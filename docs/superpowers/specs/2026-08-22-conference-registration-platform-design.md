@@ -1,4 +1,4 @@
-# ConfHub — Conference & Event Registration Platform
+# Converge — Conference & Event Registration Platform
 
 **Design specification**
 CSCI318 Software Engineering Practices & Principles, Spring 2026 — Group Project
@@ -9,7 +9,7 @@ Status: Approved for implementation planning
 
 ## 1. Purpose and business case
 
-ConfHub is a registration and attendance platform for small-to-mid-sized conferences
+Converge is a registration and attendance platform for small-to-mid-sized conferences
 (roughly 100–2000 attendees, 10–80 sessions). Organisers at this scale are typically a
 handful of volunteers who cannot afford enterprise event software, yet they face the same
 operational problems as large conferences:
@@ -24,7 +24,7 @@ operational problems as large conferences:
 - **Support is manual.** Refund and transfer requests arrive by email and are resolved by a
   volunteer reading a policy document.
 
-ConfHub addresses these by treating capacity, payment, ticketing and attendance as separate
+Converge addresses these by treating capacity, payment, ticketing and attendance as separate
 bounded contexts communicating through domain events, deriving live operational metrics
 from the event stream rather than from database polling, and delegating two genuinely
 judgement-heavy tasks — agenda planning and support triage — to LLM agents that act through

@@ -15,7 +15,7 @@
   <artifactId>conference-platform</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
-  <name>ConfHub Conference and Event Registration Platform</name>
+  <name>Converge Conference and Event Registration Platform</name>
   <description>CSCI318 Spring 2026 group project</description>
 
   <modules>
@@ -74,7 +74,7 @@
               <rules>
                 <requireJavaVersion>
                   <version>[21,22)</version>
-                  <message>ConfHub requires JDK 21 (CSCI318 specification). Set JAVA_HOME to a Temurin 21 installation.</message>
+                  <message>Converge requires JDK 21 (CSCI318 specification). Set JAVA_HOME to a Temurin 21 installation.</message>
                 </requireJavaVersion>
               </rules>
             </configuration>

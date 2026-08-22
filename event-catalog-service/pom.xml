@@ -11,7 +11,7 @@
   </parent>
 
   <artifactId>event-catalog-service</artifactId>
-  <name>ConfHub Event Catalog Service</name>
+  <name>Converge Event Catalog Service</name>
   <description>Programme bounded context: events, sessions, speakers, venues</description>
 
   <dependencies>

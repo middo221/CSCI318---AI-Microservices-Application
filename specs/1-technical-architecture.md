@@ -1,6 +1,6 @@
 # Technical Architecture
 
-ConfHub — Conference & Event Registration Platform
+Converge — Conference & Event Registration Platform
 CSCI318 Software Engineering Practices & Principles, Spring 2026
 
 ## Microservice Architecture

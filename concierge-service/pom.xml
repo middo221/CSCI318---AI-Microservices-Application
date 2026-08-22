@@ -11,7 +11,7 @@
   </parent>
 
   <artifactId>concierge-service</artifactId>
-  <name>ConfHub Concierge Service</name>
+  <name>Converge Concierge Service</name>
   <description>Attendee assistance context: LangChain4j agents. Owns no database.</description>
 
   <dependencies>

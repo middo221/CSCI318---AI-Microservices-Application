@@ -11,7 +11,7 @@
   </parent>
 
   <artifactId>ticketing-service</artifactId>
-  <name>ConfHub Ticketing Service</name>
+  <name>Converge Ticketing Service</name>
   <description>Access bounded context: tickets, transfers, gate check-in</description>
 
   <dependencies>

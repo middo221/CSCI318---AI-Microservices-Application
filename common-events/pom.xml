@@ -11,7 +11,7 @@
   </parent>
 
   <artifactId>common-events</artifactId>
-  <name>ConfHub Published Language</name>
+  <name>Converge Published Language</name>
   <description>Domain event records shared across bounded contexts. No Spring, no JPA, no behaviour.</description>
 
   <dependencies>

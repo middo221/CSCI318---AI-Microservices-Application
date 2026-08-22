@@ -11,7 +11,7 @@
   </parent>
 
   <artifactId>analytics-service</artifactId>
-  <name>ConfHub Analytics Service</name>
+  <name>Converge Analytics Service</name>
   <description>Operational insight context: Kafka Streams read models. Owns no database.</description>
 
   <dependencies>

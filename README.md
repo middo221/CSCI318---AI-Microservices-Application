@@ -1,4 +1,4 @@
-# ConfHub — Conference & Event Registration Platform
+# Converge — Conference & Event Registration Platform
 
 CSCI318 Software Engineering Practices & Principles, Spring 2026 — Group Project.
 
@@ -145,11 +145,11 @@ happens, run `git config core.autocrlf false` then re-clone.
 Git Bash rewrites container paths. Prefix the command:
 
 ```bash
-MSYS_NO_PATHCONV=1 docker exec confhub-kafka /opt/kafka/bin/kafka-topics.sh \
+MSYS_NO_PATHCONV=1 docker exec converge-kafka /opt/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --list
 ```
 
-**Build fails with "ConfHub requires JDK 21"**
+**Build fails with "Converge requires JDK 21"**
 `JAVA_HOME` points at the wrong JDK. See *Installing JDK 21* above, and reopen your terminal.
 
 **`unable to get image 'apache/kafka'` / `dockerDesktopLinuxEngine` not found**

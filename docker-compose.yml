@@ -1,15 +1,15 @@
-name: confhub
+name: converge
 
 services:
   kafka:
     image: apache/kafka:4.3.1
-    container_name: confhub-kafka
+    container_name: converge-kafka
     ports:
       - "9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      CLUSTER_ID: confhub-local-cluster-01
+      CLUSTER_ID: converge-local-cluster-01
       # HOST is for services running on the developer's machine.
       # DOCKER is for containers on this Compose network, such as kafka-ui.
       KAFKA_LISTENERS: HOST://0.0.0.0:9092,DOCKER://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
@@ -31,11 +31,11 @@ services:
 
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
-    container_name: confhub-kafka-ui
+    container_name: converge-kafka-ui
     ports:
       - "8080:8080"
     environment:
-      KAFKA_CLUSTERS_0_NAME: confhub-local
+      KAFKA_CLUSTERS_0_NAME: converge-local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       DYNAMIC_CONFIG_ENABLED: "true"
     depends_on:

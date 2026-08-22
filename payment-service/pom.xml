@@ -11,7 +11,7 @@
   </parent>
 
   <artifactId>payment-service</artifactId>
-  <name>ConfHub Payment Service</name>
+  <name>Converge Payment Service</name>
   <description>Billing bounded context: payment orders, refunds, refund policy</description>
 
   <dependencies>

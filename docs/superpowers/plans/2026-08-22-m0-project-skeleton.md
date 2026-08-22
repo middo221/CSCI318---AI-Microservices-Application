@@ -1,10 +1,10 @@
-# ConfHub M0 — Project Skeleton Implementation Plan
+# Converge M0 — Project Skeleton Implementation Plan
 
 > **STATUS: COMPLETE** — executed 2026-08-22 on branch `feat/m0-project-skeleton`. 36 tests passing across 7 modules.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stand up the ConfHub multi-module Maven repository with a working, tested vertical slice — creating and reading a draft event — plus Kafka running locally and every project artefact the CSCI318 submission requires.
+**Goal:** Stand up the Converge multi-module Maven repository with a working, tested vertical slice — creating and reading a draft event — plus Kafka running locally and every project artefact the CSCI318 submission requires.
 
 **Architecture:** A Maven multi-module repository under a Spring Boot parent. `common-events` is a dependency-free Published Language module. `event-catalog-service` is implemented end-to-end through all four architectural layers (api → application → domain → infrastructure) to establish the pattern every later service copies. The remaining five services are created as runnable skeletons. Kafka runs in Docker but is not yet wired into any service — that is M1.
 
@@ -209,7 +209,7 @@ Create `pom.xml`:
   <artifactId>conference-platform</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
-  <name>ConfHub Conference and Event Registration Platform</name>
+  <name>Converge Conference and Event Registration Platform</name>
   <description>CSCI318 Spring 2026 group project</description>
 
   <modules>
@@ -262,7 +262,7 @@ Create `pom.xml`:
               <rules>
                 <requireJavaVersion>
                   <version>[21,22)</version>
-                  <message>ConfHub requires JDK 21 (CSCI318 specification). Set JAVA_HOME to a Temurin 21 installation.</message>
+                  <message>Converge requires JDK 21 (CSCI318 specification). Set JAVA_HOME to a Temurin 21 installation.</message>
                 </requireJavaVersion>
               </rules>
             </configuration>
@@ -294,7 +294,7 @@ Create `common-events/pom.xml`. Deliberately no Spring on the main classpath —
   </parent>
 
   <artifactId>common-events</artifactId>
-  <name>ConfHub Published Language</name>
+  <name>Converge Published Language</name>
   <description>Domain event records shared across bounded contexts. No Spring, no JPA, no behaviour.</description>
 
   <dependencies>
@@ -388,7 +388,7 @@ import java.time.Instant;
 /**
  * Implemented by every event that crosses a bounded-context boundary.
  *
- * <p>This interface is the ConfHub <em>Published Language</em>: the shared vocabulary
+ * <p>This interface is the Converge <em>Published Language</em>: the shared vocabulary
  * contexts agree on for inter-service messages. Implementations live in this module and
  * must be immutable records carrying data only — no behaviour, no Spring, no JPA.
  */
@@ -499,7 +499,7 @@ Create `event-catalog-service/pom.xml`:
   </parent>
 
   <artifactId>event-catalog-service</artifactId>
-  <name>ConfHub Event Catalog Service</name>
+  <name>Converge Event Catalog Service</name>
   <description>Programme bounded context: events, sessions, speakers, venues</description>
 
   <dependencies>
@@ -1807,9 +1807,9 @@ For each of the following, create `<module>/pom.xml` by copying `event-catalog-s
 
 | Module | artifactId | name | description |
 | :--- | :--- | :--- | :--- |
-| `registration-service` | `registration-service` | `ConfHub Registration Service` | `Registration bounded context: registrations, seat holds, waitlists` |
-| `payment-service` | `payment-service` | `ConfHub Payment Service` | `Billing bounded context: payment orders, refunds, refund policy` |
-| `ticketing-service` | `ticketing-service` | `ConfHub Ticketing Service` | `Access bounded context: tickets, transfers, gate check-in` |
+| `registration-service` | `registration-service` | `Converge Registration Service` | `Registration bounded context: registrations, seat holds, waitlists` |
+| `payment-service` | `payment-service` | `Converge Payment Service` | `Billing bounded context: payment orders, refunds, refund policy` |
+| `ticketing-service` | `ticketing-service` | `Converge Ticketing Service` | `Access bounded context: tickets, transfers, gate check-in` |
 
 - [x] **Step 3: Create the two stateless services**
 
@@ -1817,8 +1817,8 @@ For `analytics-service` and `concierge-service`, create `<module>/pom.xml` the s
 
 | Module | artifactId | name | description |
 | :--- | :--- | :--- | :--- |
-| `analytics-service` | `analytics-service` | `ConfHub Analytics Service` | `Operational insight context: Kafka Streams read models. Owns no database.` |
-| `concierge-service` | `concierge-service` | `ConfHub Concierge Service` | `Attendee assistance context: LangChain4j agents. Owns no database.` |
+| `analytics-service` | `analytics-service` | `Converge Analytics Service` | `Operational insight context: Kafka Streams read models. Owns no database.` |
+| `concierge-service` | `concierge-service` | `Converge Concierge Service` | `Attendee assistance context: LangChain4j agents. Owns no database.` |
 
 - [x] **Step 4: Write the application classes**
 
@@ -1967,18 +1967,18 @@ Kafka runs in KRaft mode with no ZooKeeper. Two listeners are configured: one ad
 Create `docker-compose.yml`:
 
 ```yaml
-name: confhub
+name: converge
 
 services:
   kafka:
     image: apache/kafka:4.3.1
-    container_name: confhub-kafka
+    container_name: converge-kafka
     ports:
       - "9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      CLUSTER_ID: confhub-local-cluster-01
+      CLUSTER_ID: converge-local-cluster-01
       # HOST is for services running on the developer's machine.
       # DOCKER is for containers on this Compose network, such as kafka-ui.
       KAFKA_LISTENERS: HOST://0.0.0.0:9092,DOCKER://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
@@ -2000,11 +2000,11 @@ services:
 
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
-    container_name: confhub-kafka-ui
+    container_name: converge-kafka-ui
     ports:
       - "8080:8080"
     environment:
-      KAFKA_CLUSTERS_0_NAME: confhub-local
+      KAFKA_CLUSTERS_0_NAME: converge-local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       DYNAMIC_CONFIG_ENABLED: "true"
     depends_on:
@@ -2016,14 +2016,14 @@ services:
 
 Run: `docker compose up -d`
 
-Expected: both containers start. Check with `docker compose ps` — `confhub-kafka` should reach `healthy`, which can take up to 30 seconds.
+Expected: both containers start. Check with `docker compose ps` — `converge-kafka` should reach `healthy`, which can take up to 30 seconds.
 
 - [x] **Step 3: Verify the broker accepts a topic from the host**
 
 ```bash
-docker exec confhub-kafka /opt/kafka/bin/kafka-topics.sh \
+docker exec converge-kafka /opt/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --create --topic smoke-test --partitions 1 --replication-factor 1
-docker exec confhub-kafka /opt/kafka/bin/kafka-topics.sh \
+docker exec converge-kafka /opt/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --list
 ```
 
@@ -2031,12 +2031,12 @@ Expected: `smoke-test` appears in the list.
 
 - [x] **Step 4: Verify Kafka UI reaches the broker**
 
-Open `http://localhost:8080`. Expected: the `confhub-local` cluster shows as online and `smoke-test` appears under Topics. If the cluster shows offline, the `DOCKER` listener is misconfigured — recheck `KAFKA_ADVERTISED_LISTENERS`.
+Open `http://localhost:8080`. Expected: the `converge-local` cluster shows as online and `smoke-test` appears under Topics. If the cluster shows offline, the `DOCKER` listener is misconfigured — recheck `KAFKA_ADVERTISED_LISTENERS`.
 
 - [x] **Step 5: Clean up the smoke-test topic**
 
 ```bash
-docker exec confhub-kafka /opt/kafka/bin/kafka-topics.sh \
+docker exec converge-kafka /opt/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --delete --topic smoke-test
 ```
 
@@ -2115,7 +2115,7 @@ Create an OpenAPI 3.0.3 document. For M0 it covers only the two implemented endp
 ```yaml
 openapi: 3.0.3
 info:
-  title: ConfHub Event Catalog Service
+  title: Converge Event Catalog Service
   description: Programme bounded context. CSCI318 Spring 2026 group project.
   version: 0.1.0
 servers:
@@ -2242,12 +2242,12 @@ components:
 
 - [x] **Step 8: Write `agent-prompts/dev-agent.md`**
 
-Adapt the reference repository's four-phase development agent prompt to ConfHub:
+Adapt the reference repository's four-phase development agent prompt to Converge:
 
 ```markdown
 # Role & Persona: DEV AGENT (Senior Software Engineer)
 
-You are an expert Senior Spring Boot Developer working on ConfHub, a conference and event
+You are an expert Senior Spring Boot Developer working on Converge, a conference and event
 registration platform built for CSCI318 Spring 2026.
 
 CRITICAL BOUNDARY: The `/specs/` directory is STRICTLY READ-ONLY. Never edit specification
@@ -2450,7 +2450,7 @@ than delegation.
 Create `README.md`:
 
 ````markdown
-# ConfHub — Conference & Event Registration Platform
+# Converge — Conference & Event Registration Platform
 
 CSCI318 Software Engineering Practices & Principles, Spring 2026 — Group Project.
 

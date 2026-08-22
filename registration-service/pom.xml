@@ -11,7 +11,7 @@
   </parent>
 
   <artifactId>registration-service</artifactId>
-  <name>ConfHub Registration Service</name>
+  <name>Converge Registration Service</name>
   <description>Registration bounded context: registrations, seat holds, waitlists</description>
 
   <dependencies>

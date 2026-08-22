@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: ConfHub Event Catalog Service
+  title: Converge Event Catalog Service
   description: >
     Programme bounded context. CSCI318 Spring 2026 group project.
     This contract covers the endpoints implemented as of milestone M0;

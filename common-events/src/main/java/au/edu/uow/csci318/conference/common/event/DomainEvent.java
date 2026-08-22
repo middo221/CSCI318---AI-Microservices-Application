@@ -5,7 +5,7 @@ import java.time.Instant;
 /**
  * Implemented by every event that crosses a bounded-context boundary.
  *
- * <p>This interface is the ConfHub <em>Published Language</em>: the shared vocabulary
+ * <p>This interface is the Converge <em>Published Language</em>: the shared vocabulary
  * contexts agree on for inter-service messages. Implementations live in this module and
  * must be immutable records carrying data only — no behaviour, no Spring, no JPA.
  */

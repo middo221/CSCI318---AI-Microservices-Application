@@ -83,7 +83,7 @@ than delegation.
 | **What was asked** | Execute the M0 plan |
 | **What was proposed** | *(discovered during execution, not proposed)* |
 | **Decision** | **Modified** — two additions the plan did not contain |
-| **Rationale** | (1) Git reported it would convert `mvnw` to CRLF on checkout, which breaks Git Bash with `bad interpreter: /bin/sh^M` for anyone cloning on Windows — fixed by adding `.gitattributes` pinning `mvnw` to LF and `*.cmd` to CRLF. (2) `docker exec confhub-kafka /opt/kafka/bin/kafka-topics.sh` fails under Git Bash, which rewrites the container path into a Windows path; `MSYS_NO_PATHCONV=1` is required. Both are Windows-specific and would have blocked team members rather than showing up in CI. |
+| **Rationale** | (1) Git reported it would convert `mvnw` to CRLF on checkout, which breaks Git Bash with `bad interpreter: /bin/sh^M` for anyone cloning on Windows — fixed by adding `.gitattributes` pinning `mvnw` to LF and `*.cmd` to CRLF. (2) `docker exec converge-kafka /opt/kafka/bin/kafka-topics.sh` fails under Git Bash, which rewrites the container path into a Windows path; `MSYS_NO_PATHCONV=1` is required. Both are Windows-specific and would have blocked team members rather than showing up in CI. |
 | **Artefact** | `.gitattributes`, `README.md` troubleshooting section |
 
 ---
