@@ -1,6 +1,7 @@
 package au.edu.uow.csci318.conference.catalog.domain.repository;
 
 import au.edu.uow.csci318.conference.catalog.domain.model.Event;
+import au.edu.uow.csci318.conference.catalog.domain.model.EventStatus;
 
 import java.util.List;
 import java.util.Optional;
@@ -26,4 +27,7 @@ public interface EventRepository {
      * loading the aggregates and filtering in Java costs nothing and keeps the boundary intact.
      */
     List<Event> findAll();
+
+    /** Every event in the given lifecycle state. */
+    List<Event> findByStatus(EventStatus status);
 }

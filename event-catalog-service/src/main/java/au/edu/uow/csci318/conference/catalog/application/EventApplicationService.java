@@ -7,6 +7,7 @@ import au.edu.uow.csci318.conference.catalog.domain.EventNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.SpeakerNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.event.DomainEventPublisher;
 import au.edu.uow.csci318.conference.catalog.domain.model.Event;
+import au.edu.uow.csci318.conference.catalog.domain.model.EventStatus;
 import au.edu.uow.csci318.conference.catalog.domain.model.SeatCapacity;
 import au.edu.uow.csci318.conference.catalog.domain.model.Session;
 import au.edu.uow.csci318.conference.catalog.domain.repository.EventRepository;
@@ -124,6 +125,12 @@ public class EventApplicationService {
         Event saved = events.save(event);
         domainEvents.publishAll(saved.pullDomainEvents());
         return session;
+    }
+
+    /** Lists events, optionally narrowed to one lifecycle state (FR-05). */
+    @Transactional(readOnly = true)
+    public List<Event> list(EventStatus status) {
+        return status == null ? events.findAll() : events.findByStatus(status);
     }
 
     @Transactional(readOnly = true)
