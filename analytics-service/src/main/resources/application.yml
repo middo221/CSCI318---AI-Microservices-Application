@@ -1,0 +1,10 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: analytics-service
+
+logging:
+  level:
+    au.edu.uow.csci318.conference: DEBUG

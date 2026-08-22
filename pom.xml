@@ -21,6 +21,11 @@
   <modules>
     <module>common-events</module>
     <module>event-catalog-service</module>
+    <module>registration-service</module>
+    <module>payment-service</module>
+    <module>ticketing-service</module>
+    <module>analytics-service</module>
+    <module>concierge-service</module>
   </modules>
 
   <properties>
