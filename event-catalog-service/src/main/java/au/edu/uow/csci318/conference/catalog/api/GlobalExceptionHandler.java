@@ -2,6 +2,7 @@ package au.edu.uow.csci318.conference.catalog.api;
 
 import au.edu.uow.csci318.conference.catalog.domain.EventAlreadyPublishedException;
 import au.edu.uow.csci318.conference.catalog.domain.EventNotFoundException;
+import au.edu.uow.csci318.conference.catalog.domain.SessionNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.SpeakerNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.service.SessionSchedulingPolicy;
 import org.springframework.http.HttpStatus;
@@ -43,6 +44,12 @@ public class GlobalExceptionHandler {
             SessionSchedulingPolicy.SpeakerDoubleBookedException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ApiError("SPEAKER_DOUBLE_BOOKED", ex.getMessage()));
+    }
+
+    @ExceptionHandler(SessionNotFoundException.class)
+    public ResponseEntity<ApiError> handleSessionNotFound(SessionNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiError("SESSION_NOT_FOUND", ex.getMessage()));
     }
 
     /**

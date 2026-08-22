@@ -4,6 +4,8 @@ import au.edu.uow.csci318.conference.catalog.api.dto.CreateEventRequest;
 import au.edu.uow.csci318.conference.catalog.api.dto.CreateSessionRequest;
 import au.edu.uow.csci318.conference.catalog.api.dto.EventResponse;
 import au.edu.uow.csci318.conference.catalog.api.dto.SessionResponse;
+import au.edu.uow.csci318.conference.catalog.api.dto.UpdateCapacityRequest;
+import au.edu.uow.csci318.conference.catalog.domain.model.SeatCapacity;
 import au.edu.uow.csci318.conference.catalog.application.EventApplicationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -11,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,5 +50,13 @@ public class EventController {
                                                       @Valid @RequestBody CreateSessionRequest request) {
         SessionResponse body = SessionResponse.from(id, events.addSession(id, request.toCommand()));
         return ResponseEntity.status(HttpStatus.CREATED).body(body);
+    }
+
+    @PutMapping("/{id}/sessions/{sessionId}/capacity")
+    public SessionResponse changeCapacity(@PathVariable String id,
+                                          @PathVariable String sessionId,
+                                          @Valid @RequestBody UpdateCapacityRequest request) {
+        return SessionResponse.from(id,
+                events.changeSessionCapacity(id, sessionId, SeatCapacity.of(request.seatCapacity())));
     }
 }

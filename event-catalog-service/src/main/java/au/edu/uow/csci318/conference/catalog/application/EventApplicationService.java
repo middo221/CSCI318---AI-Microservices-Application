@@ -7,6 +7,7 @@ import au.edu.uow.csci318.conference.catalog.domain.EventNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.SpeakerNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.event.DomainEventPublisher;
 import au.edu.uow.csci318.conference.catalog.domain.model.Event;
+import au.edu.uow.csci318.conference.catalog.domain.model.SeatCapacity;
 import au.edu.uow.csci318.conference.catalog.domain.model.Session;
 import au.edu.uow.csci318.conference.catalog.domain.repository.EventRepository;
 import au.edu.uow.csci318.conference.catalog.domain.repository.SpeakerRepository;
@@ -107,6 +108,22 @@ public class EventApplicationService {
                 .filter(s -> s.getId().equals(session.getId()))
                 .findFirst()
                 .orElse(session);
+    }
+
+    /**
+     * Adjusts a session's seat capacity (FR-04), which is permitted after publication.
+     *
+     * <p>Emits {@code session-capacity-changed} only. Registration's replica and, from M3, the
+     * analytics capacity table both read that single topic, so this is the one write that has to
+     * be right.
+     */
+    @Transactional
+    public Session changeSessionCapacity(String eventId, String sessionId, SeatCapacity seatCapacity) {
+        Event event = events.findById(eventId).orElseThrow(() -> new EventNotFoundException(eventId));
+        Session session = event.changeSessionCapacity(sessionId, seatCapacity);
+        Event saved = events.save(event);
+        domainEvents.publishAll(saved.pullDomainEvents());
+        return session;
     }
 
     @Transactional(readOnly = true)
