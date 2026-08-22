@@ -2,6 +2,7 @@ package au.edu.uow.csci318.conference.catalog.api;
 
 import au.edu.uow.csci318.conference.catalog.domain.EventAlreadyPublishedException;
 import au.edu.uow.csci318.conference.catalog.domain.EventNotFoundException;
+import au.edu.uow.csci318.conference.catalog.domain.SpeakerNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -28,6 +29,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleAlreadyPublished(EventAlreadyPublishedException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ApiError("EVENT_ALREADY_PUBLISHED", ex.getMessage()));
+    }
+
+    @ExceptionHandler(SpeakerNotFoundException.class)
+    public ResponseEntity<ApiError> handleSpeakerNotFound(SpeakerNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiError("SPEAKER_NOT_FOUND", ex.getMessage()));
     }
 
     /**
