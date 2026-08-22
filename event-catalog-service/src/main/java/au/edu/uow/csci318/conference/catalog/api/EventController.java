@@ -34,4 +34,9 @@ public class EventController {
     public EventResponse getById(@PathVariable String id) {
         return EventResponse.from(events.getById(id));
     }
+
+    @PostMapping("/{id}/publish")
+    public EventResponse publish(@PathVariable String id) {
+        return EventResponse.from(events.publish(id));
+    }
 }

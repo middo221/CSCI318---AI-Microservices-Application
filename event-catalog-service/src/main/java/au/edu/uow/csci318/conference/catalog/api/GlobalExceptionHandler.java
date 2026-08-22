@@ -1,5 +1,6 @@
 package au.edu.uow.csci318.conference.catalog.api;
 
+import au.edu.uow.csci318.conference.catalog.domain.EventAlreadyPublishedException;
 import au.edu.uow.csci318.conference.catalog.domain.EventNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +22,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleNotFound(EventNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(new ApiError("EVENT_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(EventAlreadyPublishedException.class)
+    public ResponseEntity<ApiError> handleAlreadyPublished(EventAlreadyPublishedException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError("EVENT_ALREADY_PUBLISHED", ex.getMessage()));
     }
 
     /**
