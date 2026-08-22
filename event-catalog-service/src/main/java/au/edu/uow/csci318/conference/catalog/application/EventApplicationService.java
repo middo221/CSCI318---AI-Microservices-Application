@@ -1,14 +1,20 @@
 package au.edu.uow.csci318.conference.catalog.application;
 
 import au.edu.uow.csci318.conference.catalog.application.command.CreateEventCommand;
+import au.edu.uow.csci318.conference.catalog.application.command.AddSessionCommand;
 import au.edu.uow.csci318.conference.catalog.domain.EventAlreadyPublishedException;
 import au.edu.uow.csci318.conference.catalog.domain.EventNotFoundException;
+import au.edu.uow.csci318.conference.catalog.domain.SpeakerNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.event.DomainEventPublisher;
 import au.edu.uow.csci318.conference.catalog.domain.model.Event;
+import au.edu.uow.csci318.conference.catalog.domain.model.Session;
 import au.edu.uow.csci318.conference.catalog.domain.repository.EventRepository;
+import au.edu.uow.csci318.conference.catalog.domain.repository.SpeakerRepository;
+import au.edu.uow.csci318.conference.catalog.domain.service.SessionSchedulingPolicy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 /** Orchestrates event use cases and owns the transaction boundary. */
@@ -16,10 +22,14 @@ import java.util.UUID;
 public class EventApplicationService {
 
     private final EventRepository events;
+    private final SpeakerRepository speakers;
     private final DomainEventPublisher domainEvents;
 
-    public EventApplicationService(EventRepository events, DomainEventPublisher domainEvents) {
+    public EventApplicationService(EventRepository events,
+                                   SpeakerRepository speakers,
+                                   DomainEventPublisher domainEvents) {
         this.events = events;
+        this.speakers = speakers;
         this.domainEvents = domainEvents;
     }
 
@@ -53,6 +63,50 @@ public class EventApplicationService {
         Event saved = events.save(event);
         domainEvents.publishAll(saved.pullDomainEvents());
         return saved;
+    }
+
+    /**
+     * Adds a session to a draft event (FR-02).
+     *
+     * <p>Three checks, each in the layer that owns it. The speaker must exist — a cross-aggregate
+     * reference this service resolves. The speaker must be free — a rule spanning aggregates, so
+     * the domain service decides. The slot must fall inside the event and the event must still be
+     * a draft — rules the aggregate can see for itself, so the aggregate enforces them.
+     */
+    @Transactional
+    public Session addSession(String eventId, AddSessionCommand command) {
+        Event event = events.findById(eventId).orElseThrow(() -> new EventNotFoundException(eventId));
+        if (speakers.findById(command.speakerId()).isEmpty()) {
+            throw new SpeakerNotFoundException(command.speakerId());
+        }
+
+        List<Session> everySessionInTheCatalogue = events.findAll().stream()
+                .flatMap(existing -> existing.getSessions().stream())
+                .toList();
+        SessionSchedulingPolicy.ensureSpeakerIsFree(
+                command.speakerId(), command.timeSlot(), everySessionInTheCatalogue);
+
+        Session session;
+        try {
+            session = event.addSession(
+                    UUID.randomUUID().toString(),
+                    command.title(),
+                    command.track(),
+                    command.timeSlot(),
+                    command.speakerId(),
+                    command.seatCapacity(),
+                    command.price());
+        }
+        catch (IllegalStateException ex) {
+            throw new EventAlreadyPublishedException(eventId, ex.getMessage());
+        }
+
+        Event saved = events.save(event);
+        domainEvents.publishAll(saved.pullDomainEvents());
+        return saved.getSessions().stream()
+                .filter(s -> s.getId().equals(session.getId()))
+                .findFirst()
+                .orElse(session);
     }
 
     @Transactional(readOnly = true)

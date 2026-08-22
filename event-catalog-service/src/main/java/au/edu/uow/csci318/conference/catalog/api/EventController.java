@@ -1,7 +1,9 @@
 package au.edu.uow.csci318.conference.catalog.api;
 
 import au.edu.uow.csci318.conference.catalog.api.dto.CreateEventRequest;
+import au.edu.uow.csci318.conference.catalog.api.dto.CreateSessionRequest;
 import au.edu.uow.csci318.conference.catalog.api.dto.EventResponse;
+import au.edu.uow.csci318.conference.catalog.api.dto.SessionResponse;
 import au.edu.uow.csci318.conference.catalog.application.EventApplicationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -38,5 +40,12 @@ public class EventController {
     @PostMapping("/{id}/publish")
     public EventResponse publish(@PathVariable String id) {
         return EventResponse.from(events.publish(id));
+    }
+
+    @PostMapping("/{id}/sessions")
+    public ResponseEntity<SessionResponse> addSession(@PathVariable String id,
+                                                      @Valid @RequestBody CreateSessionRequest request) {
+        SessionResponse body = SessionResponse.from(id, events.addSession(id, request.toCommand()));
+        return ResponseEntity.status(HttpStatus.CREATED).body(body);
     }
 }
