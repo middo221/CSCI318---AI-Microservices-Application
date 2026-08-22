@@ -1,0 +1,164 @@
+openapi: 3.0.3
+info:
+  title: ConfHub Event Catalog Service
+  description: >
+    Programme bounded context. CSCI318 Spring 2026 group project.
+    This contract covers the endpoints implemented as of milestone M0;
+    later milestones extend it. Integration tests are generated from it.
+  version: 0.1.0
+servers:
+  - url: http://localhost:8081
+    description: Local development
+tags:
+  - name: Events
+    description: Conference programme
+paths:
+  /api/v1/events:
+    post:
+      summary: Create a draft event
+      description: Implements FR-01. The event is created with status DRAFT.
+      operationId: createDraftEvent
+      tags: [Events]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+            examples:
+              softEngSummit:
+                summary: A three-day conference
+                value:
+                  name: SoftEng Summit
+                  description: Three days of practice
+                  venue:
+                    name: Innovation Campus
+                    addressLine: Squires Way
+                    city: North Wollongong
+                  startDate: '2026-09-14'
+                  endDate: '2026-09-16'
+      responses:
+        '201':
+          description: Draft event created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '400':
+          description: Bean validation failure (VALIDATION_FAILED) or domain invariant violation (INVALID_REQUEST)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                blankName:
+                  summary: Blank event name
+                  value:
+                    code: VALIDATION_FAILED
+                    message: name must not be blank
+                endBeforeStart:
+                  summary: End date precedes start date
+                  value:
+                    code: INVALID_REQUEST
+                    message: date range end must not precede its start
+  /api/v1/events/{id}:
+    get:
+      summary: Get an event by id
+      operationId: getEventById
+      tags: [Events]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Event identifier returned by createDraftEvent
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '404':
+          description: No event with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                notFound:
+                  value:
+                    code: EVENT_NOT_FOUND
+                    message: no event with id no-such-event
+components:
+  schemas:
+    Venue:
+      type: object
+      required: [name, addressLine, city]
+      properties:
+        name:
+          type: string
+          example: Innovation Campus
+        addressLine:
+          type: string
+          example: Squires Way
+        city:
+          type: string
+          example: North Wollongong
+    CreateEventRequest:
+      type: object
+      required: [name, venue, startDate, endDate]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: SoftEng Summit
+        description:
+          type: string
+          nullable: true
+          example: Three days of practice
+        venue:
+          $ref: '#/components/schemas/Venue'
+        startDate:
+          type: string
+          format: date
+          example: '2026-09-14'
+        endDate:
+          type: string
+          format: date
+          description: Must not precede startDate
+          example: '2026-09-16'
+    EventResponse:
+      type: object
+      required: [id, name, status, venue, startDate, endDate]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [DRAFT, PUBLISHED, CANCELLED]
+        venue:
+          $ref: '#/components/schemas/Venue'
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+    ApiError:
+      type: object
+      description: Common error body used by every non-2xx response across all six services.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [EVENT_NOT_FOUND, INVALID_REQUEST, VALIDATION_FAILED]
+        message:
+          type: string

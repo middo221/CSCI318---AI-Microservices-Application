@@ -1,0 +1,17 @@
+# Normalise text files to LF in the repository.
+* text=auto eol=lf
+
+# The Maven wrapper shell script MUST stay LF or it fails in Git Bash
+# with "bad interpreter: /bin/sh^M" after a clone on Windows.
+mvnw text eol=lf
+
+# Windows scripts must stay CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Never touch binaries.
+*.jar binary
+*.zip binary
+*.png binary
+*.pdf binary

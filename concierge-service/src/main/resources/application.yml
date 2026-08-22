@@ -1,0 +1,10 @@
+server:
+  port: 8086
+
+spring:
+  application:
+    name: concierge-service
+
+logging:
+  level:
+    au.edu.uow.csci318.conference: DEBUG
