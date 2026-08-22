@@ -948,6 +948,27 @@ this in five stages:
 5. kafka-ui at `http://localhost:8080` shows topics and messages live — useful for both the
    presentation and report screenshots.
 
+### 12.1 Demonstrating without a frontend
+
+Since there is no UI (§16), the demonstration relies on three interfaces that already exist
+and cost nothing to build. Each maps to a specific thing the markers are looking for.
+
+| Requirement to show | Vehicle | What the audience sees |
+| :--- | :--- | :--- |
+| Event-driven architecture | **Kafka UI**, `localhost:8080` | Fire one registration; messages land in `registration-requested` → `payment-succeeded` → `ticket-issued` in sequence, with payloads inspectable. This is a real web interface and the single strongest visual in the project. |
+| Saga compensation | **Kafka UI** + **H2 console** | Pay with `TOK_DECLINE`; watch `payment-failed` → `seats-released` appear, and the registration row flip to `CANCELLED` in `regdb`. |
+| Data ownership per service | **H2 console**, one per service | Four separate consoles on four ports, each showing only its own tables. Makes §4.2 concrete in one screenshot. |
+| Real-time stream analysis | **`demo-traffic-burst.sh`** + polling the analytics endpoints | Run the burst, then re-query `/analytics/sessions/at-risk` live and watch the fill rate climb past 0.90 and the alert fire. |
+| Agentic AI | **`demo-agents.http`** with `log-requests-and-responses: true` | The request, the tool calls the model chose, the tool results, and the final structured answer — visible in the service log. The tool-calling loop *is* the demonstration. |
+
+**The one weak spot, stated honestly:** a fill rate crossing a threshold reads less vividly as
+JSON than it would as a moving bar. This is accepted. It costs one sentence of narration
+during the presentation, and the alternative — building and maintaining a UI all semester —
+buys no rubric marks. Rehearse that segment rather than engineer around it.
+
+**Preparation for the presentation:** have the burst script already run and the terminal
+pre-scrolled, rather than waiting on a live sixty-second window during a timed demo.
+
 ---
 
 ## 13. Testing strategy
@@ -1036,7 +1057,15 @@ reasonable extension to name in the report's future-work discussion.
 
 - Authentication, authorisation and user accounts — `attendeeId` is supplied by the caller
 - A real payment gateway — the simulated gateway is deterministic by design
-- A frontend — the specification states REST endpoints are the interface
+- **A frontend of any kind.** Decision reviewed and confirmed on 2026-08-22 against three
+  pieces of evidence: the specification states that *"a full-fledged frontend is not a
+  required component… external users will primarily communicate with the microservices by
+  calling their REST API endpoints"* (§4.2); it recommends a Postman collection or CLI script
+  as the demonstration vehicle instead; and the university's own reference implementation
+  (`gxshub/book-and-library-management-system-v1`, `post-implementation` branch) contains
+  **zero** frontend files — no HTML, no JavaScript, no `static/` or `templates/` directory.
+  A lightweight demo console was considered and deliberately rejected: it earns no rubric
+  marks, and the presentation needs it less than it appears (see §12.1)
 - API gateway, service discovery, distributed tracing
 - Containerising the six services themselves — only Kafka runs in Docker
 - Production-grade persistence — H2 in-memory, as the specification directs
@@ -1050,6 +1079,6 @@ reasonable extension to name in the report's future-work discussion.
 | :--- | :--- | :--- | :--- |
 | 1 | Install Eclipse Temurin JDK 21 alongside JDK 24 | Each member | Yes — build cannot run |
 | 2 | Each member obtains a Gemini API key | Each member | Only the agentic stories |
-| 3 | Confirm `spring-boot-starter-validation` with the subject coordinator | Group | No — trivially removable |
+| 3 | ~~Confirm `spring-boot-starter-validation`~~ — **resolved 2026-08-22**: the coordinator's own reference implementation uses it (`book-service/pom.xml`, `library-service/pom.xml`). Mention it in passing; no approval needed. | — | No |
 | 4 | Confirm the LangChain4j provider module choice with the coordinator | Group | No |
 | 5 | Create the private GitHub repository and add all three members | Group | No |

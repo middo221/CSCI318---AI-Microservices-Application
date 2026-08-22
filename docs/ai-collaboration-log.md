@@ -85,3 +85,35 @@ than delegation.
 | **Decision** | **Modified** — two additions the plan did not contain |
 | **Rationale** | (1) Git reported it would convert `mvnw` to CRLF on checkout, which breaks Git Bash with `bad interpreter: /bin/sh^M` for anyone cloning on Windows — fixed by adding `.gitattributes` pinning `mvnw` to LF and `*.cmd` to CRLF. (2) `docker exec confhub-kafka /opt/kafka/bin/kafka-topics.sh` fails under Git Bash, which rewrites the container path into a Windows path; `MSYS_NO_PATHCONV=1` is required. Both are Windows-specific and would have blocked team members rather than showing up in CI. |
 | **Artefact** | `.gitattributes`, `README.md` troubleshooting section |
+
+---
+
+## 2026-08-22 — Frontend scope challenged and re-decided on evidence
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-08-22 |
+| **Member** | *(fill in)* |
+| **Tool** | Claude Code (Opus 5) |
+| **SDLC phase** | Requirements, scope management |
+| **What was asked** | Whether the project needs a frontend. The team's initial assumption was yes; the AI's design had excluded one, initially justified only as "the specification states REST endpoints are the interface" |
+| **What was proposed** | A lightweight single-page demo console (live analytics, agent chat, saga trigger), costing zero new dependencies |
+| **Decision** | **Rejected** |
+| **Rationale** | Worth recording as a case where the team overruled an AI recommendation. The AI's original justification was too thin, so the question was re-examined against evidence: (a) the specification says a *full-fledged* frontend is not required and recommends a Postman collection or CLI script instead; (b) the coordinator's reference implementation was inspected and contains **zero** frontend files — no HTML, JS, `static/` or `templates/`; (c) a UI earns no rubric marks and would compete with the 27-mark report. The team judged the demonstration adequately covered by Kafka UI, the H2 consoles and scripted requests, and accepted the one genuine weakness — a fill rate reading less vividly as JSON than as a chart — as a narration problem rather than an engineering one. |
+| **Artefact** | Design spec §12.1 and §16; `specs/1-technical-architecture.md` Future Considerations |
+
+---
+
+## 2026-08-22 — Open dependency question resolved by inspecting the reference project
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-08-22 |
+| **Member** | *(fill in)* |
+| **Tool** | Claude Code (Opus 5) |
+| **SDLC phase** | Architecture, dependency management |
+| **What was asked** | Whether `spring-boot-starter-validation` needed the coordinator's approval, since the specification does not name it |
+| **What was proposed** | Originally flagged as the project's one genuine dependency question, to be raised with the coordinator |
+| **Decision** | **Modified** — resolved without needing to ask |
+| **Rationale** | Inspecting the coordinator's own reference implementation showed it declares `spring-boot-starter-validation` in both `book-service/pom.xml` and `library-service/pom.xml`. Precedent from the subject's own material settles the question, so the open item was closed rather than escalated. Still worth mentioning in passing to the tutor. |
+| **Artefact** | `specs/1-technical-architecture.md` dependency allowlist; design spec §17 item 3 |

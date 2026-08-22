@@ -157,11 +157,11 @@ explicit permission.**
 | `langchain4j-google-ai-gemini` | The chosen LLM provider module |
 | `langchain4j-spring-boot-starter`, `langchain4j-google-ai-gemini-spring-boot-starter` | Spring integration for LangChain4j |
 
-*Requires confirmation:*
+*Precedent from the reference implementation:*
 
 | Artifact | Rationale |
 | :--- | :--- |
-| `spring-boot-starter-validation` | `@Valid` on request DTOs. Ships with Spring Boot and belongs to the Spring Web family, but is not named explicitly in the specification. |
+| `spring-boot-starter-validation` | `@Valid` on request DTOs. Not named explicitly in the subject specification, but the coordinator's own reference project (`gxshub/book-and-library-management-system-v1`, `post-implementation` branch) declares it in both `book-service/pom.xml` and `library-service/pom.xml`. Treated as acceptable on that precedent. |
 
 *Build plugins (not application dependencies):* `spring-boot-maven-plugin`,
 `maven-enforcer-plugin`.
@@ -198,7 +198,10 @@ Out of scope for this project, and reasonable extensions to name in the report:
 
 - Authentication, authorisation and user accounts — `attendeeId` is supplied by the caller
 - A real payment gateway — the simulated gateway is deterministic by design
-- A frontend — the specification states REST endpoints are the interface
+- **A frontend of any kind.** The specification states a full-fledged frontend is not
+  required and that users communicate via REST endpoints; it recommends a Postman collection
+  or CLI script for demonstrations instead; and the reference implementation contains zero
+  frontend files. Demonstrations use Kafka UI, the H2 consoles and the `scripts/` collection
 - API gateway, service discovery, distributed tracing
 - Containerising the six services themselves — only Kafka runs in Docker
 - Production-grade persistence — H2 in-memory, as the specification directs
