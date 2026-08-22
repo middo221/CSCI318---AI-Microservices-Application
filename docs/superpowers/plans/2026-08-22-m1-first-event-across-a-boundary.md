@@ -450,9 +450,8 @@ class RegistrationApplicationTest {
 
 - [ ] **Step 12: Point both services at the local broker**
 
-Append to `event-catalog-service/src/main/resources/application.yml`, at the same indent level
-as the existing `server:` and `spring:` keys — that is, nested under the existing `spring:` key.
-Insert this block inside `spring:`, after the `h2:` block:
+Insert this block inside the existing `spring:` key of
+`event-catalog-service/src/main/resources/application.yml`, after the `h2:` block:
 
 ```yaml
   cloud:
@@ -460,10 +459,23 @@ Insert this block inside `spring:`, after the `h2:` block:
       kafka:
         binder:
           brokers: localhost:9092
+          # The binder defaults key.serializer to ByteArraySerializer, but DomainEvent.partitionKey()
+          # is a String, so every send fails with a SerializationException. Serialising keys as
+          # strings also keeps them readable in Kafka UI, which the demonstration depends on.
+          producer-properties:
+            key.serializer: org.apache.kafka.common.serialization.StringSerializer
 ```
 
-Append the identical block inside the `spring:` key of
-`registration-service/src/main/resources/application.yml`.
+Append the same block, **without** the `producer-properties` entry, inside the `spring:` key of
+`registration-service/src/main/resources/application.yml`. Registration produces nothing in M1;
+it needs the same serializer line the moment it starts emitting `seats-reserved` in M2.
+
+> **The `producer-properties` line is a defect fix, found the hard way.** It was not in the
+> original plan. The test binder never serialises anything, so every messaging test in Tasks 3,
+> 11 and 13 passes without it and the failure appears only against a real broker as
+> `SerializationException: Can't convert key of class java.lang.String to class
+> ByteArraySerializer`. This is the single best argument in the whole milestone for why Task 5
+> exists — see `docs/verification/2026-m1-kafka-hop.md`.
 
 - [ ] **Step 13: Verify the whole reactor still builds with Docker stopped**
 
