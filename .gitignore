@@ -9,6 +9,9 @@ target/
 # Anything in here is invisible to git. Each member keeps their own.
 /private/
 
+# Personal AI assistant instructions — points at /private/, so it stays local.
+/CLAUDE.md
+
 # IDEs
 .idea/
 *.iml
