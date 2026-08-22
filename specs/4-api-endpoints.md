@@ -14,16 +14,17 @@ Milestones: **M0** skeleton · **M1** catalogue and first event · **M2** the sa
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **FR-01** | `POST` | `/events` | `CreateEventRequest` | `201 Created` (`EventResponse`) | Create a draft event |
 | — | `GET` | `/events/{id}` | *None* | `200 OK` (`EventResponse`) | Get an event by id |
-| **FR-02** | `POST` | `/events/{id}/sessions` | `CreateSessionRequest` | `201 Created` (`SessionResponse`) | Add a session to a draft event *(M1)* |
-| **FR-04** | `PUT` | `/events/{id}/sessions/{sessionId}/capacity` | `UpdateCapacityRequest` | `200 OK` (`SessionResponse`) | Adjust a session's seat capacity *(M1)* |
-| **FR-03** | `POST` | `/events/{id}/publish` | *None* | `200 OK` (`EventResponse`) | Publish an event, opening registration *(M1)* |
-| **FR-05** | `GET` | `/events` | *None* | `200 OK` (`Array<EventResponse>`) | List events, filterable by `status` *(M1)* |
-| **FR-05** | `GET` | `/sessions/search` | *None* | `200 OK` (`Array<SessionResponse>`) | Search by `track`, `day`, `speaker`, `q` *(M1)* |
-| **FR-02** | `POST` | `/speakers` | `CreateSpeakerRequest` | `201 Created` (`SpeakerResponse`) | Create a speaker *(M1)* |
-| **FR-02** | `GET` | `/speakers/{id}` | *None* | `200 OK` (`SpeakerResponse`) | Get a speaker by id *(M1)* |
+| **FR-02** | `POST` | `/events/{id}/sessions` | `CreateSessionRequest` | `201 Created` (`SessionResponse`) | Add a session to a draft event |
+| **FR-04** | `PUT` | `/events/{id}/sessions/{sessionId}/capacity` | `UpdateCapacityRequest` | `200 OK` (`SessionResponse`) | Adjust a session's seat capacity |
+| **FR-03** | `POST` | `/events/{id}/publish` | *None* | `200 OK` (`EventResponse`) | Publish an event, opening registration. Requires at least one session |
+| **FR-05** | `GET` | `/events` | *None* | `200 OK` (`Array<EventResponse>`) | List events, filterable by `status`. Each carries its `sessions` |
+| **FR-05** | `GET` | `/sessions/search` | *None* | `200 OK` (`Array<SessionResponse>`) | Search **published** sessions by `track`, `day`, `speaker`, `q`. `speaker` accepts an id or a name fragment |
+| **FR-02** | `POST` | `/speakers` | `CreateSpeakerRequest` | `201 Created` (`SpeakerResponse`) | Create a speaker |
+| **FR-02** | `GET` | `/speakers/{id}` | *None* | `200 OK` (`SpeakerResponse`) | Get a speaker by id |
 
 **Error responses:** `400` (`VALIDATION_FAILED` or `INVALID_REQUEST`), `404`
-(`EVENT_NOT_FOUND`), `409` (`EVENT_ALREADY_PUBLISHED`) *(M1)*.
+(`EVENT_NOT_FOUND`, `SESSION_NOT_FOUND`, `SPEAKER_NOT_FOUND`), `409`
+(`EVENT_ALREADY_PUBLISHED`, `SPEAKER_DOUBLE_BOOKED`).
 
 ---
 
@@ -36,7 +37,7 @@ Milestones: **M0** skeleton · **M1** catalogue and first event · **M2** the sa
 | — | `GET` | `/attendees/{attendeeId}/registrations` | *None* | `200 OK` (`Array<RegistrationResponse>`) | None *(M2)* |
 | **FR-11** | `POST` | `/registrations/{id}/refund-requests` | `RefundRequest` | `202 Accepted` (`RefundRequestResponse`) | emits `refund-requested` *(M3)* |
 | **FR-10** | `POST` | `/sessions/{sessionId}/waitlist` | `JoinWaitlistRequest` | `201 Created` (`WaitlistEntryResponse`) | emits `waitlist-joined` *(M3)* |
-| **FR-06** | `GET` | `/sessions/{sessionId}/availability` | *None* | `200 OK` (`SessionAvailabilityResponse`) | reads local `SessionView` *(M2)* |
+| **FR-06** | `GET` | `/sessions/{sessionId}/availability` | *None* | `200 OK` (`SessionAvailabilityResponse`) | reads local `SessionView`, replicated from catalog events. `reservedSeats` is always `0` until M2 introduces seat holds. `404` until `session-added` has arrived |
 
 **Error responses:** `400`, `404` (`REGISTRATION_NOT_FOUND`, `SESSION_NOT_FOUND`), `409`
 (`SESSION_FULL`, `REGISTRATION_NOT_PENDING`).

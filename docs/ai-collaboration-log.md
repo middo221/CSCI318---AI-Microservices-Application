@@ -117,3 +117,51 @@ than delegation.
 | **Decision** | **Modified** — resolved without needing to ask |
 | **Rationale** | Inspecting the coordinator's own reference implementation showed it declares `spring-boot-starter-validation` in both `book-service/pom.xml` and `library-service/pom.xml`. Precedent from the subject's own material settles the question, so the open item was closed rather than escalated. Still worth mentioning in passing to the tutor. |
 | **Artefact** | `specs/1-technical-architecture.md` dependency allowlist; design spec §17 item 3 |
+
+---
+
+## 2026-08-22 — AI-written messaging code passed every test and still could not reach the broker
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-08-22 |
+| **Member** | *(fill in)* |
+| **Tool** | Claude Code (Opus 5) |
+| **SDLC phase** | Implementation, integration testing (M1) |
+| **What was asked** | Publish an `EventPublished` domain event from `event-catalog-service` to Kafka and consume it in `registration-service` |
+| **What was proposed** | A `StreamBridge` adapter setting the Kafka message key from `DomainEvent.partitionKey()`, with four messaging tests using `spring-cloud-stream-test-binder` |
+| **Decision** | **Modified after live verification** |
+| **Rationale** | All four tests passed, but the first run against a real broker wrote **zero** messages. The Kafka binder defaults `key.serializer` to `ByteArraySerializer` and the key is a `String`, so every send failed with `SerializationException`. The fix was one configuration line: `spring.cloud.stream.kafka.binder.producer-properties.key.serializer=…StringSerializer`. **The tests could not have caught this**: the test binder moves the `Message` object in-JVM and never invokes a Kafka serialiser at all. This is the strongest single argument in the project for scheduling M1 as the early risk milestone — the same defect surfacing in Week 9, against the full saga, would have looked like several unrelated services failing at once. |
+| **Artefact** | `docs/verification/2026-m1-kafka-hop.md`; `event-catalog-service/src/main/resources/application.yml` |
+
+---
+
+## 2026-08-22 — Refining the spec: one topic owns session capacity
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-08-22 |
+| **Member** | *(fill in)* |
+| **Tool** | Claude Code (Opus 5) |
+| **SDLC phase** | Design refinement during implementation planning (M1) |
+| **What was asked** | Implement the `SessionView` read replica per `specs/3-domain-models.md` §3.4, which sources `capacity` from both `session-added` and `session-capacity-changed` |
+| **What was proposed** | Make `session-capacity-changed` the **single** source of truth for capacity, and remove the capacity field from `SessionAdded` entirely |
+| **Decision** | **Accepted**, after the team reviewed the trade-off |
+| **Rationale** | Two topics writing one field is a race. Kafka guarantees ordering *within* a partition, not *across* topics, so a capacity edit that overtook the creation event would be silently reverted. The design already applies exactly this rule to the analytics fill-rate topology in §7.1 ("one topic keeps the join simple"); applying it consistently to the registration replica costs nothing, because `SessionCapacityChanged` is already emitted at session creation as well as on edit. The accepted cost is that a `SessionView` row is assembled from two independent events and returns `404` until the description arrives — which is the honest behaviour of an eventually consistent replica, and is now covered by a test. |
+| **Artefact** | Design decision recorded in `docs/superpowers/plans/2026-08-22-m1-first-event-across-a-boundary.md`; test `SessionReplicationTest.toleratesCapacityArrivingBeforeTheDescription` |
+
+---
+
+## 2026-08-22 — A verification step that would have produced false positives
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-08-22 |
+| **Member** | *(fill in)* |
+| **Tool** | Claude Code (Opus 5) |
+| **SDLC phase** | Verification (M1 Definition of Done) |
+| **What was asked** | Prove that `registration-service` never calls `event-catalog-service` |
+| **What was proposed** | `grep -ri "8081\|catalog" registration-service/src/main`, expecting no output |
+| **Decision** | **Modified** |
+| **Rationale** | The check fails on a *correct* codebase: it matches Javadoc prose, the `CatalogEventConsumers` class name and the phrase "catalogue replica". Replaced with checks for what actually matters — no `RestTemplate`/`RestClient`/`WebClient` anywhere in the service, no catalog URL in `application.yml`, and no POM dependency on the catalog module. All three are clean. Recorded rather than quietly corrected, because a check that cries wolf gets ignored, and an ignored check is worse than no check at all. |
+| **Artefact** | `docs/verification/2026-m1-catalogue-replication.md` |
