@@ -1,5 +1,7 @@
 # ConfHub M0 — Project Skeleton Implementation Plan
 
+> **STATUS: COMPLETE** — executed 2026-08-22 on branch `feat/m0-project-skeleton`. 36 tests passing across 7 modules.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stand up the ConfHub multi-module Maven repository with a working, tested vertical slice — creating and reading a draft event — plus Kafka running locally and every project artefact the CSCI318 submission requires.
@@ -73,7 +75,7 @@ Establishes JDK 21, the committed Maven wrapper, and the ignore rules. Nothing e
 - Consumes: nothing
 - Produces: a working `./mvnw` command used by every later task
 
-- [ ] **Step 1: Install Eclipse Temurin JDK 21**
+- [x] **Step 1: Install Eclipse Temurin JDK 21**
 
 The machine currently has JDK 24 only, which the enforcer in Task 2 will reject. Install 21 alongside it — do not uninstall 24.
 
@@ -81,7 +83,7 @@ The machine currently has JDK 24 only, which the enforcer in Task 2 will reject.
 winget install --id EclipseAdoptium.Temurin.21.JDK -e
 ```
 
-- [ ] **Step 2: Point JAVA_HOME at JDK 21 and verify**
+- [x] **Step 2: Point JAVA_HOME at JDK 21 and verify**
 
 ```powershell
 $jdk = (Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Filter 'jdk-21*' | Select-Object -First 1).FullName
@@ -92,7 +94,7 @@ $env:JAVA_HOME = $jdk
 
 Expected: `openjdk version "21.0.x"`. If `$jdk` is empty, the install did not land in that folder — locate it with `Get-ChildItem 'C:\Program Files' -Filter 'jdk-21*' -Recurse -Depth 2` and set `JAVA_HOME` manually.
 
-- [ ] **Step 3: Download and unpack the Maven wrapper**
+- [x] **Step 3: Download and unpack the Maven wrapper**
 
 The wrapper is fetched from the official Apache distribution because Maven itself is not installed, so `mvn wrapper:wrapper` cannot be used.
 
@@ -105,7 +107,7 @@ chmod +x mvnw
 
 This yields `mvnw`, `mvnw.cmd` and `.mvn/wrapper/maven-wrapper.jar`.
 
-- [ ] **Step 4: Write the wrapper properties**
+- [x] **Step 4: Write the wrapper properties**
 
 Create `.mvn/wrapper/maven-wrapper.properties`:
 
@@ -114,13 +116,13 @@ distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-mav
 wrapperUrl=https://repo.maven.apache.org/maven2/org/apache/maven/wrapper/maven-wrapper/3.3.4/maven-wrapper-3.3.4.jar
 ```
 
-- [ ] **Step 5: Verify the wrapper resolves Maven and the correct JDK**
+- [x] **Step 5: Verify the wrapper resolves Maven and the correct JDK**
 
 Run: `./mvnw -v`
 
 Expected: `Apache Maven 3.9.16` and `Java version: 21.0.x`. The first run downloads Maven, which takes a minute. If it reports Java 24, `JAVA_HOME` was not picked up — reopen the terminal.
 
-- [ ] **Step 6: Write `.gitignore`**
+- [x] **Step 6: Write `.gitignore`**
 
 ```gitignore
 # Build output
@@ -151,7 +153,7 @@ Thumbs.db
 /kafka-streams-state/
 ```
 
-- [ ] **Step 7: Write `.env.example`**
+- [x] **Step 7: Write `.env.example`**
 
 ```bash
 # Copy to .env and fill in. .env is gitignored and must never be committed.
@@ -159,7 +161,7 @@ Thumbs.db
 GEMINI_API_KEY=your-key-here
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add .gitignore .env.example mvnw mvnw.cmd .mvn
@@ -185,7 +187,7 @@ The Published Language module. `DomainEvent.eventType()` derives the Kafka topic
   - `au.edu.uow.csci318:common-events:0.1.0-SNAPSHOT`
   - `interface DomainEvent { String eventId(); Instant occurredAt(); default String eventType(); static String toKebabCase(String); }`
 
-- [ ] **Step 1: Write the root aggregator POM**
+- [x] **Step 1: Write the root aggregator POM**
 
 Create `pom.xml`:
 
@@ -274,7 +276,7 @@ Create `pom.xml`:
 
 Note: `maven-enforcer-plugin` is a *build* plugin, not an application dependency, so it does not consume the dependency allowlist. It exists to make the JDK-mismatch risk in spec §15 fail loudly instead of silently.
 
-- [ ] **Step 2: Write the `common-events` POM**
+- [x] **Step 2: Write the `common-events` POM**
 
 Create `common-events/pom.xml`. Deliberately no Spring on the main classpath — this module is plain Java.
 
@@ -310,7 +312,7 @@ Create `common-events/pom.xml`. Deliberately no Spring on the main classpath —
 </project>
 ```
 
-- [ ] **Step 3: Write the failing test**
+- [x] **Step 3: Write the failing test**
 
 Create `common-events/src/test/java/au/edu/uow/csci318/conference/common/event/DomainEventTest.java`:
 
@@ -368,13 +370,13 @@ class DomainEventTest {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it fails**
+- [x] **Step 4: Run the test to verify it fails**
 
 Run: `./mvnw -q -pl common-events test`
 
 Expected: compilation failure — `cannot find symbol: class DomainEvent`.
 
-- [ ] **Step 5: Write the minimal implementation**
+- [x] **Step 5: Write the minimal implementation**
 
 Create `common-events/src/main/java/au/edu/uow/csci318/conference/common/event/DomainEvent.java`:
 
@@ -432,19 +434,19 @@ public interface DomainEvent {
 }
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 Run: `./mvnw -q -pl common-events test`
 
 Expected: PASS, 5 tests.
 
-- [ ] **Step 7: Verify the whole reactor builds**
+- [x] **Step 7: Verify the whole reactor builds**
 
 Run: `./mvnw clean test`
 
 Expected: `BUILD SUCCESS`. If the enforcer fails here, `JAVA_HOME` is not JDK 21 — return to Task 1 Step 2.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add pom.xml common-events
@@ -468,7 +470,7 @@ Creates the module, its Spring Boot entry point and its H2 configuration, and pr
 - Consumes: `au.edu.uow.csci318:common-events` from Task 2
 - Produces: `au.edu.uow.csci318:event-catalog-service:0.1.0-SNAPSHOT`, base package `au.edu.uow.csci318.conference.catalog`, running on port 8081
 
-- [ ] **Step 1: Register the module in the root POM**
+- [x] **Step 1: Register the module in the root POM**
 
 In `pom.xml`, replace the `<modules>` block with:
 
@@ -479,7 +481,7 @@ In `pom.xml`, replace the `<modules>` block with:
   </modules>
 ```
 
-- [ ] **Step 2: Write the service POM**
+- [x] **Step 2: Write the service POM**
 
 Create `event-catalog-service/pom.xml`:
 
@@ -540,7 +542,7 @@ Create `event-catalog-service/pom.xml`:
 </project>
 ```
 
-- [ ] **Step 3: Write the application configuration**
+- [x] **Step 3: Write the application configuration**
 
 Create `event-catalog-service/src/main/resources/application.yml`:
 
@@ -573,7 +575,7 @@ logging:
     au.edu.uow.csci318.conference: DEBUG
 ```
 
-- [ ] **Step 4: Write the failing test**
+- [x] **Step 4: Write the failing test**
 
 Create `event-catalog-service/src/test/java/au/edu/uow/csci318/conference/catalog/EventCatalogApplicationTest.java`:
 
@@ -601,13 +603,13 @@ class EventCatalogApplicationTest {
 }
 ```
 
-- [ ] **Step 5: Run the test to verify it fails**
+- [x] **Step 5: Run the test to verify it fails**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: failure — no `@SpringBootConfiguration` found.
 
-- [ ] **Step 6: Write the application entry point**
+- [x] **Step 6: Write the application entry point**
 
 Create `event-catalog-service/src/main/java/au/edu/uow/csci318/conference/catalog/EventCatalogApplication.java`:
 
@@ -632,13 +634,13 @@ public class EventCatalogApplication {
 }
 ```
 
-- [ ] **Step 7: Run the test to verify it passes**
+- [x] **Step 7: Run the test to verify it passes**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add pom.xml event-catalog-service
@@ -668,7 +670,7 @@ Pure domain layer, tested with plain JUnit and no Spring context. This is the ta
   - `record DateRange(LocalDate start, LocalDate end)` with `boolean contains(LocalDate)`
   - `class Event` with `static Event createDraft(String id, String name, String description, Venue venue, DateRange dateRange)` and getters `getId()`, `getName()`, `getDescription()`, `getStatus()`, `getVenue()`, `getDateRange()`
 
-- [ ] **Step 1: Write the failing value-object tests**
+- [x] **Step 1: Write the failing value-object tests**
 
 Create `event-catalog-service/src/test/java/au/edu/uow/csci318/conference/catalog/domain/model/DateRangeTest.java`:
 
@@ -780,13 +782,13 @@ class VenueTest {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: compilation failure — `cannot find symbol: class DateRange`.
 
-- [ ] **Step 3: Write the value objects**
+- [x] **Step 3: Write the value objects**
 
 Create `.../domain/model/EventStatus.java`:
 
@@ -857,13 +859,13 @@ public record DateRange(LocalDate start, LocalDate end) {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: PASS, 9 value-object tests plus the context-loads test.
 
-- [ ] **Step 5: Write the failing aggregate test**
+- [x] **Step 5: Write the failing aggregate test**
 
 Create `.../domain/model/EventTest.java`:
 
@@ -932,13 +934,13 @@ class EventTest {
 }
 ```
 
-- [ ] **Step 6: Run the test to verify it fails**
+- [x] **Step 6: Run the test to verify it fails**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: compilation failure — `cannot find symbol: class Event`.
 
-- [ ] **Step 7: Write the `Event` aggregate root**
+- [x] **Step 7: Write the `Event` aggregate root**
 
 Create `.../domain/model/Event.java`. It is written without JPA annotations here; Task 5 adds them.
 
@@ -1028,13 +1030,13 @@ public class Event {
 }
 ```
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [x] **Step 8: Run the tests to verify they pass**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: PASS, all tests.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add event-catalog-service
@@ -1060,7 +1062,7 @@ Adds the JPA mapping and the port/adapter pair. Two mapping hazards are handled 
 - Consumes: `Event`, `Venue`, `DateRange`, `EventStatus` from Task 4
 - Produces: `interface EventRepository { Event save(Event event); Optional<Event> findById(String id); }`
 
-- [ ] **Step 1: Write the failing persistence test**
+- [x] **Step 1: Write the failing persistence test**
 
 Create `.../infrastructure/persistence/JpaEventRepositoryTest.java`:
 
@@ -1158,13 +1160,13 @@ The last test asserts against the physical column names directly. It is the only
 catches an `@AttributeOverride` being dropped in a later refactor — a failure that would
 otherwise show up as an obscure Hibernate error in M1.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: compilation failure — `cannot find symbol: class EventRepository`.
 
-- [ ] **Step 3: Add JPA annotations to the value objects**
+- [x] **Step 3: Add JPA annotations to the value objects**
 
 Replace the class declaration in `.../domain/model/Venue.java` so the file reads:
 
@@ -1199,7 +1201,7 @@ Do the same for `.../domain/model/DateRange.java`, adding `import jakarta.persis
 
 > **If Hibernate rejects the record embeddables** with an error mentioning a missing default constructor, convert `Venue` and `DateRange` to plain final classes with a `protected` no-argument constructor, private final-less fields, accessor methods named `name()`, `addressLine()`, `city()` / `start()`, `end()`, and hand-written `equals`/`hashCode`. Keep the accessor names identical so no other file changes. Record embeddables are supported in the Hibernate 6.6 that Spring Boot 3.5.15 ships, so this fallback should not be needed — but verify at this step rather than discovering it later.
 
-- [ ] **Step 4: Add JPA annotations to the `Event` aggregate**
+- [x] **Step 4: Add JPA annotations to the `Event` aggregate**
 
 In `.../domain/model/Event.java`, add these imports:
 
@@ -1256,7 +1258,7 @@ public class Event {
 
 Leave the constructors, factory method and getters exactly as they are.
 
-- [ ] **Step 5: Write the repository port**
+- [x] **Step 5: Write the repository port**
 
 Create `.../domain/repository/EventRepository.java`:
 
@@ -1281,7 +1283,7 @@ public interface EventRepository {
 }
 ```
 
-- [ ] **Step 6: Write the persistence adapter**
+- [x] **Step 6: Write the persistence adapter**
 
 Create `.../infrastructure/persistence/EventJpaRepository.java`:
 
@@ -1329,13 +1331,13 @@ public class JpaEventRepository implements EventRepository {
 }
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: PASS. If a test fails with `Table "EVENTS" not found` or a column-name error, re-check the `@AttributeOverrides` in Step 4.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add event-catalog-service
@@ -1365,7 +1367,7 @@ Completes the vertical slice through all four layers, with the error mapping eve
   - `GET /api/v1/events/{id}` → `200 OK` with `EventResponse`, `404` with `ApiError`
   - `record ApiError(String code, String message)`
 
-- [ ] **Step 1: Write the failing controller test**
+- [x] **Step 1: Write the failing controller test**
 
 Create `.../api/EventControllerTest.java`:
 
@@ -1478,13 +1480,13 @@ class EventControllerTest {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: failures — every request returns 404 because no controller is mapped.
 
-- [ ] **Step 3: Write the domain exception**
+- [x] **Step 3: Write the domain exception**
 
 Create `.../domain/EventNotFoundException.java`:
 
@@ -1500,7 +1502,7 @@ public class EventNotFoundException extends RuntimeException {
 }
 ```
 
-- [ ] **Step 4: Write the application layer**
+- [x] **Step 4: Write the application layer**
 
 Create `.../application/command/CreateEventCommand.java`:
 
@@ -1563,7 +1565,7 @@ public class EventApplicationService {
 }
 ```
 
-- [ ] **Step 5: Write the DTOs**
+- [x] **Step 5: Write the DTOs**
 
 Create `.../api/dto/CreateEventRequest.java`:
 
@@ -1642,7 +1644,7 @@ public record EventResponse(
 }
 ```
 
-- [ ] **Step 6: Write the controller and exception handler**
+- [x] **Step 6: Write the controller and exception handler**
 
 Create `.../api/EventController.java`:
 
@@ -1735,13 +1737,13 @@ public class GlobalExceptionHandler {
 }
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `./mvnw -q -pl event-catalog-service -am test`
 
 Expected: PASS, all five controller tests plus the earlier ones.
 
-- [ ] **Step 8: Verify the service runs for real**
+- [x] **Step 8: Verify the service runs for real**
 
 `spring-boot:run` resolves dependencies from the local Maven repository rather than the
 reactor, so `common-events` must be installed first. `-am` does **not** help here — it would
@@ -1762,7 +1764,7 @@ curl -s -X POST http://localhost:8081/api/v1/events \
 
 Expected: HTTP 201 with a JSON body containing a generated `id` and `"status":"DRAFT"`. Stop the service with Ctrl+C.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add event-catalog-service
@@ -1783,7 +1785,7 @@ Each is a runnable Spring Boot application with the four layer packages in place
 - Consumes: the root POM from Task 2
 - Produces: artifacts `registration-service`, `payment-service`, `ticketing-service`, `analytics-service`, `concierge-service`, base packages `au.edu.uow.csci318.conference.{registration,payment,ticketing,analytics,concierge}`
 
-- [ ] **Step 1: Register all five modules in the root POM**
+- [x] **Step 1: Register all five modules in the root POM**
 
 In `pom.xml`, replace the `<modules>` block with:
 
@@ -1799,7 +1801,7 @@ In `pom.xml`, replace the `<modules>` block with:
   </modules>
 ```
 
-- [ ] **Step 2: Create the three persistent services**
+- [x] **Step 2: Create the three persistent services**
 
 For each of the following, create `<module>/pom.xml` by copying `event-catalog-service/pom.xml` verbatim and changing only the `<artifactId>`, `<name>` and `<description>`:
 
@@ -1809,7 +1811,7 @@ For each of the following, create `<module>/pom.xml` by copying `event-catalog-s
 | `payment-service` | `payment-service` | `ConfHub Payment Service` | `Billing bounded context: payment orders, refunds, refund policy` |
 | `ticketing-service` | `ticketing-service` | `ConfHub Ticketing Service` | `Access bounded context: tickets, transfers, gate check-in` |
 
-- [ ] **Step 3: Create the two stateless services**
+- [x] **Step 3: Create the two stateless services**
 
 For `analytics-service` and `concierge-service`, create `<module>/pom.xml` the same way but **remove** the `spring-boot-starter-data-jpa` and `com.h2database:h2` dependencies — neither service owns a database, per spec §4.2. Keep `spring-boot-starter-web`, `spring-boot-starter-validation`, `common-events` and `spring-boot-starter-test`.
 
@@ -1818,7 +1820,7 @@ For `analytics-service` and `concierge-service`, create `<module>/pom.xml` the s
 | `analytics-service` | `analytics-service` | `ConfHub Analytics Service` | `Operational insight context: Kafka Streams read models. Owns no database.` |
 | `concierge-service` | `concierge-service` | `ConfHub Concierge Service` | `Attendee assistance context: LangChain4j agents. Owns no database.` |
 
-- [ ] **Step 4: Write the application classes**
+- [x] **Step 4: Write the application classes**
 
 For each module, create `<module>/src/main/java/au/edu/uow/csci318/conference/<pkg>/<Class>.java` using this template, substituting from the table below:
 
@@ -1846,7 +1848,7 @@ public class CLASS {
 | `analytics-service` | `analytics` | `AnalyticsApplication` | Operational insight |
 | `concierge-service` | `concierge` | `ConciergeApplication` | Attendee assistance |
 
-- [ ] **Step 5: Write the configuration for the three persistent services**
+- [x] **Step 5: Write the configuration for the three persistent services**
 
 For `registration-service` (port 8082, schema `regdb`), `payment-service` (8083, `paydb`) and `ticketing-service` (8084, `ticketdb`), create `<module>/src/main/resources/application.yml`:
 
@@ -1876,7 +1878,7 @@ logging:
     au.edu.uow.csci318.conference: DEBUG
 ```
 
-- [ ] **Step 6: Write the configuration for the two stateless services**
+- [x] **Step 6: Write the configuration for the two stateless services**
 
 For `analytics-service` (8085) and `concierge-service` (8086), create `<module>/src/main/resources/application.yml`:
 
@@ -1893,7 +1895,7 @@ logging:
     au.edu.uow.csci318.conference: DEBUG
 ```
 
-- [ ] **Step 7: Write a context test for each module**
+- [x] **Step 7: Write a context test for each module**
 
 For each module create `<module>/src/test/java/au/edu/uow/csci318/conference/<pkg>/<Class>Test.java`:
 
@@ -1920,7 +1922,7 @@ class CLASSTest {
 }
 ```
 
-- [ ] **Step 8: Create the empty layer packages**
+- [x] **Step 8: Create the empty layer packages**
 
 So that later milestones drop files into a structure that already matches spec §9, create a `.gitkeep` in each layer directory of all five modules:
 
@@ -1934,13 +1936,13 @@ for m in registration:registration payment:payment ticketing:ticketing analytics
 done
 ```
 
-- [ ] **Step 9: Run the full build**
+- [x] **Step 9: Run the full build**
 
 Run: `./mvnw clean test`
 
 Expected: `BUILD SUCCESS`, `Reactor Summary` listing all seven modules.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add pom.xml registration-service payment-service ticketing-service analytics-service concierge-service
@@ -1960,7 +1962,7 @@ Kafka runs in KRaft mode with no ZooKeeper. Two listeners are configured: one ad
 - Consumes: nothing
 - Produces: a Kafka broker at `localhost:9092` and Kafka UI at `http://localhost:8080`
 
-- [ ] **Step 1: Write the Compose file**
+- [x] **Step 1: Write the Compose file**
 
 Create `docker-compose.yml`:
 
@@ -2010,13 +2012,13 @@ services:
         condition: service_healthy
 ```
 
-- [ ] **Step 2: Start the stack**
+- [x] **Step 2: Start the stack**
 
 Run: `docker compose up -d`
 
 Expected: both containers start. Check with `docker compose ps` — `confhub-kafka` should reach `healthy`, which can take up to 30 seconds.
 
-- [ ] **Step 3: Verify the broker accepts a topic from the host**
+- [x] **Step 3: Verify the broker accepts a topic from the host**
 
 ```bash
 docker exec confhub-kafka /opt/kafka/bin/kafka-topics.sh \
@@ -2027,18 +2029,18 @@ docker exec confhub-kafka /opt/kafka/bin/kafka-topics.sh \
 
 Expected: `smoke-test` appears in the list.
 
-- [ ] **Step 4: Verify Kafka UI reaches the broker**
+- [x] **Step 4: Verify Kafka UI reaches the broker**
 
 Open `http://localhost:8080`. Expected: the `confhub-local` cluster shows as online and `smoke-test` appears under Topics. If the cluster shows offline, the `DOCKER` listener is misconfigured — recheck `KAFKA_ADVERTISED_LISTENERS`.
 
-- [ ] **Step 5: Clean up the smoke-test topic**
+- [x] **Step 5: Clean up the smoke-test topic**
 
 ```bash
 docker exec confhub-kafka /opt/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --delete --topic smoke-test
 ```
 
-- [ ] **Step 6: Confirm the build still passes with Kafka running and with it stopped**
+- [x] **Step 6: Confirm the build still passes with Kafka running and with it stopped**
 
 ```bash
 ./mvnw clean test
@@ -2048,7 +2050,7 @@ docker compose down
 
 Expected: `BUILD SUCCESS` both times. No service depends on Kafka yet, and the global constraint requires the suite to pass without Docker.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add docker-compose.yml
@@ -2075,19 +2077,19 @@ The marker knows the `gxshub/book-and-library-management-system-v1` layout. Matc
 - Consumes: `docs/superpowers/specs/2026-08-22-conference-registration-platform-design.md`
 - Produces: the specification set every later milestone's contract tests are generated from
 
-- [ ] **Step 1: Write `specs/1-technical-architecture.md`**
+- [x] **Step 1: Write `specs/1-technical-architecture.md`**
 
 Transcribe from design §4 (services and data ownership), §6 (event-driven architecture), §9 (layered architecture) and §10 (technology and version matrix). Include the service table with ports and owned schemas, the context map diagram, the four-layer package structure, and the version matrix. Replace the reference repository's `## Design Principles` / `## Future Considerations` "Todo" stubs with real content drawn from design §4.2 (data ownership, why two services own no database) and §16 (out of scope).
 
-- [ ] **Step 2: Write `specs/2-user-stories.md`**
+- [x] **Step 2: Write `specs/2-user-stories.md`**
 
 Transcribe design §3. Use the reference repository's format: an overview table of `Service | User Story ID | User Story Name | Role(s)`, then a section per story written as "**As a** … **I want to** …". Use the FR-01 … FR-18 identifiers from the design so requirements stay traceable into the report. Mark FR-14, FR-15 and FR-16 as real-time analysis stories and FR-17 and FR-18 as agentic AI stories, since the marking rubric looks for them explicitly.
 
-- [ ] **Step 3: Write `specs/3-domain-models.md`**
+- [x] **Step 3: Write `specs/3-domain-models.md`**
 
 Transcribe design §5. Keep the reference repository's per-field table format (`Field Name | Type | Description | Constraints / Notes`) rather than the design's condensed tables, and keep the `[AR]` / `[E]` / `[VO]` / `[DS]` / `[RM]` annotations — they are what report section 3.3 argues from. Include the "Domain Classes and Related User Stories" mapping table at the top, as the reference does.
 
-- [ ] **Step 4: Write `specs/4-api-endpoints.md`**
+- [x] **Step 4: Write `specs/4-api-endpoints.md`**
 
 One table per service in the reference repository's format: `Feature | Method | Endpoint Path | Request Body | Response (Success) | Description`. Cover all six services using the endpoint list in design §12 and §8. Mark endpoints not yet implemented as of M0 with `(M1)`, `(M2)` and so on, so the file doubles as a progress tracker.
 
@@ -2098,15 +2100,15 @@ For M0, only these exist and must be listed without a milestone marker:
 | FR-01 | `POST` | `/api/v1/events` | `CreateEventRequest` | `201 Created` (`EventResponse`) | Create a draft event |
 | — | `GET` | `/api/v1/events/{id}` | *None* | `200 OK` (`EventResponse`) | Get an event by id |
 
-- [ ] **Step 5: Write `specs/5-events-and-streams.md`**
+- [x] **Step 5: Write `specs/5-events-and-streams.md`**
 
 Transcribe design §6.1 (the full topic table with keys, producers and consumers), §6.3 (the saga flows including both compensation paths) and §7 (both stream topologies with their ksqlDB equivalents). This file has no counterpart in the reference repository — it exists because the CSCI318 specification requires event-driven architecture and stream processing that the reference project did not have.
 
-- [ ] **Step 6: Write `specs/6-agentic-ai.md`**
+- [x] **Step 6: Write `specs/6-agentic-ai.md`**
 
 Transcribe design §8: both agents, their tool tables, the guardrail configuration, the model configuration, and the named agentic patterns. State explicitly that `detectTimeClashes` and the refund threshold are enforced in code rather than in prompts, and why — that argument is the core of report section 3.6.
 
-- [ ] **Step 7: Write `specs/openapi-contract.yaml`**
+- [x] **Step 7: Write `specs/openapi-contract.yaml`**
 
 Create an OpenAPI 3.0.3 document. For M0 it covers only the two implemented endpoints; later milestones extend it, and contract tests are generated from it.
 
@@ -2238,7 +2240,7 @@ components:
           type: string
 ```
 
-- [ ] **Step 8: Write `agent-prompts/dev-agent.md`**
+- [x] **Step 8: Write `agent-prompts/dev-agent.md`**
 
 Adapt the reference repository's four-phase development agent prompt to ConfHub:
 
@@ -2284,7 +2286,7 @@ require one, HALT and report.
 - `./mvnw clean test` must pass with no Docker container running.
 ```
 
-- [ ] **Step 9: Verify every specification file is present and non-empty**
+- [x] **Step 9: Verify every specification file is present and non-empty**
 
 ```bash
 for f in specs/1-technical-architecture.md specs/2-user-stories.md specs/3-domain-models.md \
@@ -2296,7 +2298,7 @@ done
 
 Expected: eight `OK` lines, none `FAIL`.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add specs agent-prompts
@@ -2319,7 +2321,7 @@ The meeting minutes are worth 3 marks across Weeks 3–11, and report Section 5 
 - Consumes: everything built in Tasks 1–9
 - Produces: the repository root README required by the CSCI318 specification
 
-- [ ] **Step 1: Write the meeting minutes template**
+- [x] **Step 1: Write the meeting minutes template**
 
 Create `docs/meetings/TEMPLATE.md`:
 
@@ -2369,7 +2371,7 @@ Create `docs/meetings/TEMPLATE.md`:
 **Date:** YYYY-MM-DD · **Location:**
 ```
 
-- [ ] **Step 2: Write the meetings README**
+- [x] **Step 2: Write the meetings README**
 
 Create `docs/meetings/README.md`:
 
@@ -2397,7 +2399,7 @@ meeting, not afterwards.
 | 11 | `week-11.md` | ☐ |
 ```
 
-- [ ] **Step 3: Write the AI collaboration log**
+- [x] **Step 3: Write the AI collaboration log**
 
 Create `docs/ai-collaboration-log.md`:
 
@@ -2443,7 +2445,7 @@ than delegation.
 | **Artefact** | `docs/superpowers/specs/2026-08-22-conference-registration-platform-design.md` |
 ```
 
-- [ ] **Step 4: Write the root README**
+- [x] **Step 4: Write the root README**
 
 Create `README.md`:
 
@@ -2575,7 +2577,7 @@ curl http://localhost:8081/api/v1/events/{id}
 | M5 — Submission | 11–12 | ☐ |
 ````
 
-- [ ] **Step 5: Verify the README instructions actually work from a clean state**
+- [x] **Step 5: Verify the README instructions actually work from a clean state**
 
 ```bash
 ./mvnw clean test
@@ -2586,7 +2588,7 @@ docker compose down
 
 Expected: `BUILD SUCCESS`, both containers healthy, clean shutdown. If any README command fails, fix the README rather than the reader.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add README.md docs/meetings docs/ai-collaboration-log.md
@@ -2597,15 +2599,15 @@ git commit -m "docs: add README, meeting minutes template and AI collaboration l
 
 ## M0 Definition of Done
 
-- [ ] `./mvnw -v` reports Maven 3.9.16 on Java 21
-- [ ] `./mvnw clean test` succeeds with Docker stopped and all seven modules in the reactor summary
-- [ ] `docker compose up -d` brings Kafka to healthy and Kafka UI shows the cluster online
-- [ ] `POST /api/v1/events` returns 201 with a generated id and `DRAFT` status
-- [ ] `GET /api/v1/events/{unknown}` returns 404 with `EVENT_NOT_FOUND`
-- [ ] All eight files in `specs/` and `agent-prompts/` exist and are non-empty
-- [ ] `README.md`, `docs/meetings/TEMPLATE.md` and `docs/ai-collaboration-log.md` exist
-- [ ] Every layer package (`api`, `application`, `domain`, `infrastructure`) exists in all six services
-- [ ] `.env` is gitignored and no secret is committed — verify with `git log -p | grep -i "api.key"` returning nothing meaningful
+- [x] `./mvnw -v` reports Maven 3.9.16 on Java 21
+- [x] `./mvnw clean test` succeeds with Docker stopped and all seven modules in the reactor summary
+- [x] `docker compose up -d` brings Kafka to healthy and Kafka UI shows the cluster online
+- [x] `POST /api/v1/events` returns 201 with a generated id and `DRAFT` status
+- [x] `GET /api/v1/events/{unknown}` returns 404 with `EVENT_NOT_FOUND`
+- [x] All eight files in `specs/` and `agent-prompts/` exist and are non-empty
+- [x] `README.md`, `docs/meetings/TEMPLATE.md` and `docs/ai-collaboration-log.md` exist
+- [x] Every layer package (`api`, `application`, `domain`, `infrastructure`) exists in all six services
+- [x] `.env` is gitignored and no secret is committed — verify with `git log -p | grep -i "api.key"` returning nothing meaningful
 
 ---
 
