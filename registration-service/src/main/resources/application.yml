@@ -18,7 +18,13 @@ spring:
       enabled: true
       path: /h2-console
   cloud:
+    function:
+      definition: eventPublished
     stream:
+      bindings:
+        eventPublished-in-0:
+          destination: event-published
+          group: registration-service
       kafka:
         binder:
           brokers: localhost:9092
