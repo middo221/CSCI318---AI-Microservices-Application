@@ -67,9 +67,45 @@ class EventPublishingIntegrationTest {
         return objectMapper.readTree(body).get("id").asText();
     }
 
+    private String createSpeaker() throws Exception {
+        String body = mockMvc().perform(post("/api/v1/speakers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Dr Chen\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(body).get("id").asText();
+    }
+
+    /**
+     * An event needs at least one session before it can be published (FR-03), so every test here
+     * creates one. The session events it emits are drained so they cannot be mistaken for the
+     * publication event under test.
+     */
+    private String createPublishableEvent() throws Exception {
+        String eventId = createDraftEvent();
+        String speakerId = createSpeaker();
+        mockMvc().perform(post("/api/v1/events/{id}/sessions", eventId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Observability in practice",
+                                  "track": "ML Infrastructure",
+                                  "startsAt": "2026-09-14T09:00",
+                                  "endsAt": "2026-09-14T10:30",
+                                  "speakerId": "%s",
+                                  "seatCapacity": 120,
+                                  "priceAmount": "49.50"
+                                }
+                                """.formatted(speakerId)))
+                .andExpect(status().isCreated());
+        outbound.clear("session-added");
+        outbound.clear("session-capacity-changed");
+        return eventId;
+    }
+
     @Test
     void publishingAnEventEmitsEventPublishedToItsOwnTopic() throws Exception {
-        String id = createDraftEvent();
+        String id = createPublishableEvent();
 
         mockMvc().perform(post("/api/v1/events/{id}/publish", id))
                 .andExpect(status().isOk())
@@ -89,7 +125,7 @@ class EventPublishingIntegrationTest {
 
     @Test
     void keysTheMessageByTheConferenceEventId() throws Exception {
-        String id = createDraftEvent();
+        String id = createPublishableEvent();
 
         mockMvc().perform(post("/api/v1/events/{id}/publish", id))
                 .andExpect(status().isOk());
@@ -104,7 +140,7 @@ class EventPublishingIntegrationTest {
 
     @Test
     void refusesToPublishTwiceAndEmitsNothingTheSecondTime() throws Exception {
-        String id = createDraftEvent();
+        String id = createPublishableEvent();
 
         mockMvc().perform(post("/api/v1/events/{id}/publish", id))
                 .andExpect(status().isOk());

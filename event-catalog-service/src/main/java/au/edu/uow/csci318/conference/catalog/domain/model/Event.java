@@ -166,6 +166,10 @@ public class Event {
      * @throws IllegalStateException if the event is not a draft
      */
     public void publish() {
+        if (sessions.isEmpty()) {
+            throw new IllegalStateException(
+                    "event " + id + " needs at least one session before it can be published");
+        }
         if (status != EventStatus.DRAFT) {
             throw new IllegalStateException(
                     "event " + id + " is already published or cancelled and cannot be published again");

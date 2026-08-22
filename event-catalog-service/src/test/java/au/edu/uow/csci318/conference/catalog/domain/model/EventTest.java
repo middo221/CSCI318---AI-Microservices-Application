@@ -66,6 +66,7 @@ class EventTest {
     @Test
     void publishingMovesADraftToPublished() {
         Event event = Event.createDraft("evt-10", "SoftEng Summit", null, VENUE, DATES);
+        givenOneSession(event);
 
         event.publish();
 
@@ -75,6 +76,7 @@ class EventTest {
     @Test
     void publishingRecordsAnEventPublishedDomainEvent() {
         Event event = Event.createDraft("evt-11", "SoftEng Summit", null, VENUE, DATES);
+        givenOneSession(event);
 
         event.publish();
 
@@ -92,6 +94,7 @@ class EventTest {
     @Test
     void pullingDomainEventsClearsThem() {
         Event event = Event.createDraft("evt-12", "SoftEng Summit", null, VENUE, DATES);
+        givenOneSession(event);
         event.publish();
 
         assertThat(event.pullDomainEvents()).hasSize(1);
@@ -108,6 +111,7 @@ class EventTest {
     @Test
     void refusesToPublishAnAlreadyPublishedEvent() {
         Event event = Event.createDraft("evt-14", "SoftEng Summit", null, VENUE, DATES);
+        givenOneSession(event);
         event.publish();
         event.pullDomainEvents();
 
@@ -119,11 +123,41 @@ class EventTest {
     @Test
     void recordsNoSecondEventWhenPublishingIsRefused() {
         Event event = Event.createDraft("evt-15", "SoftEng Summit", null, VENUE, DATES);
+        givenOneSession(event);
         event.publish();
         event.pullDomainEvents();
 
         assertThatThrownBy(event::publish).isInstanceOf(IllegalStateException.class);
 
         assertThat(event.pullDomainEvents()).isEmpty();
+    }
+
+    private static void givenOneSession(Event event) {
+        event.addSession("ses-" + event.getId(), "Observability in practice",
+                new Track("ML Infrastructure"),
+                new TimeSlot(java.time.LocalDateTime.parse("2026-09-14T09:00"),
+                        java.time.LocalDateTime.parse("2026-09-14T10:30")),
+                "spk-1", SeatCapacity.of(120), Price.aud("49.50"));
+        event.pullDomainEvents();
+    }
+
+    @Test
+    void refusesToPublishAnEventWithNoSessions() {
+        Event event = Event.createDraft("evt-16", "SoftEng Summit", null, VENUE, DATES);
+
+        assertThatThrownBy(event::publish)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("at least one session");
+    }
+
+    @Test
+    void publishesAnEventThatHasASession() {
+        Event event = Event.createDraft("evt-17", "SoftEng Summit", null, VENUE, DATES);
+        givenOneSession(event);
+
+        event.publish();
+
+        assertThat(event.getStatus()).isEqualTo(EventStatus.PUBLISHED);
+        assertThat(event.pullDomainEvents()).hasSize(1);
     }
 }
