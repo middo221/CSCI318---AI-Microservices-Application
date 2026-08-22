@@ -1,6 +1,9 @@
 package au.edu.uow.csci318.conference.registration.infrastructure.messaging;
 
 import au.edu.uow.csci318.conference.common.event.EventPublished;
+import au.edu.uow.csci318.conference.common.event.SessionAdded;
+import au.edu.uow.csci318.conference.common.event.SessionCapacityChanged;
+import au.edu.uow.csci318.conference.registration.application.SessionViewProjection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
@@ -23,9 +26,12 @@ public class CatalogEventConsumers {
     private static final Logger log = LoggerFactory.getLogger(CatalogEventConsumers.class);
 
     private final ProcessedEventStore processedEvents;
+    private final SessionViewProjection sessions;
 
-    public CatalogEventConsumers(ProcessedEventStore processedEvents) {
+    public CatalogEventConsumers(ProcessedEventStore processedEvents,
+                                 SessionViewProjection sessions) {
         this.processedEvents = processedEvents;
+        this.sessions = sessions;
     }
 
     /**
@@ -46,6 +52,29 @@ public class CatalogEventConsumers {
             }
             log.info("event {} ({}) is open for registration from {} to {}",
                     event.conferenceEventId(), event.name(), event.startDate(), event.endDate());
+        };
+    }
+
+    /**
+     * Handles {@code session-added}. No processed-event check: the projection is an upsert and
+     * is therefore idempotent by construction.
+     */
+    @Bean
+    public Consumer<Message<SessionAdded>> sessionAdded() {
+        return message -> {
+            SessionAdded event = message.getPayload();
+            log.debug("replicating session {} of event {}", event.sessionId(), event.conferenceEventId());
+            sessions.apply(event);
+        };
+    }
+
+    /** Handles {@code session-capacity-changed}, the only writer of replica capacity. */
+    @Bean
+    public Consumer<Message<SessionCapacityChanged>> sessionCapacityChanged() {
+        return message -> {
+            SessionCapacityChanged event = message.getPayload();
+            log.debug("session {} capacity is now {}", event.sessionId(), event.seatCapacity());
+            sessions.apply(event);
         };
     }
 }
