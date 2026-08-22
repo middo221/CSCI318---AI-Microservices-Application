@@ -48,4 +48,25 @@ class DomainEventTest {
         assertThatThrownBy(() -> DomainEvent.toKebabCase(null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void defaultsThePartitionKeyToTheEventOccurrenceId() {
+        DomainEvent event = new EventPublished("evt-4", Instant.EPOCH);
+
+        assertThat(event.partitionKey()).isEqualTo("evt-4");
+    }
+
+    @Test
+    void allowsAnImplementationToChooseItsOwnPartitionKey() {
+        record SessionAdded(String eventId, Instant occurredAt, String sessionId) implements DomainEvent {
+            @Override
+            public String partitionKey() {
+                return sessionId;
+            }
+        }
+
+        DomainEvent event = new SessionAdded("evt-5", Instant.EPOCH, "ses-9");
+
+        assertThat(event.partitionKey()).isEqualTo("ses-9");
+    }
 }

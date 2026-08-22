@@ -17,6 +17,11 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  cloud:
+    stream:
+      kafka:
+        binder:
+          brokers: localhost:9092
 
 logging:
   level:
