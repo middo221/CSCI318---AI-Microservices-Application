@@ -5,6 +5,10 @@ target/
 # Secrets — never commit
 .env
 
+# Personal working files — never shared with the group.
+# Anything in here is invisible to git. Each member keeps their own.
+/private/
+
 # IDEs
 .idea/
 *.iml
