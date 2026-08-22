@@ -1,5 +1,7 @@
 package au.edu.uow.csci318.conference.catalog.domain.model;
 
+import au.edu.uow.csci318.conference.common.event.DomainEvent;
+import au.edu.uow.csci318.conference.common.event.EventPublished;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.Column;
@@ -9,6 +11,12 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * Aggregate root for the Programme bounded context.
@@ -54,6 +62,17 @@ public class Event {
             @AttributeOverride(name = "end", column = @Column(name = "ends_on", nullable = false))
     })
     private DateRange dateRange;
+
+    /**
+     * Domain events recorded by this aggregate during the current use case.
+     *
+     * <p>Not persisted. The aggregate records what happened in domain terms; the application
+     * layer drains this list and hands it to an outbound port, and only an infrastructure
+     * adapter behind that port knows the events reach Kafka. That indirection is what keeps
+     * {@code org.springframework.cloud.stream} out of the domain layer entirely.
+     */
+    @Transient
+    private final List<DomainEvent> domainEvents = new ArrayList<>();
 
     protected Event() {
         // required by JPA
@@ -115,5 +134,32 @@ public class Event {
 
     public DateRange getDateRange() {
         return dateRange;
+    }
+
+    /**
+     * Opens this event for registration.
+     *
+     * @throws IllegalStateException if the event is not a draft
+     */
+    public void publish() {
+        if (status != EventStatus.DRAFT) {
+            throw new IllegalStateException(
+                    "event " + id + " is already published or cancelled and cannot be published again");
+        }
+        status = EventStatus.PUBLISHED;
+        domainEvents.add(new EventPublished(
+                UUID.randomUUID().toString(),
+                Instant.now(),
+                id,
+                name,
+                dateRange.start(),
+                dateRange.end()));
+    }
+
+    /** Returns the events recorded since the last call and clears them. */
+    public List<DomainEvent> pullDomainEvents() {
+        List<DomainEvent> drained = List.copyOf(domainEvents);
+        domainEvents.clear();
+        return drained;
     }
 }
