@@ -20,6 +20,16 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  cloud:
+    stream:
+      kafka:
+        binder:
+          brokers: localhost:9092
+          # The binder defaults key.serializer to ByteArraySerializer, but DomainEvent.partitionKey()
+          # is a String, so every send fails with a SerializationException. Serialising keys as
+          # strings also keeps them readable in Kafka UI, which the demonstration depends on.
+          producer-properties:
+            key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 logging:
   level:

@@ -135,6 +135,49 @@ curl -X POST http://localhost:8081/api/v1/events -H "Content-Type: application/j
   -d '{"name":"X","venue":{"name":"a","addressLine":"b","city":"c"},"startDate":"2026-09-14","endDate":"2026-09-01"}'
 ```
 
+### The full M1 walkthrough — one event across a service boundary
+
+This is the sequence worth running first. It ends by changing state in one service and observing
+the change in **another service on another port**, with no HTTP request passing between them.
+
+Start Kafka and both services, then:
+
+```bash
+# 1. A speaker (FR-02)
+curl -s -X POST http://localhost:8081/api/v1/speakers   -H "Content-Type: application/json"   -d '{"name":"Dr Chen","bio":"Works on observability","organisation":"University of Wollongong"}'
+
+# 2. A draft event (FR-01) — note the returned id
+curl -s -X POST http://localhost:8081/api/v1/events   -H "Content-Type: application/json"   -d '{"name":"SoftEng Summit","description":"Three days of practice","venue":{"name":"Innovation Campus","addressLine":"Squires Way","city":"North Wollongong"},"startDate":"2026-09-14","endDate":"2026-09-16"}'
+
+# 3. A session (FR-02) — substitute the ids from steps 1 and 2
+curl -s -X POST http://localhost:8081/api/v1/events/<EVENT_ID>/sessions   -H "Content-Type: application/json"   -d '{"title":"Observability in practice","track":"ML Infrastructure","startsAt":"2026-09-14T09:00","endsAt":"2026-09-14T10:30","speakerId":"<SPEAKER_ID>","seatCapacity":120,"priceAmount":"49.50"}'
+
+# 4. Publish it (FR-03) — an event with no sessions is refused with 409
+curl -s -X POST http://localhost:8081/api/v1/events/<EVENT_ID>/publish
+
+# 5. Search the catalogue (FR-05) — drafts never appear in these results
+curl -s "http://localhost:8081/api/v1/sessions/search?track=ml%20infrastructure"
+curl -s "http://localhost:8081/api/v1/sessions/search?speaker=chen"
+curl -s "http://localhost:8081/api/v1/sessions/search?day=2026-09-14"
+curl -s "http://localhost:8081/api/v1/events?status=PUBLISHED"
+
+# 6. The replica in the OTHER service — port 8082, fed entirely by Kafka
+curl -s http://localhost:8082/api/v1/sessions/<SESSION_ID>/availability
+
+# 7. THE DEMONSTRATION: change capacity on 8081, re-read on 8082
+curl -s -X PUT http://localhost:8081/api/v1/events/<EVENT_ID>/sessions/<SESSION_ID>/capacity   -H "Content-Type: application/json" -d '{"seatCapacity":200}'
+curl -s http://localhost:8082/api/v1/sessions/<SESSION_ID>/availability
+```
+
+Step 7 is the point of the whole milestone. `registration-service` contains no HTTP client, no
+URL and no configuration referring to `event-catalog-service` — everything it knows about the
+programme arrived as a Kafka event. Watch the messages land in `event-published`,
+`session-added` and `session-capacity-changed` in Kafka UI at `http://localhost:8080` while the
+sequence runs.
+
+`session-capacity-changed` will hold **two** messages, not one: capacity is emitted at session
+creation as well as on the edit, so the topic carries the complete history every consumer needs.
+
 ## Troubleshooting
 
 **`bad interpreter: /bin/sh^M` when running `./mvnw`**

@@ -29,6 +29,23 @@ public interface DomainEvent {
         return toKebabCase(getClass().getSimpleName());
     }
 
+    /**
+     * The Kafka message key this event is published under.
+     *
+     * <p>Key choice is load-bearing rather than cosmetic. Specification section 6.1 keys
+     * {@code session-capacity-changed}, {@code seats-reserved} and {@code seats-released} by
+     * {@code sessionId} so that the analytics fill-rate join is co-partitioned and Kafka
+     * Streams inserts no repartition topic. Declaring the key on the event itself keeps that
+     * decision next to the payload it applies to, rather than scattered across publisher
+     * adapters where it would drift.
+     *
+     * <p>Defaults to the event occurrence id, which is only correct for events that have no
+     * meaningful aggregate key. Every event in this module overrides it.
+     */
+    default String partitionKey() {
+        return eventId();
+    }
+
     /** Converts a PascalCase type name to a kebab-case topic name. */
     static String toKebabCase(String pascalCase) {
         if (pascalCase == null || pascalCase.isBlank()) {

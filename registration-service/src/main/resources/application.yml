@@ -17,6 +17,23 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  cloud:
+    function:
+      definition: eventPublished;sessionAdded;sessionCapacityChanged
+    stream:
+      bindings:
+        eventPublished-in-0:
+          destination: event-published
+          group: registration-service
+        sessionAdded-in-0:
+          destination: session-added
+          group: registration-service
+        sessionCapacityChanged-in-0:
+          destination: session-capacity-changed
+          group: registration-service
+      kafka:
+        binder:
+          brokers: localhost:9092
 
 logging:
   level:
