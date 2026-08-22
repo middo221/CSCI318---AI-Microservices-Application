@@ -24,7 +24,7 @@ Milestones: **M0** skeleton · **M1** catalogue and first event · **M2** the sa
 
 **Error responses:** `400` (`VALIDATION_FAILED` or `INVALID_REQUEST`), `404`
 (`EVENT_NOT_FOUND`, `SESSION_NOT_FOUND`, `SPEAKER_NOT_FOUND`), `409`
-(`EVENT_ALREADY_PUBLISHED`, `SPEAKER_DOUBLE_BOOKED`).
+(`EVENT_ALREADY_PUBLISHED`, `EVENT_HAS_NO_SESSIONS`, `SPEAKER_DOUBLE_BOOKED`).
 
 ---
 

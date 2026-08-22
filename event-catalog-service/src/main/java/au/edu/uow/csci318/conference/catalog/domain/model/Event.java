@@ -1,5 +1,6 @@
 package au.edu.uow.csci318.conference.catalog.domain.model;
 
+import au.edu.uow.csci318.conference.catalog.domain.EventHasNoSessionsException;
 import au.edu.uow.csci318.conference.catalog.domain.SessionNotFoundException;
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
 import au.edu.uow.csci318.conference.common.event.EventPublished;
@@ -167,8 +168,7 @@ public class Event {
      */
     public void publish() {
         if (sessions.isEmpty()) {
-            throw new IllegalStateException(
-                    "event " + id + " needs at least one session before it can be published");
+            throw new EventHasNoSessionsException(id);
         }
         if (status != EventStatus.DRAFT) {
             throw new IllegalStateException(

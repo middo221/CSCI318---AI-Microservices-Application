@@ -156,6 +156,19 @@ class EventPublishingIntegrationTest {
     }
 
     @Test
+    void refusesToPublishAnEventWithAnEmptyProgramme() throws Exception {
+        String id = createDraftEvent();
+
+        mockMvc().perform(post("/api/v1/events/{id}/publish", id))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("EVENT_HAS_NO_SESSIONS"));
+
+        assertThat(outbound.receive(500, EVENT_PUBLISHED_TOPIC))
+                .as("a refused publish must not emit an event")
+                .isNull();
+    }
+
+    @Test
     void returnsNotFoundWhenPublishingAnUnknownEvent() throws Exception {
         mockMvc().perform(post("/api/v1/events/{id}/publish", "no-such-event"))
                 .andExpect(status().isNotFound())

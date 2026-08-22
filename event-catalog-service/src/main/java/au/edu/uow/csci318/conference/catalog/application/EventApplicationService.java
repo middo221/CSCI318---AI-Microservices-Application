@@ -3,6 +3,7 @@ package au.edu.uow.csci318.conference.catalog.application;
 import au.edu.uow.csci318.conference.catalog.application.command.CreateEventCommand;
 import au.edu.uow.csci318.conference.catalog.application.command.AddSessionCommand;
 import au.edu.uow.csci318.conference.catalog.domain.EventAlreadyPublishedException;
+import au.edu.uow.csci318.conference.catalog.domain.EventHasNoSessionsException;
 import au.edu.uow.csci318.conference.catalog.domain.EventNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.SpeakerNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.event.DomainEventPublisher;
@@ -58,6 +59,10 @@ public class EventApplicationService {
         Event event = events.findById(id).orElseThrow(() -> new EventNotFoundException(id));
         try {
             event.publish();
+        }
+        catch (EventHasNoSessionsException ex) {
+            // Already precise; wrapping it would lose the distinction the API needs.
+            throw ex;
         }
         catch (IllegalStateException ex) {
             throw new EventAlreadyPublishedException(id, ex.getMessage());

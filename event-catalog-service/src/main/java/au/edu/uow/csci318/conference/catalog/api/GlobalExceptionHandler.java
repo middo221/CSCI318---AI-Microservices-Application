@@ -1,6 +1,7 @@
 package au.edu.uow.csci318.conference.catalog.api;
 
 import au.edu.uow.csci318.conference.catalog.domain.EventAlreadyPublishedException;
+import au.edu.uow.csci318.conference.catalog.domain.EventHasNoSessionsException;
 import au.edu.uow.csci318.conference.catalog.domain.EventNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.SessionNotFoundException;
 import au.edu.uow.csci318.conference.catalog.domain.SpeakerNotFoundException;
@@ -31,6 +32,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleAlreadyPublished(EventAlreadyPublishedException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ApiError("EVENT_ALREADY_PUBLISHED", ex.getMessage()));
+    }
+
+    @ExceptionHandler(EventHasNoSessionsException.class)
+    public ResponseEntity<ApiError> handleEmptyProgramme(EventHasNoSessionsException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError("EVENT_HAS_NO_SESSIONS", ex.getMessage()));
     }
 
     @ExceptionHandler(SpeakerNotFoundException.class)
