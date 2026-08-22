@@ -1,21 +1,30 @@
 package au.edu.uow.csci318.conference.catalog.domain.model;
 
+import au.edu.uow.csci318.conference.catalog.domain.SessionNotFoundException;
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
 import au.edu.uow.csci318.conference.common.event.EventPublished;
+import au.edu.uow.csci318.conference.common.event.SessionAdded;
+import au.edu.uow.csci318.conference.common.event.SessionCapacityChanged;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -62,6 +71,21 @@ public class Event {
             @AttributeOverride(name = "end", column = @Column(name = "ends_on", nullable = false))
     })
     private DateRange dateRange;
+
+    /**
+     * The sessions in this programme.
+     *
+     * <p>Fetched eagerly, and deliberately so. {@code open-in-view} is disabled, the whole
+     * aggregate is needed to enforce publication and scheduling rules, and a conference of this
+     * size has tens of sessions rather than thousands. A lazy collection here would only produce
+     * {@code LazyInitializationException} at the API boundary.
+     *
+     * <p>Not {@code final}: Hibernate replaces the instance with its own persistent collection
+     * when the aggregate is loaded, which it cannot do through a final field.
+     */
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @JoinColumn(name = "event_id")
+    private List<Session> sessions = new ArrayList<>();
 
     /**
      * Domain events recorded by this aggregate during the current use case.
@@ -161,5 +185,99 @@ public class Event {
         List<DomainEvent> drained = List.copyOf(domainEvents);
         domainEvents.clear();
         return drained;
+    }
+
+    /** The sessions in this programme, in the order they were added. */
+    public List<Session> getSessions() {
+        return Collections.unmodifiableList(sessions);
+    }
+
+    /**
+     * Adds a session to the programme (FR-02).
+     *
+     * <p>Records both a {@code SessionAdded} and a {@code SessionCapacityChanged}. The second is
+     * not redundant: specification section 5.1 requires the capacity topic to carry the complete
+     * history for every session, so that a session which is never edited still has a capacity row
+     * for the analytics join and for the registration replica to read.
+     *
+     * @throws IllegalStateException    if the event is no longer a draft
+     * @throws IllegalArgumentException if the slot falls outside the event dates, or the session
+     *                                  id is already used in this event
+     */
+    public Session addSession(String sessionId,
+                              String title,
+                              Track track,
+                              TimeSlot timeSlot,
+                              String speakerId,
+                              SeatCapacity seatCapacity,
+                              Price price) {
+        if (status != EventStatus.DRAFT) {
+            throw new IllegalStateException(
+                    "sessions may be added to only a draft event; event " + id + " is " + status);
+        }
+        if (timeSlot != null
+                && !(dateRange.contains(timeSlot.start().toLocalDate())
+                     && dateRange.contains(timeSlot.end().toLocalDate()))) {
+            throw new IllegalArgumentException(
+                    "session time slot must fall within the event date range "
+                            + dateRange.start() + " to " + dateRange.end());
+        }
+        if (findSession(sessionId).isPresent()) {
+            throw new IllegalArgumentException("session " + sessionId + " already exists in event " + id);
+        }
+
+        Session session = Session.create(sessionId, title, track, timeSlot, speakerId, seatCapacity, price);
+        sessions.add(session);
+
+        domainEvents.add(new SessionAdded(
+                UUID.randomUUID().toString(),
+                Instant.now(),
+                session.getId(),
+                id,
+                session.getTitle(),
+                session.getTrack().name(),
+                session.getTimeSlot().start(),
+                session.getTimeSlot().end(),
+                session.getSpeakerId(),
+                session.getPrice().amount(),
+                session.getPrice().currency()));
+        recordCapacity(session);
+        return session;
+    }
+
+    /**
+     * Adjusts a session's seat capacity (FR-04), which is permitted after publication.
+     *
+     * <p>A reduction is accepted rather than validated. The catalog has no knowledge of how many
+     * seats are already reserved, and a synchronous check would reintroduce exactly the coupling
+     * the event-driven design removes. Specification section 5.1 places the rule in
+     * {@code registration-service} instead: existing holds are grandfathered and new reservations
+     * are refused until the session drains to the new capacity.
+     *
+     * @throws SessionNotFoundException if no session in this event has that id
+     * @throws IllegalStateException    if the event has been cancelled
+     */
+    public Session changeSessionCapacity(String sessionId, SeatCapacity seatCapacity) {
+        if (status == EventStatus.CANCELLED) {
+            throw new IllegalStateException("event " + id + " is cancelled");
+        }
+        Session session = findSession(sessionId)
+                .orElseThrow(() -> new SessionNotFoundException(id, sessionId));
+        session.changeSeatCapacity(seatCapacity);
+        recordCapacity(session);
+        return session;
+    }
+
+    private void recordCapacity(Session session) {
+        domainEvents.add(new SessionCapacityChanged(
+                UUID.randomUUID().toString(),
+                Instant.now(),
+                session.getId(),
+                id,
+                session.getSeatCapacity().value()));
+    }
+
+    private Optional<Session> findSession(String sessionId) {
+        return sessions.stream().filter(s -> s.getId().equals(sessionId)).findFirst();
     }
 }
