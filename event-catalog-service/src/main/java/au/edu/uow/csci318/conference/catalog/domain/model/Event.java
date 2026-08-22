@@ -1,5 +1,15 @@
 package au.edu.uow.csci318.conference.catalog.domain.model;
 
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.Column;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
 /**
  * Aggregate root for the Programme bounded context.
  *
@@ -10,13 +20,39 @@ package au.edu.uow.csci318.conference.catalog.domain.model;
  * <p>Constructed only via {@link #createDraft}; the protected no-argument constructor exists
  * solely for JPA.
  */
+@Entity
+@Table(name = "events")
 public class Event {
 
+    @Id
+    @Column(name = "id", nullable = false, length = 64)
     private String id;
+
+    @Column(name = "name", nullable = false)
     private String name;
+
+    @Column(name = "description", length = 2000)
     private String description;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 16)
     private EventStatus status;
+
+    // Venue.name would collide with Event.name, so every attribute is overridden.
+    @Embedded
+    @AttributeOverrides({
+            @AttributeOverride(name = "name", column = @Column(name = "venue_name", nullable = false)),
+            @AttributeOverride(name = "addressLine", column = @Column(name = "venue_address_line", nullable = false)),
+            @AttributeOverride(name = "city", column = @Column(name = "venue_city", nullable = false))
+    })
     private Venue venue;
+
+    // "start" and "end" are reserved SQL words, so both are renamed.
+    @Embedded
+    @AttributeOverrides({
+            @AttributeOverride(name = "start", column = @Column(name = "starts_on", nullable = false)),
+            @AttributeOverride(name = "end", column = @Column(name = "ends_on", nullable = false))
+    })
     private DateRange dateRange;
 
     protected Event() {

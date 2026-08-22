@@ -1,10 +1,13 @@
 package au.edu.uow.csci318.conference.catalog.domain.model;
 
+import jakarta.persistence.Embeddable;
+
 /**
  * Value object describing where an event is held.
  *
  * <p>Has no identity: two venues with the same name, address and city are the same venue.
  */
+@Embeddable
 public record Venue(String name, String addressLine, String city) {
 
     public Venue {

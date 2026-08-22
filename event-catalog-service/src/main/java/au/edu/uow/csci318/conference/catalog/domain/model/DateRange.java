@@ -1,5 +1,7 @@
 package au.edu.uow.csci318.conference.catalog.domain.model;
 
+import jakarta.persistence.Embeddable;
+
 import java.time.LocalDate;
 
 /**
@@ -7,6 +9,7 @@ import java.time.LocalDate;
  *
  * <p>Used for the dates an event runs over. Sessions added in M1 must fall within it.
  */
+@Embeddable
 public record DateRange(LocalDate start, LocalDate end) {
 
     public DateRange {
