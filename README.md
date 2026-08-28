@@ -140,7 +140,22 @@ curl -X POST http://localhost:8081/api/v1/events -H "Content-Type: application/j
 This is the sequence worth running first. It ends by changing state in one service and observing
 the change in **another service on another port**, with no HTTP request passing between them.
 
-Start Kafka and both services, then:
+Start Kafka and both services, then run the whole sequence in one go:
+
+```bash
+./scripts/demo-m1.sh
+```
+
+Add `--pause` when demonstrating to other people. It prints the broker's message counts after
+every step and waits for Enter, so you can switch to Kafka UI and explain what just landed:
+
+```bash
+./scripts/demo-m1.sh --pause
+```
+
+Or step through it by hand. Paste these one line at a time — pasting a whole block into Git Bash
+can leave a `^[[200~` prefix on the first line, and it is easy to paste an example *response* by
+mistake, which strands the shell on a `>` continuation prompt. `Ctrl+C` clears it.
 
 ```bash
 # 1. A speaker (FR-02)
@@ -207,14 +222,14 @@ Docker Desktop is not running. Start it and wait for the whale icon to settle.
 | `docs/meetings/` | Weekly meeting minutes, Weeks 3–11 |
 | `docs/ai-collaboration-log.md` | Evidence for report Section 5 |
 | `docs/superpowers/` | Design specification and implementation plans |
-| `scripts/` | Seed data and demonstration scripts (from M4) |
+| `scripts/` | Demonstration scripts — `demo-m1.sh` runs the whole M1 walkthrough |
 
 ## Project status
 
 | Milestone | Weeks | Status |
 | :--- | :--- | :--- |
 | M0 — Skeleton | 3–4 | ✅ Complete |
-| M1 — First event across a boundary | 5–6 | ☐ |
+| M1 — First event across a boundary | 5–6 | ✅ Complete |
 | M2 — The saga | 7–8 | ☐ |
 | M3 — Streams | 9–10 | ☐ |
 | M4 — Agents | 10–11 | ☐ |
