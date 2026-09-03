@@ -1,0 +1,69 @@
+package au.edu.uow.csci318.conference.concierge.support;
+
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
+
+/**
+ * A {@link ChatModel} that replays a fixed script instead of calling Gemini.
+ *
+ * <p>This is what lets the whole agent be tested with no network, no API key and no free-tier
+ * quota, which is a hard constraint on the build. It also makes agent tests deterministic: the
+ * question a test asks is "given that the model decided X, does the system behave correctly",
+ * and that question has one answer rather than a distribution.
+ *
+ * <p>Every request LangChain4j sends is recorded, so a test can assert the tool-calling loop
+ * really happened rather than inferring it from the final answer.
+ */
+public class ScriptedChatModel implements ChatModel {
+
+    private final Deque<ChatResponse> script = new ArrayDeque<>();
+    private final List<ChatRequest> requests = new ArrayList<>();
+
+    /** Queue a turn in which the model asks for one tool to be run. */
+    public ScriptedChatModel thenCallsTool(String toolName, String argumentsJson) {
+        script.add(ChatResponse.builder()
+                .aiMessage(AiMessage.from(ToolExecutionRequest.builder()
+                        .id("call-" + (script.size() + 1))
+                        .name(toolName)
+                        .arguments(argumentsJson)
+                        .build()))
+                .build());
+        return this;
+    }
+
+    /** Queue the model's final answer, as the JSON its structured return type expects. */
+    public ScriptedChatModel thenAnswers(String json) {
+        script.add(ChatResponse.builder().aiMessage(AiMessage.from(json)).build());
+        return this;
+    }
+
+    /** Every request LangChain4j sent, in order. */
+    public List<ChatRequest> requests() {
+        return List.copyOf(requests);
+    }
+
+    /** How many turns the loop actually took. */
+    public int turns() {
+        return requests.size();
+    }
+
+    @Override
+    public ChatResponse chat(ChatRequest request) {
+        requests.add(request);
+        ChatResponse next = script.poll();
+        if (next == null) {
+            throw new IllegalStateException(
+                    "the agent asked for turn " + requests.size() + " but the script ended; "
+                            + "either the loop is not terminating or the script is short");
+        }
+        return next;
+    }
+}
