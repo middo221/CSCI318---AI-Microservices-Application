@@ -59,6 +59,28 @@
   <build>
     <plugins>
       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <!--
+              Stop the hold-expiry sweeper's timer during tests.
+
+              regdb is an in-memory database with DB_CLOSE_DELAY=-1, so every Spring context in
+              the JVM shares one copy of it, and Spring caches those contexts. A @Scheduled
+              sweeper in any cached context therefore keeps firing against rows other test
+              classes are still using: HoldExpirySweeperTest creates a registration with a
+              half-second window, and a sweeper belonging to a different context expires it
+              first, publishing to an outbound destination that test is not watching.
+
+              HoldExpirySweeperTest calls sweep() directly, which is why it is public, so no test
+              needs the timer at all.
+            -->
+            <conference.registration.sweep-interval>PT1H</conference.registration.sweep-interval>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
