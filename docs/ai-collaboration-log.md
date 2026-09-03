@@ -260,3 +260,51 @@ than delegation.
 | **Decision** | **Accepted** |
 | **Rationale** | The specification does not address concurrency anywhere, but the replica row is exactly where the last-seat race lives: two simultaneous registrations both read `reservedSeats`, both pass the capacity check, and the session oversells. Worth recording because the addition paid for itself within the hour — the version column failed the first controller test run, and the cause was a real test-isolation bug: `@SpringBootTest` is not transactional, rows outlive each method, and the setup was saving a fresh version-0 instance over a row a previous test had already bumped. It failed loudly instead of silently overwriting, which is precisely the behaviour it was added for. |
 | **Artefact** | `SessionView`; `RegistrationControllerTest` setup; M2 plan, "where this plan refines the spec" |
+
+---
+
+## 2026-09-03 — A prompt instruction was rejected as a guarantee
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Design refinement, implementation (M4) |
+| **What was asked** | Implement Agent 1, the Agenda Builder, per `specs/6-agentic-ai.md` §2 |
+| **What was proposed** | The specification says the agent "MUST call `detectTimeClashes` before proposing". Implementing that literally means putting the sentence in the system prompt and trusting it |
+| **Decision** | **Modified** |
+| **Rationale** | The specification contradicts itself, and §1 is the half that is right: invariants belong in code, not prompts. "MUST call this tool" is still a sentence in a prompt, and the attendee's own free text sits in the same context window, so the agent's output is downstream of user input. The tool was kept — it demonstrates the pattern and improves the model's first attempt — and a **second, non-optional check was added after the agent returns**: `AgendaApplicationService` re-runs `ClashDetector` over whatever came back and drops anything that overlaps a session already accepted. The regression test drives a model that calls no clash tool at all and returns a deliberately overlapping pair; the response is still clash-free. That test is the evidence that the guarantee does not rest on the model's cooperation. |
+| **Artefact** | `AgendaApplicationService`; `AgendaApplicationServiceTest.isClashFreeEvenWhenTheModelNeverChecksForClashes`; M4 plan refinement 2 |
+
+---
+
+## 2026-09-03 — Structured output was judged insufficient against hallucination
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Design refinement (M4) |
+| **What was asked** | Return a typed agenda from the agent using LangChain4j structured output |
+| **What was proposed** | A first design in which the agent returned full session details — title, track, times, speaker — as a structured record |
+| **Decision** | **Rejected**, and replaced |
+| **Rationale** | A JSON schema constrains the *shape* of a reply, not its *truth*. A model asked for a title will produce a plausible title for a session that does not exist, and structured output makes that fabrication look more authoritative, not less. The agent's return type was narrowed to session ids and free-text rationales only. Every displayed fact is re-read from the dossier of sessions the tools actually fetched over HTTP during that run, so an id the agent never retrieved cannot be resolved and is discarded with a note. Two tests pin it: one where the model invents an id, and one where it recommends a genuinely real session it never looked up — both yield an empty agenda, because the service has no evidence either way. |
+| **Artefact** | `ProposedAgenda`; `AgendaTools.dossier()`; M4 plan refinement 3 |
+
+---
+
+## 2026-09-03 — Two specification assumptions about LangChain4j checked against the artefacts
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Implementation (M4) |
+| **What was asked** | Put LangChain4j on the concierge classpath as the dependency allowlist describes |
+| **What was proposed** | Adding all three artefacts version-free, on the assumption that `langchain4j-bom` manages them |
+| **Decision** | **Modified**, after checking |
+| **Rationale** | Two assumptions in `specs/1-technical-architecture.md` did not survive inspection. First, the BOM at 1.19.0 declares Boot 3 starters for Anthropic, Azure and OpenAI only — there is no Gemini entry, though the artefact exists on Maven Central at `1.19.0-beta29`, so it needs an explicit `${langchain4j-spring.version}`. Second, and more consequential, disassembling `AutoConfig.class` showed the chat model bean is `@ConditionalOnProperty` on the api-key, so **no `ChatModel` bean exists without a key at all**. Rather than work around that, the design uses it: the agent factory resolves the model through an `ObjectProvider` and reports the documented `502 LLM_UNAVAILABLE` when there is none. That single decision is what lets `./mvnw clean test` pass with no key, no network and no quota. A follow-on trap was found the same way: an empty-string key is a *present* property to `@ConditionalOnProperty`, so a blank-key guard sits in front of the lookup. |
+| **Artefact** | `concierge-service/pom.xml`; `LangChain4jAgendaAgentFactory`; `ConciergeControllerWithoutModelTest`; M4 plan refinements 1 and 4 |
