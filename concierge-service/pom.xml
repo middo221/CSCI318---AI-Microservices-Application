@@ -27,6 +27,27 @@
       <groupId>au.edu.uow.csci318</groupId>
       <artifactId>common-events</artifactId>
     </dependency>
+
+    <!--
+      LangChain4j. The first two are managed by langchain4j-bom, imported in the root POM, and
+      so carry no version. The Gemini Spring starter is NOT in that BOM - it ships on the beta
+      train and must be pinned explicitly to ${langchain4j-spring.version}, which is exactly why
+      the root POM declares that property alongside ${langchain4j.version}.
+    -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-google-ai-gemini</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-google-ai-gemini-spring-boot-starter</artifactId>
+      <version>${langchain4j-spring.version}</version>
+    </dependency>
+
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>

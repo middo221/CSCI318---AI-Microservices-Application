@@ -4,6 +4,34 @@ server:
 spring:
   application:
     name: concierge-service
+  http:
+    client:
+      # The concierge fans out to two other services inside a single request that an
+      # attendee is waiting on, and the agent may make several such calls in one run.
+      # Without ceilings, one unresponsive upstream stalls the whole agenda.
+      connect-timeout: 2s
+      read-timeout: 10s
+
+conference:
+  concierge:
+    catalog-base-url: http://localhost:8081
+    registration-base-url: http://localhost:8082
+    # A conference day holds roughly this many sessions. Beyond it an "agenda" is
+    # just the programme again, which helps nobody.
+    max-agenda-items: 8
+
+langchain4j:
+  google-ai-gemini:
+    chat-model:
+      # Supplied from .env, which is gitignored. Blank when absent, which the agent
+      # factory treats as "no model configured" and reports as 502 LLM_UNAVAILABLE.
+      api-key: ${GEMINI_API_KEY:}
+      model-name: gemini-2.5-flash
+      # Retrieval and ranking, not creative writing.
+      temperature: 0.2
+      # Deliberately on: these logs are the evidence that the tool-calling loop ran,
+      # for report Section 5 and for the live demonstration.
+      log-requests-and-responses: true
 
 logging:
   level:
