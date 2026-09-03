@@ -17,8 +17,10 @@ the production objects. A `ScriptedChatModel` replays a fixed sequence of tool c
 answer in place of Gemini, so the loop is exercised without network, without an API key and
 without consuming free-tier quota.
 
-**A live run against Gemini has not been done yet** and is deliberately deferred — see
-*Still outstanding* at the foot of this note. Nothing below was observed against the real model.
+**A live run against Gemini was then done on the same day** — see *Live run against Gemini* below.
+It succeeded on the second attempt; the first attempt failed and caught three real defects, which
+are recorded at the foot of this note. Everything in *Observed* immediately below was measured
+against the scripted model, not the live one.
 
 ## Method
 
@@ -26,6 +28,8 @@ without consuming free-tier quota.
    offline mode, so neither the build nor the tests can reach the network.
 2. Domain purity checked by grep.
 3. Test counts read from the surefire XML reports rather than from the console summary.
+4. Live run driven by `scripts/demo-m4.sh` against Gemini, with catalogue, registration and
+   concierge all running and Kafka up.
 
 Docker was running on the machine during this run. That does not affect the result —
 `concierge-service` declares no `spring-cloud-stream` dependency at all, so it has no Kafka
@@ -141,14 +145,95 @@ already booked, but that is a prompt instruction and therefore not a guarantee, 
 be described as one. Closing this properly needs either a catalogue lookup by id or times on the
 registration payload, and is a candidate for M5.
 
-## Still outstanding
+## Live run against Gemini — 2026-09-03
 
-A live run against Gemini, listed as Task 9 of the M4 plan. It needs `GEMINI_API_KEY` in `.env`,
-Docker up, and catalog and registration running, and it produces two things this note cannot:
+**Model:** `gemini-2.5-flash`, free tier. **Result: HTTP 200 in 27 seconds, 4 model turns.**
 
-- proof that a real model drives the loop as intended, rather than a scripted one;
-- the `log-requests-and-responses` output, which is the direct evidence of tool calling for report
-  Section 5 and for the demonstration.
+The agent was asked for an agenda by an attendee whose stated interests deliberately name *both*
+halves of a clashing pair:
 
-Until that run happens, the honest claim is: **the agent is correct against a scripted model and
-its guardrails are proven, but it has never spoken to Gemini.**
+> "I work on ML infrastructure. I really want the streams deep dive and the observability talk,
+> and anything by Dr Chen. Keep my late afternoon free if you can."
+
+### What the model did
+
+| Turn | What the model asked for |
+| :--- | :--- |
+| 1 | **Four `searchSessions` calls in one response** — `keyword: ML infrastructure`, `keyword: streams deep dive`, `keyword: observability`, `speaker: Dr Chen` |
+| 2 | Three `getSessionAvailability` calls, one per shortlisted session |
+| 3 | `detectTimeClashes` over the shortlist |
+| 4 | The final structured answer |
+
+Parallel function calling in turn 1 is worth pointing at in the report: the model batched four
+tool calls into a single round trip rather than taking four turns over it.
+
+### The agenda it produced
+
+```json
+{"items": [
+  {"sessionId": "6907bae3-…", "rationale": "You asked for the observability talk, and this session is also by Dr Chen."},
+  {"sessionId": "5e742572-…", "rationale": "This workshop is by Dr Chen and finishes by 3:30 PM, keeping your late afternoon free."}
+ ],
+ "summary": "… The 'Streams deep dive' session clashed with 'Observability in practice', so I prioritised the observability talk as it also features Dr Chen, whom you expressed interest in."}
+```
+
+Two sessions, no overlap, and the soft constraint honoured — the workshop ends at 15:30, leaving
+the late afternoon clear. `notes` was empty, because the model called `detectTimeClashes` itself
+and resolved the clash before answering.
+
+**Note what resolved the clash and how.** The code guarantees only that no overlapping pair
+survives; it has no opinion about *which* of the two to keep. The model kept the observability
+talk over the streams talk, reasoning that the attendee had also asked for "anything by Dr Chen"
+and that session is Chen's. That is the intended division of labour: the model exercises
+judgement over a soft preference, the code enforces the invariant.
+
+### Confirmed by this run
+
+| Claim | Evidence |
+| :--- | :--- |
+| A real model drives the plan-act-observe loop | 4 turns logged, tool results feeding the next request |
+| All four tools are reachable and correctly described | The model chose 3 of the 4 unprompted; `getAttendeeRegistrations` was correctly skipped, the attendee having mentioned no existing bookings |
+| Structured output parses into `ProposedAgenda` | The final message is a JSON code fence; LangChain4j appends the schema to the user message and parses the reply |
+| Facts come from the catalogue, not the model | The model returned two ids; the response carried full titles, times, tracks and prices |
+| The agenda is clash-free | Verified independently by `scripts/demo-m4.sh` step 3 |
+
+### What this run did NOT prove
+
+The guardrail. `notes` was empty because the model behaved well. A live model cannot be made to
+misbehave on demand, which is exactly why
+`AgendaApplicationServiceTest.isClashFreeEvenWhenTheModelNeverChecksForClashes` exists. **Demo the
+loop from this run; cite the test for the guarantee.** An empty `notes` array is not the guardrail
+firing.
+
+---
+
+## The defects the first live run caught
+
+The first attempt failed, and both failures were real.
+
+**1. Free-tier quota is five requests per minute, and a ReAct loop spends one per turn.**
+The first run took seven turns and was refused on the sixth with `429 RESOURCE_EXHAUSTED`,
+`quotaId: GenerateRequestsPerMinutePerProjectPerModel-FreeTier, quotaValue: 5`. Two of those seven
+were burned by a preflight probe in the demonstration script that ran a whole agent loop against
+dummy input — removed. The system prompt was then rewritten to ask the model to batch tool calls
+into as few turns as it can, which brought a run from seven turns to four. **This is a genuine
+architectural constraint on agentic designs, not a configuration slip:** an agent that reasons in
+many small steps is more expensive in requests than one that plans in few, and on a metered tier
+that difference decides whether the feature works at all.
+
+**2. `RateLimitException` was unmapped, so a 429 from Gemini became a 500 from us.**
+`GlobalExceptionHandler` handled `LlmUnavailableException` and `TimeoutException` and nothing
+else, so the rate limit escaped as a bare 500 carrying Spring's default error body — breaking the
+`{code, message}` contract every other service in the platform honours. Fixed: `RateLimitException`
+now maps to `429 LLM_RATE_LIMITED`, and a `LangChain4jException` catch-all maps anything
+unanticipated to `502 LLM_UNAVAILABLE`. Both are covered by regression tests that drive a scripted
+model which throws.
+
+**3. The demonstration script's own verification could not fail.** Step 3 piped the response into
+`python - <<'PY'`. A heredoc and a pipe both claim stdin and the heredoc wins, so the script read
+its own source as input, threw `JSONDecodeError`, left the result variable empty and printed "NO
+TWO SESSIONS OVERLAP — the guarantee held" without having checked anything. It reported success on
+the failed 500 run. Fixed by writing the response to a file and passing the path as `argv[1]`, and
+the corrected check was then tested against a deliberately clashing fixture to confirm it *can*
+fail. Worth recording as a lessons-learned item in its own right: **a verification step that
+cannot fail is worse than no verification step, because it manufactures false confidence.**

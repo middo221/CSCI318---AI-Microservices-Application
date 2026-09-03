@@ -64,27 +64,15 @@ for pair in "catalog:$CATALOG/events" "registration:$REGISTRATION/sessions/none/
   ok "$name is up (HTTP $code)"
 done
 
-# Probe the agent before seeding anything, so a missing key fails in two seconds
-# rather than after building a whole programme.
-run "POST $CONCIERGE/concierge/agenda   (probe)"
-probe=$(curl -s -w '\n%{http_code}' -X POST "$CONCIERGE/concierge/agenda" \
-  -H "Content-Type: application/json" \
-  -d '{"attendeeId":"probe","interests":"probe"}' 2>/dev/null)
-probe_code=$(printf '%s' "$probe" | tail -1)
+# NO agent probe here, deliberately.
+#
+# An earlier version of this script called the agenda endpoint with dummy input to check a
+# model was configured. That probe is a full multi-turn agent run, and on the free Gemini tier
+# - five requests per minute, per model - it spent two of the five before the demonstration
+# had even started, which is part of why the first live run hit 429. The endpoint reports a
+# missing model perfectly well on the real call in step 2.
 
-if [ "$probe_code" = "502" ]; then
-  fail "502 LLM_UNAVAILABLE — the concierge has no language model."
-  echo
-  note "The service is healthy; it simply has no key. Stop concierge-service and restart it"
-  note "with the key exported into ITS shell:"
-  echo
-  printf '     %sset -a; . ./.env; set +a%s\n' "$bold" "$off"
-  printf '     %s./mvnw spring-boot:run -pl concierge-service%s\n' "$bold" "$off"
-  echo
-  note "Check it took: echo \$GEMINI_API_KEY   should print your key, not an empty line."
-  exit 1
-fi
-ok "the agent answered HTTP $probe_code — a model is configured"
+ok "skipping the agent probe: on the free tier every model request is scarce"
 
 pause "preflight done"
 
@@ -151,13 +139,43 @@ run "POST $CONCIERGE/concierge/agenda"
 printf '%s   %s%s\n\n' "$dim" "$REQUEST" "$off"
 
 started=$(date +%s)
-RESPONSE=$(curl -s -X POST "$CONCIERGE/concierge/agenda" \
+RAW=$(curl -s -w '\n%{http_code}' -X POST "$CONCIERGE/concierge/agenda" \
   -H "Content-Type: application/json" -d "$REQUEST")
 elapsed=$(( $(date +%s) - started ))
+CODE=$(printf '%s' "$RAW" | tail -1)
+RESPONSE=$(printf '%s' "$RAW" | sed '$d')
 
 printf '%s' "$RESPONSE" | pretty
 printf '\n'
-note "answered in ${elapsed}s"
+note "HTTP $CODE in ${elapsed}s"
+
+# A non-200 is a failed demonstration. Say so here, rather than letting the checks below
+# read an absent items array as an empty agenda and cheerfully report success.
+if [ "$CODE" != "200" ]; then
+  printf '\n'
+  case "$CODE" in
+    429)
+      fail "429 LLM_RATE_LIMITED - the free Gemini tier allows five requests per minute per"
+      fail "model, and one agenda is a multi-turn agent run spending one request per turn."
+      printf '\n'
+      note "Wait 60 seconds and run this script again. If it keeps happening, either lower"
+      note "the turn count or switch model-name in the concierge application.yml to a model"
+      note "with a higher free-tier limit."
+      ;;
+    502)
+      fail "502 LLM_UNAVAILABLE - the concierge has no language model."
+      printf '\n'
+      note "Stop concierge-service and restart it with the key exported into ITS shell:"
+      printf '\n'
+      printf '     %sset -a; . ./.env; set +a%s\n' "$bold" "$off"
+      printf '     %s./mvnw spring-boot:run -pl concierge-service%s\n' "$bold" "$off"
+      ;;
+    504) fail "504 LLM_TIMEOUT - the model did not answer in time. Try again." ;;
+    *)   fail "HTTP $CODE - see the concierge terminal for the stack trace." ;;
+  esac
+  exit 1
+fi
+ok "HTTP 200"
 
 pause "agenda returned"
 
@@ -171,10 +189,23 @@ NOTES=$(printf '%s' "$RESPONSE" | python -c "import sys,json;print(len(json.load
 printf '%s   %d session(s) on the agenda, %d note(s)%s\n\n' "$dim" "$COUNT" "$NOTES" "$off"
 
 # The whole point: no two sessions on the returned agenda may overlap.
-CLASH=$(printf '%s' "$RESPONSE" | python - <<'PY'
+# Verify independently of what the service said: no two sessions on the returned agenda
+# may overlap.
+#
+# The response goes to a file rather than down a pipe. A heredoc and a pipe both claim stdin
+# and the heredoc wins, so an earlier version of this check read the Python script as its own
+# input, threw a JSONDecodeError, left CLASH empty, and reported success without having checked
+# anything. A verification step that cannot fail is worse than no verification step.
+AGENDA_JSON=$(mktemp 2>/dev/null || echo "./.demo-m4-agenda.json")
+printf '%s' "$RESPONSE" > "$AGENDA_JSON"
+
+CLASH=$(python - "$AGENDA_JSON" <<'CLASHCHECK'
 import sys, json
 from datetime import datetime
-items = json.load(sys.stdin)["items"]
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    items = json.load(fh)["items"]
+
 bad = []
 for i in range(len(items)):
     for j in range(i + 1, len(items)):
@@ -182,10 +213,11 @@ for i in range(len(items)):
         a_s, a_e = datetime.fromisoformat(a["startsAt"]), datetime.fromisoformat(a["endsAt"])
         b_s, b_e = datetime.fromisoformat(b["startsAt"]), datetime.fromisoformat(b["endsAt"])
         if a_s < b_e and b_s < a_e:
-            bad.append(f'{a["sessionId"]} overlaps {b["sessionId"]}')
+            bad.append(f'{a["sessionId"]} ({a["title"]}) overlaps {b["sessionId"]} ({b["title"]})')
 print("; ".join(bad))
-PY
+CLASHCHECK
 )
+rm -f "$AGENDA_JSON"
 
 if [ -z "$CLASH" ]; then
   ok "NO TWO SESSIONS OVERLAP — the guarantee held"

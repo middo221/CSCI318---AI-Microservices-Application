@@ -24,7 +24,8 @@ import java.util.List;
  */
 public class ScriptedChatModel implements ChatModel {
 
-    private final Deque<ChatResponse> script = new ArrayDeque<>();
+    /** Holds either a {@link ChatResponse} to return or a {@link RuntimeException} to throw. */
+    private final Deque<Object> script = new ArrayDeque<>();
     private final List<ChatRequest> requests = new ArrayList<>();
 
     /** Queue a turn in which the model asks for one tool to be run. */
@@ -36,6 +37,17 @@ public class ScriptedChatModel implements ChatModel {
                         .arguments(argumentsJson)
                         .build()))
                 .build());
+        return this;
+    }
+
+    /**
+     * Queue a turn in which the model call fails.
+     *
+     * <p>Lets a test drive the failure paths a real provider produces - rate limits, timeouts,
+     * upstream errors - without waiting for one to happen.
+     */
+    public ScriptedChatModel thenThrows(RuntimeException failure) {
+        script.add(failure);
         return this;
     }
 
@@ -70,12 +82,15 @@ public class ScriptedChatModel implements ChatModel {
     @Override
     public ChatResponse chat(ChatRequest request) {
         requests.add(request);
-        ChatResponse next = script.poll();
+        Object next = script.poll();
         if (next == null) {
             throw new IllegalStateException(
                     "the agent asked for turn " + requests.size() + " but the script ended; "
                             + "either the loop is not terminating or the script is short");
         }
-        return next;
+        if (next instanceof RuntimeException failure) {
+            throw failure;
+        }
+        return (ChatResponse) next;
     }
 }

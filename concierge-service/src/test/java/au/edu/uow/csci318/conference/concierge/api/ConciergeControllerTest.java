@@ -163,4 +163,34 @@ class ConciergeControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
+
+    /**
+     * Regression for the first live run against Gemini, which returned
+     * {@code 429 RESOURCE_EXHAUSTED} on the free tier's five-requests-per-minute limit and
+     * escaped as a bare 500 carrying Spring's default error body.
+     */
+    @Test
+    void reportsAModelRateLimitAsA429InThePlatformErrorShape() throws Exception {
+        model.thenThrows(new dev.langchain4j.exception.RateLimitException(
+                "quota exceeded for generate_content_free_tier_requests, limit: 5"));
+
+        mockMvc.perform(post("/api/v1/concierge/agenda")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody("streams")))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("LLM_RATE_LIMITED"))
+                .andExpect(jsonPath("$.message").exists());
+    }
+
+    @Test
+    void keepsTheErrorContractForAnUnanticipatedModelFailure() throws Exception {
+        model.thenThrows(new dev.langchain4j.exception.InternalServerException("upstream exploded"));
+
+        mockMvc.perform(post("/api/v1/concierge/agenda")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody("streams")))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("LLM_UNAVAILABLE"))
+                .andExpect(jsonPath("$.message").exists());
+    }
 }
