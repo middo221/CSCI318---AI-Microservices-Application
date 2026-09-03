@@ -434,6 +434,10 @@ plus new handlers on `GlobalExceptionHandler`.
       `grep -r "org.springframework.cloud.stream" registration-service/src/main/java/**/domain/`
       returns nothing
 - [ ] Verification record written with real observed output, not assumed output
+- [ ] **FR-06, FR-08 and FR-09 ticked in `specs/2-user-stories.md`**, in the overview table
+      and in their own sections, each naming the class or endpoint that delivers it. Mark a
+      requirement `[~]` if only part of it landed — FR-08's ticket issuance belongs to
+      `ticketing-service` and is not delivered by this plan
 
 ## Deferred to M3
 
