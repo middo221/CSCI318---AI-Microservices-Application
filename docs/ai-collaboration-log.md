@@ -308,3 +308,19 @@ than delegation.
 | **Decision** | **Modified**, after checking |
 | **Rationale** | Two assumptions in `specs/1-technical-architecture.md` did not survive inspection. First, the BOM at 1.19.0 declares Boot 3 starters for Anthropic, Azure and OpenAI only — there is no Gemini entry, though the artefact exists on Maven Central at `1.19.0-beta29`, so it needs an explicit `${langchain4j-spring.version}`. Second, and more consequential, disassembling `AutoConfig.class` showed the chat model bean is `@ConditionalOnProperty` on the api-key, so **no `ChatModel` bean exists without a key at all**. Rather than work around that, the design uses it: the agent factory resolves the model through an `ObjectProvider` and reports the documented `502 LLM_UNAVAILABLE` when there is none. That single decision is what lets `./mvnw clean test` pass with no key, no network and no quota. A follow-on trap was found the same way: an empty-string key is a *present* property to `@ConditionalOnProperty`, so a blank-key guard sits in front of the lookup. |
 | **Artefact** | `concierge-service/pom.xml`; `LangChain4jAgendaAgentFactory`; `ConciergeControllerWithoutModelTest`; M4 plan refinements 1 and 4 |
+
+---
+
+## 2026-09-03 — The first live model run caught three defects a green suite had not
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Testing, implementation (M4) |
+| **What was asked** | Run the Agenda Builder against the real Gemini model for the first time |
+| **What was proposed** | The agent had 65 passing tests against a scripted model and was believed ready |
+| **Decision** | **Modified** — three defects fixed before the feature was accepted |
+| **Rationale** | The most useful half-hour of the milestone, and the clearest evidence that a green suite is not the same as a working feature. (1) The free Gemini tier allows **five requests per minute per model**, and a ReAct loop spends one request per turn; the first run took seven turns and was refused on the sixth with `429 RESOURCE_EXHAUSTED`. This is an architectural property of agentic designs, not a configuration slip — an agent that reasons in many small steps costs more requests than one that plans in few. The system prompt was rewritten to ask for batched tool calls, taking a run from seven turns to four, and the model then issued **four parallel `searchSessions` calls in a single turn**. (2) `RateLimitException` was unmapped, so Gemini's 429 escaped as a bare **500 carrying Spring's default error body**, breaking the `{code, message}` contract every other service honours; now `429 LLM_RATE_LIMITED` with a `LangChain4jException` catch-all behind it. (3) The demonstration script's own clash check piped into a heredoc, so it read its own source as stdin, threw `JSONDecodeError`, and printed "the guarantee held" **without having checked anything** — including on the failed 500 run. None of the three was reachable by any test against a scripted model, because all three live in the gap between the stub and the real provider. |
+| **Artefact** | `GlobalExceptionHandler`; `AgendaBuilder` system message; `scripts/demo-m4.sh`; `docs/verification/2026-m4-agenda-builder.md`, "The defects the first live run caught" |
