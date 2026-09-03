@@ -1,5 +1,6 @@
 package au.edu.uow.csci318.conference.registration.application;
 
+import au.edu.uow.csci318.conference.common.event.DomainEvent;
 import au.edu.uow.csci318.conference.registration.application.command.RequestRegistrationCommand;
 import au.edu.uow.csci318.conference.registration.application.command.SessionRequest;
 import au.edu.uow.csci318.conference.registration.domain.RegistrationNotFoundException;
@@ -84,13 +85,19 @@ public class RegistrationApplicationService {
                 holds,
                 total);
 
+        // Drain before saving. Spring Data sees an id that is already assigned, so save() takes
+        // the merge path and hands back a different managed copy — and domainEvents is @Transient,
+        // so that copy carries nothing. Draining the instance we actually built is the only
+        // reliable source. Publishing is still safe here: the port defers every send until after
+        // the commit, so a rollback sends nothing.
+        List<DomainEvent> recorded = registration.pullDomainEvents();
         Registration saved = registrations.save(registration);
         requested.forEach((sessionId, quantity) -> {
             SessionView view = views.get(sessionId);
             view.reserve(quantity);
             sessions.save(view);
         });
-        domainEvents.publishAll(saved.pullDomainEvents());
+        domainEvents.publishAll(recorded);
         return saved;
     }
 
@@ -117,8 +124,9 @@ public class RegistrationApplicationService {
     public void confirmPaid(String registrationId) {
         Registration registration = findById(registrationId);
         registration.confirm();
-        Registration saved = registrations.save(registration);
-        domainEvents.publishAll(saved.pullDomainEvents());
+        List<DomainEvent> recorded = registration.pullDomainEvents();
+        registrations.save(registration);
+        domainEvents.publishAll(recorded);
     }
 
     /**
@@ -131,9 +139,10 @@ public class RegistrationApplicationService {
     public void cancelUnpaid(String registrationId) {
         Registration registration = findById(registrationId);
         registration.cancel();
-        Registration saved = registrations.save(registration);
-        returnSeats(saved);
-        domainEvents.publishAll(saved.pullDomainEvents());
+        List<DomainEvent> recorded = registration.pullDomainEvents();
+        registrations.save(registration);
+        returnSeats(registration);
+        domainEvents.publishAll(recorded);
     }
 
     /**
@@ -151,9 +160,10 @@ public class RegistrationApplicationService {
                 .toList();
         overdue.forEach(registration -> {
             registration.expire();
-            Registration saved = registrations.save(registration);
-            returnSeats(saved);
-            domainEvents.publishAll(saved.pullDomainEvents());
+            List<DomainEvent> recorded = registration.pullDomainEvents();
+            registrations.save(registration);
+            returnSeats(registration);
+            domainEvents.publishAll(recorded);
         });
         return overdue.size();
     }
