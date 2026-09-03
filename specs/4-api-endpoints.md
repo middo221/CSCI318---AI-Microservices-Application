@@ -32,15 +32,18 @@ Milestones: **M0** skeleton · **M1** catalogue and first event · **M2** the sa
 
 | Feature | Method | Endpoint Path | Request Body | Response (Success) | Inter-Service Dependencies |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **FR-06** | `POST` | `/registrations` | `CreateRegistrationRequest` | `201 Created` (`RegistrationResponse`) | emits `registration-requested` *(M2)* |
-| — | `GET` | `/registrations/{id}` | *None* | `200 OK` (`RegistrationResponse`) | None *(M2)* |
-| — | `GET` | `/attendees/{attendeeId}/registrations` | *None* | `200 OK` (`Array<RegistrationResponse>`) | None *(M2)* |
+| **FR-06** | `POST` | `/registrations` | `CreateRegistrationRequest` | `201 Created` (`RegistrationResponse`) | emits `registration-requested` and one `seats-reserved` per session |
+| — | `GET` | `/registrations/{id}` | *None* | `200 OK` (`RegistrationResponse`) | None |
+| — | `GET` | `/attendees/{attendeeId}/registrations` | *None* | `200 OK` (`Array<RegistrationResponse>`) | None |
 | **FR-11** | `POST` | `/registrations/{id}/refund-requests` | `RefundRequest` | `202 Accepted` (`RefundRequestResponse`) | emits `refund-requested` *(M3)* |
 | **FR-10** | `POST` | `/sessions/{sessionId}/waitlist` | `JoinWaitlistRequest` | `201 Created` (`WaitlistEntryResponse`) | emits `waitlist-joined` *(M3)* |
-| **FR-06** | `GET` | `/sessions/{sessionId}/availability` | *None* | `200 OK` (`SessionAvailabilityResponse`) | reads local `SessionView`, replicated from catalog events. `reservedSeats` is always `0` until M2 introduces seat holds. `404` until `session-added` has arrived |
+| **FR-06** | `GET` | `/sessions/{sessionId}/availability` | *None* | `200 OK` (`SessionAvailabilityResponse`) | reads local `SessionView`, replicated from catalog events. `reservedSeats` moves as seats are held and released. `404` until `session-added` has arrived |
 
-**Error responses:** `400`, `404` (`REGISTRATION_NOT_FOUND`, `SESSION_NOT_FOUND`), `409`
-(`SESSION_FULL`, `REGISTRATION_NOT_PENDING`).
+**Error responses:** `400` (`VALIDATION_FAILED`, `INVALID_REQUEST`), `404`
+(`REGISTRATION_NOT_FOUND`, `SESSION_NOT_FOUND`), `409` (`SESSION_FULL`).
+
+`SESSION_FULL` refuses the **whole** registration in M2. Design section 6.3 routes a full session
+to the waitlist, which is FR-10 and arrives in M3.
 
 ---
 

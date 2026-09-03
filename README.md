@@ -193,6 +193,35 @@ sequence runs.
 `session-capacity-changed` will hold **two** messages, not one: capacity is emitted at session
 creation as well as on the edit, so the topic carries the complete history every consumer needs.
 
+### The M2 walkthrough — the registration saga
+
+Start Kafka and both services, then run:
+
+```bash
+./scripts/demo-m2.sh
+```
+
+It seeds a published session of capacity 10 and drives three registrations down the three paths a
+registration can take: one is paid for and confirmed, one has its card declined and is compensated,
+and one is never paid for at all and is swept away when its hold window elapses. Seat inventory
+moves and comes back each time.
+
+`payment-service` is still being built on another branch, so the script hand-injects the two events
+it will produce:
+
+```bash
+MSYS_NO_PATHCONV=1 docker exec -i converge-kafka /opt/kafka/bin/kafka-console-producer.sh   --bootstrap-server localhost:9092 --topic payment-succeeded   --property parse.key=true --property key.separator='|'
+```
+
+To watch the third path finish inside the demonstration, start registration with a short hold
+window. The service default is `PT2M` and the stated business rule is `PT15M`:
+
+```bash
+CONFERENCE_REGISTRATION_HOLD_WINDOW=PT20S ./mvnw spring-boot:run -pl registration-service
+```
+
+Add `--pause` to step through it in front of an audience.
+
 ## Troubleshooting
 
 **`bad interpreter: /bin/sh^M` when running `./mvnw`**
@@ -222,7 +251,7 @@ Docker Desktop is not running. Start it and wait for the whale icon to settle.
 | `docs/meetings/` | Weekly meeting minutes, Weeks 3–11 |
 | `docs/ai-collaboration-log.md` | Evidence for report Section 5 |
 | `docs/superpowers/` | Design specification and implementation plans |
-| `scripts/` | Demonstration scripts — `demo-m1.sh` runs the whole M1 walkthrough |
+| `scripts/` | Demonstration scripts — `demo-m1.sh` for the catalogue hop, `demo-m2.sh` for the saga |
 
 ## Project status
 
@@ -230,7 +259,7 @@ Docker Desktop is not running. Start it and wait for the whale icon to settle.
 | :--- | :--- | :--- |
 | M0 — Skeleton | 3–4 | ✅ Complete |
 | M1 — First event across a boundary | 5–6 | ✅ Complete |
-| M2 — The saga | 7–8 | ☐ |
+| M2 — The saga | 7–8 | 🟡 Registration half complete; payment and ticketing in progress |
 | M3 — Streams | 9–10 | ☐ |
 | M4 — Agents | 10–11 | ☐ |
 | M5 — Submission | 11–12 | ☐ |

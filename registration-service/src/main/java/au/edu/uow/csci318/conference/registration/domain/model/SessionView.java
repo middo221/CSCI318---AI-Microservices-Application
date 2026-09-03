@@ -7,6 +7,7 @@ import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 /**
  * Local replica of a catalogue session, maintained purely from events.
@@ -23,8 +24,15 @@ import jakarta.persistence.Table;
  * reverted. A row is therefore assembled from two independent messages and is only
  * {@link #isComplete() complete} once the description has arrived.
  *
- * <p>{@code reservedSeats} is written by this service alone and stays at zero until the
- * {@code Registration} aggregate arrives in M2.
+ * <p>{@code reservedSeats} is written by this service alone, in the same transaction as the
+ * {@link SeatHold} that caused it to move.
+ *
+ * <p><strong>Optimistic locking.</strong> The specification does not address concurrency, but this
+ * row is where the last-seat race lives: two simultaneous registrations would both read
+ * {@code reservedSeats}, both pass {@link #canAccommodate(int)}, and oversell the session. The
+ * {@code @Version} column makes the second write fail so the caller retries against the updated
+ * count. This is the only place in the context that knows the seat total, so it is the only place
+ * the race can honestly be closed.
  */
 @Entity
 @Table(name = "session_views")
@@ -52,6 +60,10 @@ public class SessionView {
 
     @Column(name = "reserved_seats", nullable = false)
     private int reservedSeats;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     @Embedded
     @AttributeOverrides({
@@ -94,6 +106,42 @@ public class SessionView {
     /** Written by this service as seats are held and released. Used from M2. */
     public void recordReservedSeats(int reservedSeats) {
         this.reservedSeats = reservedSeats;
+    }
+
+    /**
+     * Whether {@code quantity} more seats can be taken without exceeding capacity.
+     *
+     * <p>False while the session is over-subscribed by a capacity cut: existing holds are
+     * grandfathered, but no further seats may be taken until the session drains.
+     */
+    public boolean canAccommodate(int quantity) {
+        return quantity > 0 && reservedSeats + quantity <= capacity;
+    }
+
+    /**
+     * Takes {@code quantity} seats out of inventory.
+     *
+     * @throws IllegalStateException if the seats are not available, so the caller cannot oversell
+     *                               by ignoring {@link #canAccommodate(int)}
+     */
+    public void reserve(int quantity) {
+        if (!canAccommodate(quantity)) {
+            throw new IllegalStateException(
+                    "session " + sessionId + " cannot take " + quantity + " more seats: "
+                            + reservedSeats + " of " + capacity + " capacity already reserved");
+        }
+        reservedSeats += quantity;
+    }
+
+    /**
+     * Returns {@code quantity} seats to inventory.
+     *
+     * <p>Floored at zero rather than trusting the caller. A redelivered release that slipped past
+     * the idempotency guard would otherwise drive the count negative and silently inflate
+     * availability for every later reader.
+     */
+    public void release(int quantity) {
+        reservedSeats = Math.max(0, reservedSeats - quantity);
     }
 
     /** True once {@code session-added} has been applied and the row describes a real session. */

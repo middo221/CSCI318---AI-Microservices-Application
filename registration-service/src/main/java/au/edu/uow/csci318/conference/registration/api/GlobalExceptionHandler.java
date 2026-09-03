@@ -1,5 +1,7 @@
 package au.edu.uow.csci318.conference.registration.api;
 
+import au.edu.uow.csci318.conference.registration.domain.RegistrationNotFoundException;
+import au.edu.uow.csci318.conference.registration.domain.SessionFullException;
 import au.edu.uow.csci318.conference.registration.domain.SessionNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +29,23 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleSessionNotFound(SessionNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(new ApiError("SESSION_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(RegistrationNotFoundException.class)
+    public ResponseEntity<ApiError> handleRegistrationNotFound(RegistrationNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiError("REGISTRATION_NOT_FOUND", ex.getMessage()));
+    }
+
+    /**
+     * 409 rather than 400: the request was well formed and would have succeeded a moment earlier.
+     * Nothing the caller can correct in the payload will change the answer, so it is a conflict
+     * with the current state of the session, not a bad request.
+     */
+    @ExceptionHandler(SessionFullException.class)
+    public ResponseEntity<ApiError> handleSessionFull(SessionFullException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError("SESSION_FULL", ex.getMessage()));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

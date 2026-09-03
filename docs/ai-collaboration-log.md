@@ -212,3 +212,51 @@ than delegation.
 | **Decision** | **Modified** |
 | **Rationale** | (1) §6.3 routes full sessions to the waitlist, but the waitlist is FR-10 and scheduled for M3 — so in M2 the rule describes a destination that does not exist. Resolved by refusing a registration containing any full session outright with `409 SESSION_FULL`, which keeps the "at least one `SeatHold`" invariant honest and avoids a half-registration state M3 would have to unpick. (2) The specification does not address concurrency anywhere: two simultaneous registrations for the last seat both read `reservedSeats` before either writes, and oversell. Closed with optimistic locking on `SessionView`. Both follow the M1 precedent of recording a refinement in the plan rather than editing the read-only `specs/` set. |
 | **Artefact** | `private/STATUS.md` decision log; M2 implementation plan, "where this plan refines the spec" |
+
+---
+
+## 2026-09-03 — AI-written saga code passed 121 tests and never reached the broker
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Implementation, integration testing (M2) |
+| **What was asked** | Implement the registration half of the orchestrated saga: hold seats on request, confirm on payment success, compensate on payment failure and on hold expiry |
+| **What was proposed** | A `Registration` aggregate recording domain events, drained by the application service and published after commit — the pattern already proven in the Programme context |
+| **Decision** | **Modified after live verification** |
+| **Rationale** | The whole suite passed, 121 tests in the module, and the saga behaved correctly through every endpoint. The first live run then wrote **zero** `registration-requested` and **zero** `seats-reserved` messages, while `registration-confirmed`, `seats-released`, `registration-cancelled` and `registration-expired` all landed. `payment-service` would never have seen a single registration. The cause: `Registration` is created with its id already assigned, so Spring Data treats it as not-new, `save()` takes the `merge` path, and returns a *different* managed copy — and recorded events live in a `@Transient` field the copy does not carry. Draining the return value of `save()` yielded an empty list. The later transitions worked only by accident, because they load the aggregate first and `merge` then returns the same managed instance. Fixed by draining the aggregate that was actually mutated. **This is the second defect of exactly this shape in the project**, after the M1 key serialiser: green suite, silent broker, caught only by running it. |
+| **Artefact** | `docs/verification/2026-m2-registration-saga.md`; `RegistrationApplicationService`; regression test `RegistrationRequestPublishingTest` |
+
+---
+
+## 2026-09-03 — Why the test suite could not have caught it, and what was added instead
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Testing strategy |
+| **What was asked** | Add a regression test for the merge-copy defect above |
+| **What was proposed** | A test exercising the use case through the **real JPA repository** rather than the in-memory fake the existing application-service test uses |
+| **Decision** | **Accepted** |
+| **Rationale** | Worth recording because the diagnosis is more useful than the fix. The existing fake repository's `save` returns the instance it was handed, so it is *structurally incapable* of reproducing a merge copy — the double was faithful to the interface and unfaithful to the implementation behind it. The answer was not more tests but a test at the right level. The fake was kept, because it is still the best way to assert that a refused registration writes nothing and publishes nothing, which is awkward to prove against a real database. The general lesson for the report: choose the level of a test by what can go wrong at that level, not by what is convenient to assert. |
+| **Artefact** | `RegistrationRequestPublishingTest`, which fails without the fix on exactly the two assertions that matter |
+
+---
+
+## 2026-09-03 — Optimistic locking added on judgement, and immediately earned it
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Design refinement, implementation (M2) |
+| **What was asked** | Implement seat allocation against the local `SessionView` replica |
+| **What was proposed** | A `@Version` column on `SessionView`, beyond what the specification asks for |
+| **Decision** | **Accepted** |
+| **Rationale** | The specification does not address concurrency anywhere, but the replica row is exactly where the last-seat race lives: two simultaneous registrations both read `reservedSeats`, both pass the capacity check, and the session oversells. Worth recording because the addition paid for itself within the hour — the version column failed the first controller test run, and the cause was a real test-isolation bug: `@SpringBootTest` is not transactional, rows outlive each method, and the setup was saving a fresh version-0 instance over a row a previous test had already bumped. It failed loudly instead of silently overwriting, which is precisely the behaviour it was added for. |
+| **Artefact** | `SessionView`; `RegistrationControllerTest` setup; M2 plan, "where this plan refines the spec" |
