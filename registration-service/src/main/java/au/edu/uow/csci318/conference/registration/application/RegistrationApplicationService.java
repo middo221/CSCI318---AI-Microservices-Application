@@ -104,6 +104,74 @@ public class RegistrationApplicationService {
         return views;
     }
 
+    /**
+     * Confirms a registration whose payment succeeded (FR-08).
+     *
+     * <p>Seat counts on the replica are deliberately left alone: the seats were taken when the
+     * hold was created and they stay taken. Only the hold's status changes.
+     *
+     * @throws RegistrationNotFoundException if the id is unknown
+     * @throws IllegalStateException         if the registration is no longer awaiting payment
+     */
+    @Transactional
+    public void confirmPaid(String registrationId) {
+        Registration registration = findById(registrationId);
+        registration.confirm();
+        Registration saved = registrations.save(registration);
+        domainEvents.publishAll(saved.pullDomainEvents());
+    }
+
+    /**
+     * Cancels a registration whose payment failed and returns its seats (FR-09).
+     *
+     * @throws RegistrationNotFoundException if the id is unknown
+     * @throws IllegalStateException         if the registration is no longer awaiting payment
+     */
+    @Transactional
+    public void cancelUnpaid(String registrationId) {
+        Registration registration = findById(registrationId);
+        registration.cancel();
+        Registration saved = registrations.save(registration);
+        returnSeats(saved);
+        domainEvents.publishAll(saved.pullDomainEvents());
+    }
+
+    /**
+     * Expires every registration whose hold window has elapsed without payment (FR-09).
+     *
+     * <p>Candidates are selected by status in the query and filtered by clock in the domain, so
+     * {@link Registration#isExpiredAt} stays the only definition of expired.
+     *
+     * @return how many registrations were expired
+     */
+    @Transactional
+    public int expireOverdue(Instant now) {
+        List<Registration> overdue = registrations.findPendingPayment().stream()
+                .filter(registration -> registration.isExpiredAt(now))
+                .toList();
+        overdue.forEach(registration -> {
+            registration.expire();
+            Registration saved = registrations.save(registration);
+            returnSeats(saved);
+            domainEvents.publishAll(saved.pullDomainEvents());
+        });
+        return overdue.size();
+    }
+
+    /**
+     * Returns the seats a registration was holding to the replica.
+     *
+     * <p>Reads each view fresh rather than reusing one loaded earlier in the request, so the
+     * release is applied to the current version and cannot clobber a concurrent reservation.
+     */
+    private void returnSeats(Registration registration) {
+        registration.getSeatHolds().forEach(hold ->
+                sessions.findById(hold.getSessionId()).ifPresent(view -> {
+                    view.release(hold.getQuantity());
+                    sessions.save(view);
+                }));
+    }
+
     @Transactional(readOnly = true)
     public Registration findById(String registrationId) {
         return registrations.findById(registrationId)
