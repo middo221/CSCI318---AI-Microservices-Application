@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SessionViewTest {
 
@@ -76,5 +77,77 @@ class SessionViewTest {
         assertThat(view.getAvailableSeats())
                 .as("a reduction grandfathers existing holds rather than revoking them")
                 .isZero();
+    }
+
+    @Test
+    void accommodatesARequestThatFitsInsideTheRemainingSeats() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.setCapacity(10);
+        view.reserve(8);
+
+        assertThat(view.canAccommodate(2)).isTrue();
+        assertThat(view.canAccommodate(3)).isFalse();
+    }
+
+    @Test
+    void reservingSeatsLowersWhatIsAvailable() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.setCapacity(120);
+
+        view.reserve(2);
+
+        assertThat(view.getReservedSeats()).isEqualTo(2);
+        assertThat(view.getAvailableSeats()).isEqualTo(118);
+    }
+
+    @Test
+    void releasingSeatsReturnsThemToInventory() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.setCapacity(120);
+        view.reserve(5);
+
+        view.release(2);
+
+        assertThat(view.getReservedSeats()).isEqualTo(3);
+        assertThat(view.getAvailableSeats()).isEqualTo(117);
+    }
+
+    @Test
+    void neverReleasesMoreSeatsThanAreHeld() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.setCapacity(120);
+        view.reserve(2);
+
+        view.release(5);
+
+        assertThat(view.getReservedSeats())
+                .as("a double release must not drive the count negative")
+                .isZero();
+    }
+
+    @Test
+    void refusesToReserveBeyondCapacity() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.setCapacity(3);
+
+        assertThatThrownBy(() -> view.reserve(4))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("capacity");
+    }
+
+    /**
+     * A capacity cut below the number already held is accepted — spec 5.1 grandfathers existing
+     * holds — but no further seats may be taken while the session is over-subscribed.
+     */
+    @Test
+    void acceptsNoNewSeatsWhileOverSubscribedByACapacityCut() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.setCapacity(120);
+        view.reserve(100);
+
+        view.setCapacity(50);
+
+        assertThat(view.canAccommodate(1)).isFalse();
+        assertThat(view.getAvailableSeats()).isZero();
     }
 }
