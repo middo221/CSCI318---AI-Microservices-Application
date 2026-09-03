@@ -45,6 +45,18 @@ public class ScriptedChatModel implements ChatModel {
         return this;
     }
 
+    /**
+     * Clear the script and the recorded requests.
+     *
+     * <p>Needed because Spring caches the application context across test methods, so the same
+     * instance is reused. Without this, one test method's leftover script drives the next.
+     */
+    public ScriptedChatModel reset() {
+        script.clear();
+        requests.clear();
+        return this;
+    }
+
     /** Every request LangChain4j sent, in order. */
     public List<ChatRequest> requests() {
         return List.copyOf(requests);
