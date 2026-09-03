@@ -3,6 +3,9 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
+>
+> **Status: Tasks 1-8 complete on `feat/m4-agenda-builder`. Task 9, the live Gemini run,
+> is outstanding and needs an API key.**
 
 **Goal:** Deliver FR-17 — an attendee describes their interests in free text and receives a
 personalised, **provably clash-free** conference agenda, assembled by a LangChain4j tool-calling
@@ -100,9 +103,13 @@ five tools call endpoints that do not exist yet: `payment GET /refund-policy/quo
 only on catalog `/sessions/search` and registration `/sessions/{id}/availability` and
 `/attendees/{id}/registrations`, all three of which are merged on `main` and live today.
 
-**7. `maxSequentialToolsInvocations(12)` is set explicitly.** A ReAct loop against a real model
-can otherwise call tools until the token budget runs out. Twelve is roughly three searches, six
-availability checks and a clash check, with headroom.
+**7. `maxToolCallingRoundTrips(12)` is set explicitly.** A ReAct loop against a real model can
+otherwise call tools until the token budget runs out. Twelve is roughly three searches, six
+availability checks, a clash check and the final answer, with headroom.
+
+Note for anyone following an older LangChain4j example: `maxSequentialToolsInvocations` is the
+obvious-looking method and it is **deprecated** in 1.19.0. The build compiles with
+`-Dmaven.compiler.showDeprecation=true` clean, which is how this was caught.
 
 ---
 
@@ -165,14 +172,14 @@ LangChain4j, no HTTP.
 
 **Files:** Modify `concierge-service/pom.xml`.
 
-- [ ] **Step 1:** Add `dev.langchain4j:langchain4j` and
+- [x] **Step 1:** Add `dev.langchain4j:langchain4j` and
       `dev.langchain4j:langchain4j-google-ai-gemini` with **no** `<version>` (BOM-managed), and
       `dev.langchain4j:langchain4j-google-ai-gemini-spring-boot-starter` with
       `<version>${langchain4j-spring.version}</version>` (refinement 1).
-- [ ] **Step 2:** `./mvnw -q -pl concierge-service -am test` → the existing
+- [x] **Step 2:** `./mvnw -q -pl concierge-service -am test` → the existing
       `ConciergeApplicationTest` must still pass. If it fails, the starter is auto-configuring
       something that needs a key and refinement 4 is wrong — stop and re-check.
-- [ ] **Step 3: Commit.** `chore: put LangChain4j on the concierge classpath`
+- [x] **Step 3: Commit.** `chore: put LangChain4j on the concierge classpath`
 
 ---
 
@@ -191,15 +198,15 @@ LangChain4j, no HTTP.
   `ClashDetector.clashFreePrefix(List<SessionSummary>) -> List<SessionSummary>`, which keeps the
   first of any overlapping pair in the order given.
 
-- [ ] **Step 1: Write the failing tests.** `TimeSlot` rejects nulls and a non-positive span;
+- [x] **Step 1: Write the failing tests.** `TimeSlot` rejects nulls and a non-positive span;
       touching slots do not overlap; overlapping and contained slots do. `ClashDetector` finds
       nothing in a disjoint programme, finds one clash in an overlapping pair, finds three in a
       mutually-overlapping triple, and `clashFreePrefix` keeps the earlier-listed session.
-- [ ] **Step 2: Run to verify failure.** `./mvnw -q -pl concierge-service -am test` → FAIL,
+- [x] **Step 2: Run to verify failure.** `./mvnw -q -pl concierge-service -am test` → FAIL,
       cannot find symbol.
-- [ ] **Step 3: Implement** the six files. `ClashDetector` is a plain class with no annotations.
-- [ ] **Step 4: Run to verify green.**
-- [ ] **Step 5: Commit.** `feat: add concierge domain model and deterministic clash detection`
+- [x] **Step 3: Implement** the six files. `ClashDetector` is a plain class with no annotations.
+- [x] **Step 4: Run to verify green.**
+- [x] **Step 5: Commit.** `feat: add concierge domain model and deterministic clash detection`
 
 ---
 
@@ -228,15 +235,15 @@ The wire records mirror `SessionResponse`, `SessionAvailabilityResponse` and
 A `404` from availability becomes `Optional.empty()`, not an exception: a session the registration
 replica has not yet seen is a normal condition, not a failure.
 
-- [ ] **Step 1: Write the failing tests** with `MockRestServiceServer.bindTo(RestClient.Builder)`.
+- [x] **Step 1: Write the failing tests** with `MockRestServiceServer.bindTo(RestClient.Builder)`.
       Assert the exact outgoing URI including query parameters, that null facets are omitted from
       the query string, that the JSON maps onto the domain types, and that a 404 on availability
       yields an empty `Optional`.
-- [ ] **Step 2: Run to verify failure.**
-- [ ] **Step 3: Implement.** Both clients take `RestClient.Builder` in the constructor so the mock
+- [x] **Step 2: Run to verify failure.**
+- [x] **Step 3: Implement.** Both clients take `RestClient.Builder` in the constructor so the mock
       server can bind to it.
-- [ ] **Step 4: Run to verify green.**
-- [ ] **Step 5: Commit.** `feat: add concierge REST adapters for catalogue and registration`
+- [x] **Step 4: Run to verify green.**
+- [x] **Step 5: Commit.** `feat: add concierge REST adapters for catalogue and registration`
 
 ---
 
@@ -261,16 +268,16 @@ what `AgendaApplicationService` later resolves proposed ids against (refinement 
 `detectTimeClashes` resolves its ids against the dossier too, and ignores ids it has not seen —
 the agent cannot ask about a session it never searched for.
 
-- [ ] **Step 1: Write the failing tests** against fake in-memory ports. `searchSessions` populates
+- [x] **Step 1: Write the failing tests** against fake in-memory ports. `searchSessions` populates
       the dossier and passes its facets through; a repeated search does not duplicate dossier
       entries; `detectTimeClashes` returns a clash for two overlapping searched sessions and an
       empty list for an unknown id; `getSessionAvailability` degrades to a marker rather than
       throwing when the replica returns empty.
-- [ ] **Step 2: Run to verify failure.**
-- [ ] **Step 3: Implement.** `AgendaTools` is a plain object, not a bean; `AgendaToolsFactory` is
+- [x] **Step 2: Run to verify failure.**
+- [x] **Step 3: Implement.** `AgendaTools` is a plain object, not a bean; `AgendaToolsFactory` is
       the `@Component` that mints them (refinement 5).
-- [ ] **Step 4: Run to verify green.**
-- [ ] **Step 5: Commit.** `feat: add the agenda builder tool surface`
+- [x] **Step 4: Run to verify green.**
+- [x] **Step 5: Commit.** `feat: add the agenda builder tool surface`
 
 ---
 
@@ -301,19 +308,19 @@ propose a session that is full, call `detectTimeClashes` before answering, and r
 ids that came back from a search. It is a *prompt*, so none of it is a guarantee — the guarantees
 are in Tasks 2 and 6.
 
-- [ ] **Step 1: Write the failing test.** A `ScriptedChatModel` test double implementing
+- [x] **Step 1: Write the failing test.** A `ScriptedChatModel` test double implementing
       `ChatModel.chat(ChatRequest)` and returning a queued sequence of `ChatResponse`s: first an
       `AiMessage` carrying a `searchSessions` `ToolExecutionRequest`, then one carrying
       `detectTimeClashes`, then a final `AiMessage` holding the `ProposedAgenda` JSON. Build the
       agent with `AiServices.builder(AgendaBuilder.class).chatModel(stub).tools(tools).build()`
       and assert **which tools were invoked, in which order, with which arguments**, and that the
       JSON parsed into `ProposedAgenda`. No network, no key.
-- [ ] **Step 2: Run to verify failure.**
-- [ ] **Step 3: Implement.** `LangChain4jAgendaAgentFactory` takes `ObjectProvider<ChatModel>`; on
+- [x] **Step 2: Run to verify failure.**
+- [x] **Step 3: Implement.** `LangChain4jAgendaAgentFactory` takes `ObjectProvider<ChatModel>`; on
       `getIfAvailable() == null` it throws `LlmUnavailableException` (refinement 4). Set
-      `.maxSequentialToolsInvocations(12)` (refinement 7).
-- [ ] **Step 4: Run to verify green.**
-- [ ] **Step 5: Commit.** `feat: add the agenda builder agent and its LangChain4j wiring`
+      `.maxToolCallingRoundTrips(12)` (refinement 7).
+- [x] **Step 4: Run to verify green.**
+- [x] **Step 5: Commit.** `feat: add the agenda builder agent and its LangChain4j wiring`
 
 ---
 
@@ -334,16 +341,16 @@ are in Tasks 2 and 6.
 4. Truncate to `conference.concierge.max-agenda-items`.
 5. Return `AgendaResult(attendeeId, items, notes, summary)`.
 
-- [ ] **Step 1: Write the failing tests.** With a scripted model that proposes: (a) a clean
+- [x] **Step 1: Write the failing tests.** With a scripted model that proposes: (a) a clean
       agenda — passes through in order; (b) two overlapping sessions — the second is dropped and
       a note names both; (c) a hallucinated id never searched for — dropped with a note;
       (d) an agenda where the model **never called `detectTimeClashes` at all** and returned an
       overlapping pair — still clash-free, which is the test that makes refinement 2 real;
       (e) more items than the cap — truncated.
-- [ ] **Step 2: Run to verify failure.**
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run to verify green.**
-- [ ] **Step 5: Commit.** `feat: enforce clash-freeness and fact provenance on the agenda`
+- [x] **Step 2: Run to verify failure.**
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run to verify green.**
+- [x] **Step 5: Commit.** `feat: enforce clash-freeness and fact provenance on the agenda`
 
 ---
 
@@ -360,29 +367,29 @@ are in Tasks 2 and 6.
 `400 VALIDATION_FAILED`, `502 LLM_UNAVAILABLE`, `504 LLM_TIMEOUT` (mapping
 `dev.langchain4j.exception.TimeoutException`).
 
-- [ ] **Step 1: Write the failing tests.** `@SpringBootTest` + MockMvc. A `@TestConfiguration`
+- [x] **Step 1: Write the failing tests.** `@SpringBootTest` + MockMvc. A `@TestConfiguration`
       supplies a scripted `ChatModel` bean and stub ports; assert `200` and the JSON shape. A
       blank `interests` gives `400 VALIDATION_FAILED`. A second test class with **no** `ChatModel`
       bean asserts `502 LLM_UNAVAILABLE` — this is the offline contract from refinement 4.
-- [ ] **Step 2: Run to verify failure.**
-- [ ] **Step 3: Implement**, including the `application.yml` block.
-- [ ] **Step 4: Run to verify green.**
-- [ ] **Step 5: Commit.** `feat: expose POST /api/v1/concierge/agenda`
+- [x] **Step 2: Run to verify failure.**
+- [x] **Step 3: Implement**, including the `application.yml` block.
+- [x] **Step 4: Run to verify green.**
+- [x] **Step 5: Commit.** `feat: expose POST /api/v1/concierge/agenda`
 
 ---
 
 ### Task 8: Full-suite regression and documentation
 
-- [ ] **Step 1:** `./mvnw clean test` from the repository root, **Docker stopped**, and with
+- [x] **Step 1:** `./mvnw clean test` from the repository root, **Docker stopped**, and with
       `GEMINI_API_KEY` unset. Every module must be green.
-- [ ] **Step 2:** Confirm the domain layer is pure — a recursive grep for `langchain4j` and
+- [x] **Step 2:** Confirm the domain layer is pure — a recursive grep for `langchain4j` and
       `springframework` under `concierge-service/src/main/java/**/domain/` returns nothing.
-- [ ] **Step 3:** Do **not** edit `specs/` — it is read-only. Record the delivered endpoint in the
+- [x] **Step 3:** Do **not** edit `specs/` — it is read-only. Record the delivered endpoint in the
       verification note instead.
-- [ ] **Step 4:** Write `docs/verification/2026-m4-agenda-builder.md` with real pasted output,
+- [x] **Step 4:** Write `docs/verification/2026-m4-agenda-builder.md` with real pasted output,
       following `docs/verification/2026-m2-registration-saga.md`.
-- [ ] **Step 5:** Append a `docs/ai-collaboration-log.md` entry covering refinements 2, 3 and 4.
-- [ ] **Step 6: Commit.** `docs: record M4 Agent 1 verification and design refinements`
+- [x] **Step 5:** Append a `docs/ai-collaboration-log.md` entry covering refinements 2, 3 and 4.
+- [x] **Step 6: Commit.** `docs: record M4 Agent 1 verification and design refinements`
 
 ---
 
@@ -402,16 +409,16 @@ Deferred to a session with `GEMINI_API_KEY` present. Recorded here so it is not 
 
 ## Definition of Done
 
-- [ ] `./mvnw clean test` green with Docker stopped, no network and **no `GEMINI_API_KEY`**
-- [ ] FR-17 delivered behind `POST /api/v1/concierge/agenda`
-- [ ] All four tools implemented, each covered by a test asserting arguments as well as results
-- [ ] The agent loop is tested with a stubbed `ChatModel` — no live call in the default build
-- [ ] **An agenda is clash-free even when the model never calls `detectTimeClashes`**
-- [ ] **A session id the agent never searched for cannot appear in the response**
-- [ ] Missing `ChatModel` yields `502 LLM_UNAVAILABLE`, not a context failure
-- [ ] `concierge-service/src/main/java/**/domain/` imports neither Spring nor LangChain4j
-- [ ] `.env.example` documents `GEMINI_API_KEY`; no key anywhere in the repository
-- [ ] Verification note written; live run against Gemini deferred to Task 9 and marked as such
+- [x] `./mvnw clean test` green with Docker stopped, no network and **no `GEMINI_API_KEY`**
+- [x] FR-17 delivered behind `POST /api/v1/concierge/agenda`
+- [x] All four tools implemented, each covered by a test asserting arguments as well as results
+- [x] The agent loop is tested with a stubbed `ChatModel` — no live call in the default build
+- [x] **An agenda is clash-free even when the model never calls `detectTimeClashes`**
+- [x] **A session id the agent never searched for cannot appear in the response**
+- [x] Missing `ChatModel` yields `502 LLM_UNAVAILABLE`, not a context failure
+- [x] `concierge-service/src/main/java/**/domain/` imports neither Spring nor LangChain4j
+- [x] `.env.example` documents `GEMINI_API_KEY`; no key anywhere in the repository
+- [x] Verification note written; live run against Gemini deferred to Task 9 and marked as such
 
 ## Deferred
 
