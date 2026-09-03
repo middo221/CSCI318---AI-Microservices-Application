@@ -34,6 +34,21 @@ spring:
       kafka:
         binder:
           brokers: localhost:9092
+          # The binder defaults key.serializer to ByteArraySerializer, but
+          # DomainEvent.partitionKey() is a String, so every send fails with a
+          # SerializationException. The test binder moves the message in-JVM and never invokes a
+          # serialiser, so no test can catch this - only a live broker can, and it did, in M1.
+          # Serialising keys as strings also keeps them readable in Kafka UI, which the
+          # demonstration depends on.
+          producer-properties:
+            key.serializer: org.apache.kafka.common.serialization.StringSerializer
+
+conference:
+  registration:
+    # The stated business rule is 15 minutes. PT2M is the demo default, because hold expiry
+    # cannot be shown inside a ten-minute presentation otherwise. Tests override it to PT0.5S.
+    hold-window: PT2M
+    sweep-interval: PT10S
 
 logging:
   level:
