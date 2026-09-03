@@ -165,3 +165,50 @@ than delegation.
 | **Decision** | **Modified** |
 | **Rationale** | The check fails on a *correct* codebase: it matches Javadoc prose, the `CatalogEventConsumers` class name and the phrase "catalogue replica". Replaced with checks for what actually matters — no `RestTemplate`/`RestClient`/`WebClient` anywhere in the service, no catalog URL in `application.yml`, and no POM dependency on the catalog module. All three are clean. Recorded rather than quietly corrected, because a check that cries wolf gets ignored, and an ignored check is worse than no check at all. |
 | **Artefact** | `docs/verification/2026-m1-catalogue-replication.md` |
+
+---
+
+## 2026-09-03 — Planning review found an unowned service in the team's own work split
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Project planning, work allocation |
+| **What was asked** | Write an implementation plan for the concierge agents, to be built on a branch in parallel with two teammates taking ticketing and payment |
+| **Decision** | **Modified** — the plan was not written; the allocation was corrected first |
+| **Rationale** | Mapping each agent tool to its backing endpoint showed that only three of the nine had one, and tracing the rest surfaced a defect in the team's own split rather than in the design: with three members on concierge, ticketing and payment, **`registration-service` had no owner** — and it is the saga orchestrator. Payment consumes `registration-requested` and ticketing consumes `registration-confirmed`, so both members would have spent a week building services that consume events nobody emits. The split was corrected before any branch was created. Worth recording because the error was in a human plan and was caught by mechanically checking a dependency chain, which is the inverse of the usual direction in this log. |
+| **Artefact** | `private/STATUS.md` risk table and decision log, 2026-09-03 |
+
+---
+
+## 2026-09-03 — One branch decomposed into two before any code was written
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Implementation planning |
+| **What was asked** | Plan a single branch covering both the registration saga and the concierge agents, after registration was absorbed into one member's scope |
+| **What was proposed** | Two branches and two plans instead of one |
+| **Decision** | **Accepted** |
+| **Rationale** | The two share no code, bounded context, technology or milestone — one is JPA aggregates and a Kafka saga, the other a LangChain4j anti-corruption layer over REST. The decisive argument was not tidiness but throughput: the registration saga is what unblocks the other two members, so holding it behind concierge in a shared branch would have kept both of them waiting for work they did not need. Split, the saga reaches `main` in days while concierge continues independently. |
+| **Artefact** | `private/STATUS.md` decision log, 2026-09-03 |
+
+---
+
+## 2026-09-03 — A specification rule that could not hold in the milestone that needed it
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-03 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Fable 5) |
+| **SDLC phase** | Design refinement during implementation planning (M2) |
+| **What was asked** | Design the seat-allocation path for `POST /registrations` per design §6.3 |
+| **What was proposed** | Two refinements to the approved design, both recorded rather than silently applied |
+| **Decision** | **Modified** |
+| **Rationale** | (1) §6.3 routes full sessions to the waitlist, but the waitlist is FR-10 and scheduled for M3 — so in M2 the rule describes a destination that does not exist. Resolved by refusing a registration containing any full session outright with `409 SESSION_FULL`, which keeps the "at least one `SeatHold`" invariant honest and avoids a half-registration state M3 would have to unpick. (2) The specification does not address concurrency anywhere: two simultaneous registrations for the last seat both read `reservedSeats` before either writes, and oversell. Closed with optimistic locking on `SessionView`. Both follow the M1 precedent of recording a refinement in the plan rather than editing the read-only `specs/` set. |
+| **Artefact** | `private/STATUS.md` decision log; M2 implementation plan, "where this plan refines the spec" |
