@@ -89,6 +89,10 @@ class RegistrationTest {
                     assertThat(confirmed.registrationId()).isEqualTo("reg-1");
                     assertThat(confirmed.attendeeId()).isEqualTo("att-1042");
                     assertThat(confirmed.sessionIds()).containsExactly("ses-1", "ses-2");
+                    // Ticketing names a holder on every ticket it issues and has no other source
+                    // for these two, so a confirmation that omitted them would issue no tickets.
+                    assertThat(confirmed.attendeeName()).isEqualTo("Dana");
+                    assertThat(confirmed.attendeeEmail()).isEqualTo("dana@example.com");
                 });
     }
 

@@ -167,7 +167,8 @@ public class Registration {
      *
      * <p>Records a {@code RegistrationConfirmed} carrying every session id, because
      * {@code ticketing-service} issues one ticket per session and holds no replica of the
-     * programme to look them up in.
+     * programme to look them up in. The attendee's name and email travel for the same reason:
+     * ticketing names a holder on every ticket it issues and has no other source for them.
      *
      * @throws IllegalStateException if the registration is not awaiting payment
      */
@@ -180,6 +181,8 @@ public class Registration {
                 Instant.now(),
                 id,
                 attendee.attendeeId(),
+                attendee.name(),
+                attendee.email(),
                 conferenceEventId,
                 heldSessionIds()));
     }

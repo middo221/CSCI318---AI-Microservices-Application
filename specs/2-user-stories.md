@@ -14,7 +14,7 @@ planned**, and it is maintained by hand.
 | `[~]` | Partially delivered — one side of the story exists, the other does not |
 | `[ ]` | Not started |
 
-**Last checked against the code:** 2026-09-03 — 8 delivered, 1 partial, 9 not started.
+**Last checked against the code:** 2026-09-11 — 10 delivered, 1 partial, 7 not started.
 
 ### Updating these checkboxes is part of delivering a story
 
@@ -51,8 +51,8 @@ crosses a service boundary is delivered when it has been observed crossing it.
 | **Registration** | FR-10 | Join a waitlist for a full session | Attendee | | `[ ]` |
 | **Payment** | FR-07 | Pay for a registration and receive a ticket | Attendee | | `[ ]` |
 | **Payment** | FR-11 | Request a refund | Attendee | | `[ ]` |
-| **Ticketing** | FR-12 | Transfer a ticket to another person | Attendee | | `[ ]` |
-| **Ticketing** | FR-13 | Check in at a gate | Gate staff, Attendee | | `[ ]` |
+| **Ticketing** | FR-12 | Transfer a ticket to another person | Attendee | | `[x]` |
+| **Ticketing** | FR-13 | Check in at a gate | Gate staff, Attendee | | `[x]` |
 | **System** | FR-08 | Confirm registration and issue tickets on payment | *(system)* | | `[~]` |
 | **System** | FR-09 | Release seats on payment failure or hold expiry | *(system)* | | `[x]` |
 | **Analytics** | FR-14 | View live per-session fill rate | Organiser | **Real-time** | `[ ]` |
@@ -160,29 +160,45 @@ crosses a service boundary is delivered when it has been observed crossing it.
 ## Ticketing Service
 
 ### FR-12: Transfer a ticket to another person
-- [ ] **Not started** — `ticketing-service` is still an empty skeleton (`TicketingApplication`
-  only). Unblocked: `registration-confirmed` is live on the broker.
+- [x] **Delivered** — `POST /api/v1/tickets/{ticketCode}/transfer` on `TicketController`, over the
+  `Ticket` aggregate's `transferTo`. History is an append-only `List<TransferRecord>` behind an
+  unmodifiable getter; emits `ticket-transferred`.
 - **As an** Attendee, **I want to** transfer a ticket to somebody else, **so that** my seat is
   not wasted when I cannot attend.
 - **Acceptance:** a void ticket cannot be transferred; transfer history is append-only.
+- **Refinement:** a ticket that has already been checked in cannot be transferred either, and is
+  refused with the existing `409 ALREADY_CHECKED_IN`. The story names only void tickets, but
+  `USED` → `TRANSFERRED` would erase the record that somebody already walked through a gate on
+  that code. See `docs/superpowers/plans/2026-09-11-m2-ticketing-service.md`.
 
 ### FR-13: Check in at a gate
-- [ ] **Not started** — and note FR-16 cannot be built until this exists, because the
-  `attendee-checked-in` events it windows are produced here.
+- [x] **Delivered** — `POST /api/v1/gates/{gateId}/check-ins` on `GateController`, guarded by the
+  `CheckInPolicy` domain service and again by the aggregate. Emits `attendee-checked-in` keyed by
+  `sessionId`, carrying both timestamps — **this unblocks FR-16.**
 - **As** Gate staff, **I want to** check an attendee in against their ticket code, **so that**
   entry is controlled and attendance is recorded.
 - **Acceptance:** void tickets are rejected; a ticket may be checked in at most once. The
   check-in records both `queuedAt` and `checkedInAt`, which is what makes FR-16 possible.
+- **Refinement:** `CheckInPolicy` enforces two of its three specified rules. The third — refusing
+  check-ins outside the session's time window — needs programme data the Access context has no
+  source for: it owns no read replica, consumes no `session-added`, and `registration-confirmed`
+  carries session ids only. The two implemented rules are exactly this story's acceptance
+  criteria. Closing the gap needs either a replica in `ticketdb` or a session window on the
+  confirmation payload, and both are group decisions.
 
 ---
 
 ## System Stories
 
 ### FR-08: Confirm registration and issue tickets on payment
-- [~] **Half delivered.** The confirmation half is done: `PaymentEventConsumers` consumes
-  `payment-succeeded` and emits `registration-confirmed`, live-verified in
-  `docs/verification/2026-m2-registration-saga.md`. **Ticket issuance is not** — nothing consumes
-  `registration-confirmed` and no `ticket-issued` event is ever emitted. Completed by FR-12/FR-13.
+- [~] **Both halves implemented; the hop is not yet live-verified.** Confirmation:
+  `PaymentEventConsumers` emits `registration-confirmed`, live-verified in
+  `docs/verification/2026-m2-registration-saga.md`. Issuance:
+  `RegistrationEventConsumers.registrationConfirmed` now consumes it and issues one `Ticket` per
+  session, emitting a `ticket-issued` per ticket — proven with the Spring Cloud Stream test binder
+  in `RegistrationEventConsumersTest`, but **not yet observed crossing a live broker.** This file
+  is explicit that a green suite is not enough for a story that crosses a service boundary, so it
+  stays `[~]` until the verification note under `docs/verification/` exists.
 - **As the** System, **I want to** confirm the registration and issue one ticket per confirmed
   session when payment succeeds, **so that** the attendee receives what they paid for.
 
@@ -214,7 +230,9 @@ crosses a service boundary is delivered when it has been observed crossing it.
 - **Acceptance:** each session alerts **once**, not on every subsequent reservation.
 
 ### FR-16: Monitor gate throughput and queue congestion
-- [ ] **Not started** — M3, and **blocked on FR-13**: no service emits `attendee-checked-in` yet.
+- [ ] **Not started** — M3. **No longer blocked:** FR-13 landed, so `ticketing-service` now emits
+  `attendee-checked-in` keyed by `sessionId`, carrying both `queuedAt` and `checkedInAt` so the
+  wait is derivable from the event alone. The RT2 topology still has to re-key to `gateId` itself.
 - **As an** Organiser, **I want to** see check-ins per minute and average wait per gate,
   **so that** I can open another gate before a queue delays the schedule.
 - **Implementation:** one-minute tumbling window keyed by gate. See §RT2.
@@ -236,9 +254,10 @@ crosses a service boundary is delivered when it has been observed crossing it.
   **must** call the deterministic `detectTimeClashes` tool before proposing an agenda.
 
 ### FR-18: Raise a support request handled by an agent
-- [ ] **Not started — blocked.** Its tools need three endpoints that do not exist yet: ticketing
-  `GET /registrations/{id}/tickets` (FR-12), payment `GET /refund-policy/quote` (FR-11) and
-  registration `POST /refund-requests` (FR-11).
+- [ ] **Not started — still blocked, but less so.** Of the three endpoints its tools need,
+  ticketing `GET /registrations/{id}/tickets` now exists, so the `lookupTicket` tool is unblocked.
+  Payment `GET /refund-policy/quote` and registration `POST /refund-requests` are still missing,
+  both behind FR-11.
 - **As an** Attendee, **I want to** describe my problem in plain English and have it resolved
   or escalated, **so that** I do not wait on a volunteer reading a policy document.
 - **Sample input:** *"I've been hospitalised and can't attend next week. Can I get my money

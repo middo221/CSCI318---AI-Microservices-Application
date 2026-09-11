@@ -87,6 +87,20 @@ events land. `registration-cancelled` is deliberately **not** consumed either: `
 runs only from `PENDING_PAYMENT`, so a cancelled registration never had tickets, and the consumer
 would be a permanent no-op that misleads the next reader.
 
+**6. `Ticket` stores `attendeeId`,** which specification section 5.1's field list does not include.
+`TicketIssued` — already in `common-events` before this plan — carries it, the aggregate is the
+only thing that can record that event, and the Access context cannot call Registration to look it
+up. Storing rather than passing it through also preserves who actually paid once a transfer has
+moved the holder to somebody else.
+
+**7. Every full-context test in this module carries `@EnableTestBinder`,** including the two that
+publish nothing. Found during Task 8 rather than planned: once the module gained a consumer
+binding, a plain `@SpringBootTest` started the *real* Kafka binder, whose admin client spent
+sixty seconds failing to reach `localhost:9092` — 65 connection attempts in a single run, and
+`JpaTicketRepositoryTest` alone went from 0.1s to 61.9s. The standing constraint is that
+`./mvnw clean test` passes with no broker and no network, so the test binder is substituted in
+every full-context test. Worth knowing before the next service gains its first consumer binding.
+
 ---
 
 ## File Structure
@@ -190,7 +204,7 @@ The two events this context emits that do not exist yet, plus the two components
   - `TicketVoided(String eventId, Instant occurredAt, String ticketCode, String registrationId, String sessionId, String reason)`, `partitionKey()` → `ticketCode`
   - `RegistrationConfirmed(String eventId, Instant occurredAt, String registrationId, String attendeeId, String attendeeName, String attendeeEmail, String conferenceEventId, List<String> sessionIds)`
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
 
 `TicketTransferredTest` asserts the topic is `ticket-transferred`, the key is the ticket code, and
 both holders travel. `TicketVoidedTest` asserts the topic is `ticket-voided`, the key is the ticket
@@ -274,10 +288,10 @@ Added to `RegistrationConfirmedTest`:
     }
 ```
 
-- [ ] **Step 2: Run to verify failure.** `./mvnw -q -pl common-events test` → FAIL, cannot find
+- [x] **Step 2: Run to verify failure.** `./mvnw -q -pl common-events test` → FAIL, cannot find
       symbol `TicketTransferred`.
 
-- [ ] **Step 3: Implement.** Both records, with the javadoc conventions the module already uses —
+- [x] **Step 3: Implement.** Both records, with the javadoc conventions the module already uses —
       topic, key, and *why* the payload is shaped that way.
 
 ```java
@@ -319,7 +333,7 @@ public record TicketVoided(
 untouched. `Registration.confirm()` passes `attendee.name()` and `attendee.email()` — values it
 already holds.
 
-- [ ] **Step 4: Run to verify.** `./mvnw -q -pl registration-service -am test` → PASS, 51 + 124
+- [x] **Step 4: Run to verify.** `./mvnw -q -pl registration-service -am test` → PASS, 51 + 124
       tests plus the four new ones.
 
 - [ ] **Step 5: Commit.** `feat: carry the ticket holder on registration-confirmed and add the ticket transfer and void events`
@@ -341,7 +355,7 @@ already holds.
   `TicketStatus{ISSUED, TRANSFERRED, VOID, USED}`. All three value objects are `@Embeddable`
   records.
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
 
 ```java
 class TicketCodeTest {
@@ -422,10 +436,10 @@ class GateTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure.** `./mvnw -q -pl ticketing-service -am test` → FAIL, cannot
+- [x] **Step 2: Run to verify failure.** `./mvnw -q -pl ticketing-service -am test` → FAIL, cannot
       find symbol.
 
-- [ ] **Step 3: Implement.** `TicketCode.generate()` draws nine bytes from a `SecureRandom` and
+- [x] **Step 3: Implement.** `TicketCode.generate()` draws nine bytes from a `SecureRandom` and
       encodes them with `Base64.getUrlEncoder().withoutPadding()`, giving twelve URL-safe
       characters behind a readable `TKT-` prefix so a code is recognisable in Kafka UI during the
       demonstration.
@@ -456,7 +470,7 @@ public record TicketCode(String value) {
 }
 ```
 
-- [ ] **Step 4: Run to verify.** `./mvnw -q -pl ticketing-service -am test` → PASS.
+- [x] **Step 4: Run to verify.** `./mvnw -q -pl ticketing-service -am test` → PASS.
 
 - [ ] **Step 5: Commit.** `feat: add the ticketing value objects`
 
@@ -484,7 +498,7 @@ public record TicketCode(String value) {
   - `TicketNotFoundException(String ticketCode)`, `TicketVoidException(String ticketCode)`,
     `AlreadyCheckedInException(String ticketCode)` — all extend `RuntimeException`
 
-- [ ] **Step 1: Write the failing tests.** One test per invariant in `specs/3-domain-models.md`
+- [x] **Step 1: Write the failing tests.** One test per invariant in `specs/3-domain-models.md`
       §5.1, plus the events each transition records.
 
 ```java
@@ -693,14 +707,14 @@ class CheckInTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure.** `./mvnw -q -pl ticketing-service -am test` → FAIL.
+- [x] **Step 2: Run to verify failure.** `./mvnw -q -pl ticketing-service -am test` → FAIL.
 
-- [ ] **Step 3: Implement.** `Ticket` follows `Registration`'s shape exactly: `@Entity`, a
+- [x] **Step 3: Implement.** `Ticket` follows `Registration`'s shape exactly: `@Entity`, a
       `@Transient final List<DomainEvent> domainEvents`, a `protected` no-arg constructor for JPA,
       static factory, guarded transitions, `pullDomainEvents()`, and unmodifiable collection
       getters. `voidTicket` returns early when already `VOID` so a redelivery records nothing.
 
-- [ ] **Step 4: Run to verify.** `./mvnw -q -pl ticketing-service -am test` → PASS.
+- [x] **Step 4: Run to verify.** `./mvnw -q -pl ticketing-service -am test` → PASS.
 
 - [ ] **Step 5: Commit.** `feat: add the ticket aggregate and its invariants`
 
@@ -721,7 +735,7 @@ which the report points at as the deterministic guard on FR-13. The aggregate gu
 conditions independently — the policy cannot assume it ran, exactly as the DTO layer and the domain
 both validate a registration request.
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
 
 ```java
 class CheckInPolicyTest {
@@ -763,10 +777,10 @@ class CheckInPolicyTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure.** FAIL, cannot find symbol `CheckInPolicy`.
-- [ ] **Step 3: Implement.** A pure class with no Spring annotation, instantiated as a field by the
+- [x] **Step 2: Run to verify failure.** FAIL, cannot find symbol `CheckInPolicy`.
+- [x] **Step 3: Implement.** A pure class with no Spring annotation, instantiated as a field by the
       application service — the same way `SeatAllocationService` is used in `registration-service`.
-- [ ] **Step 4: Run to verify.** PASS.
+- [x] **Step 4: Run to verify.** PASS.
 - [ ] **Step 5: Commit.** `feat: add the check-in policy domain service`
 
 ---
@@ -786,7 +800,7 @@ class CheckInPolicyTest {
   `List<Ticket> findByRegistrationId(String registrationId)`,
   `boolean existsByRegistrationIdAndSessionId(String registrationId, String sessionId)`.
 
-- [ ] **Step 1: Write the failing test.**
+- [x] **Step 1: Write the failing test.**
 
 ```java
 @SpringBootTest
@@ -847,11 +861,11 @@ class JpaTicketRepositoryTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure.** FAIL, no bean of type `TicketRepository`.
-- [ ] **Step 3: Implement.** `Ticket` gains `@Column(name = "ticket_code", unique = true, nullable = false)`
+- [x] **Step 2: Run to verify failure.** FAIL, no bean of type `TicketRepository`.
+- [x] **Step 3: Implement.** `Ticket` gains `@Column(name = "ticket_code", unique = true, nullable = false)`
       on the embedded code's `value` attribute override. `TicketJpaRepository` is package-private,
       as `RegistrationJpaRepository` is.
-- [ ] **Step 4: Run to verify.** PASS.
+- [x] **Step 4: Run to verify.** PASS.
 - [ ] **Step 5: Commit.** `feat: persist tickets behind a domain repository port`
 
 ---
@@ -893,7 +907,7 @@ that the M1 defect proved only a live broker catches, and the publisher.
             key.serializer: org.apache.kafka.common.serialization.StringSerializer
 ```
 
-- [ ] **Step 1: Write the failing test.** Every one of the four events this context emits asserts
+- [x] **Step 1: Write the failing test.** Every one of the four events this context emits asserts
       both its destination and its key, because the key choices are load-bearing.
 
 ```java
@@ -975,11 +989,11 @@ class TicketEventPublishingTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure.** FAIL, cannot resolve `StreamBridge`.
-- [ ] **Step 3: Implement.** The adapter is the same one `registration-service` uses — publish to
+- [x] **Step 2: Run to verify failure.** FAIL, cannot resolve `StreamBridge`.
+- [x] **Step 3: Implement.** The adapter is the same one `registration-service` uses — publish to
       an `ApplicationEventPublisher`, then send on `@TransactionalEventListener(AFTER_COMMIT,
       fallbackExecution = true)` with the destination and key read off the event.
-- [ ] **Step 4: Run to verify.** PASS.
+- [x] **Step 4: Run to verify.** PASS.
 - [ ] **Step 5: Commit.** `feat: publish ticketing domain events to kafka after commit`
 
 ---
@@ -1009,7 +1023,7 @@ issued twice for a session even if the guard is bypassed — for instance by a r
 processed-event table has been recreated, which `ddl-auto: create-drop` guarantees on every
 restart.
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
 
 ```java
 @SpringBootTest
@@ -1109,12 +1123,12 @@ class TicketApplicationServiceTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure.** FAIL, cannot find symbol.
-- [ ] **Step 3: Implement.** Each method drains the aggregate's events *before* `save()`, for the
+- [x] **Step 2: Run to verify failure.** FAIL, cannot find symbol.
+- [x] **Step 3: Implement.** Each method drains the aggregate's events *before* `save()`, for the
       reason `RegistrationApplicationService` documents: Spring Data takes the merge path for an
       assigned id and returns a different managed copy whose `@Transient` event list is empty.
       `checkIn` calls `checkInPolicy.admit(ticket)` before `ticket.checkIn(...)`.
-- [ ] **Step 4: Run to verify.** PASS.
+- [x] **Step 4: Run to verify.** PASS.
 - [ ] **Step 5: Commit.** `feat: add the ticketing application service`
 
 ---
@@ -1150,7 +1164,7 @@ the event vocabulary crosses boundaries.
           group: ticketing-service
 ```
 
-- [ ] **Step 1: Write the failing test.**
+- [x] **Step 1: Write the failing test.**
 
 ```java
 @SpringBootTest
@@ -1246,12 +1260,12 @@ class RegistrationEventConsumersTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure.** FAIL, no `InputDestination` binding.
-- [ ] **Step 3: Implement.** The consumer guards on `processedEvents.markProcessed(...)`, then
+- [x] **Step 2: Run to verify failure.** FAIL, no `InputDestination` binding.
+- [x] **Step 3: Implement.** The consumer guards on `processedEvents.markProcessed(...)`, then
       calls `tickets.issue(...)` inside a `try`/`catch (IllegalArgumentException ex)` that logs and
       returns — the same absorb-and-log shape `PaymentEventConsumers` uses for an unknown
       registration.
-- [ ] **Step 4: Run to verify.** PASS.
+- [x] **Step 4: Run to verify.** PASS.
 - [ ] **Step 5: Commit.** `feat: issue tickets when a registration is confirmed`
 
 ---
@@ -1283,7 +1297,7 @@ class RegistrationEventConsumersTest {
 | `IllegalArgumentException` | 400 | `INVALID_REQUEST` |
 | `MethodArgumentNotValidException` | 400 | `VALIDATION_FAILED` |
 
-- [ ] **Step 1: Write the failing tests.** MockMvc, built the way `RegistrationControllerTest`
+- [x] **Step 1: Write the failing tests.** MockMvc, built the way `RegistrationControllerTest`
       builds it, covering the happy path and every documented error for both controllers.
 
 ```java
@@ -1511,11 +1525,11 @@ class GateControllerTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure.** FAIL, 404 on every route.
-- [ ] **Step 3: Implement.** `TicketResponse.from(Ticket)` flattens the aggregate — never serialise
+- [x] **Step 2: Run to verify failure.** FAIL, 404 on every route.
+- [x] **Step 3: Implement.** `TicketResponse.from(Ticket)` flattens the aggregate — never serialise
       the entity, for the reason `RegistrationResponse` documents. `CheckInResponse` carries
       `waitMillis` derived from the two timestamps rather than stored.
-- [ ] **Step 4: Run to verify.** PASS.
+- [x] **Step 4: Run to verify.** PASS.
 - [ ] **Step 5: Commit.** `feat: expose the ticketing rest surface`
 
 ---
@@ -1534,16 +1548,16 @@ out its own exception in *"Updating these checkboxes is part of delivering a sto
 checkboxes, evidence lines and counts in that one file are touched. The milestone markers in
 `specs/4-api-endpoints.md` are **left alone** — they have no such exception.
 
-- [ ] **Step 1: Update the user stories.** FR-12 and FR-13 point at `TicketController.transfer`,
+- [x] **Step 1: Update the user stories.** FR-12 and FR-13 point at `TicketController.transfer`,
       `GateController.checkIn` and the `Ticket` aggregate; FR-08 points at
       `RegistrationEventConsumers.registrationConfirmed`. Counts become 11 delivered, 0 partial,
       7 not started.
-- [ ] **Step 2: Update the README.** M2 becomes complete for registration and ticketing, with
+- [x] **Step 2: Update the README.** M2 becomes complete for registration and ticketing, with
       payment still outstanding.
-- [ ] **Step 3: Write `scripts/demo-ticketing.sh`,** following `demo-m2.sh`'s shape: `--pause`
+- [x] **Step 3: Write `scripts/demo-ticketing.sh`,** following `demo-m2.sh`'s shape: `--pause`
       support, the same colour helpers, and a hand-injected `registration-confirmed` for as long as
       the full saga cannot be driven from `payment-service`.
-- [ ] **Step 4: Run the full suite.** `./mvnw clean test` → `BUILD SUCCESS`.
+- [x] **Step 4: Run the full suite.** `./mvnw clean test` → `BUILD SUCCESS`.
 - [ ] **Step 5: Commit.** `docs: record the ticketing service against its user stories`
 
 ---

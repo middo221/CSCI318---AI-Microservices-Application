@@ -222,6 +222,46 @@ CONFERENCE_REGISTRATION_HOLD_WINDOW=PT20S ./mvnw spring-boot:run -pl registratio
 
 Add `--pause` to step through it in front of an audience.
 
+### The ticketing walkthrough — issuance, transfer and the gate
+
+Start Kafka, then catalog on 8081, registration on 8082 and ticketing on 8084:
+
+```bash
+./scripts/demo-ticketing.sh
+```
+
+It registers one attendee for **two** sessions, hand-injects the `payment-succeeded` that
+`payment-service` will one day produce, and then reads port **8084** — where two tickets have
+appeared, one per confirmed session, each with its own code. No HTTP request passed between
+`registration-service` and `ticketing-service`; everything ticketing knows arrived as a
+`registration-confirmed` event.
+
+It goes on to hand the second ticket to a colleague (FR-12) and admit them at a gate (FR-13),
+then shows the invariants refusing a second check-in and a transfer of a used ticket.
+
+```bash
+# Read a ticket by its code
+curl -s http://localhost:8084/api/v1/tickets/<TICKET_CODE>
+
+# Every ticket of a registration — the endpoint FR-18's support agent calls
+curl -s http://localhost:8084/api/v1/registrations/<REGISTRATION_ID>/tickets
+
+# Transfer it (FR-12)
+curl -s -X POST http://localhost:8084/api/v1/tickets/<TICKET_CODE>/transfer \
+  -H "Content-Type: application/json" \
+  -d '{"toHolderName":"Sam Patel","toHolderEmail":"sam@example.com"}'
+
+# Check in at a gate (FR-13). queuedAt is required — the FR-16 congestion
+# stream derives every wait time from it.
+curl -s -X POST http://localhost:8084/api/v1/gates/north-1/check-ins \
+  -H "Content-Type: application/json" \
+  -d '{"ticketCode":"<TICKET_CODE>","queuedAt":"2026-09-14T08:50:00Z"}'
+```
+
+`attendee-checked-in` is keyed by `sessionId`, not `gateId`. That is deliberate: the RT2 topology
+re-keys to the gate itself, so the repartition stays an explicit design point rather than
+something hidden in the producer.
+
 ## Troubleshooting
 
 **`bad interpreter: /bin/sh^M` when running `./mvnw`**
@@ -251,7 +291,7 @@ Docker Desktop is not running. Start it and wait for the whale icon to settle.
 | `docs/meetings/` | Weekly meeting minutes, Weeks 3–11 |
 | `docs/ai-collaboration-log.md` | Evidence for report Section 5 |
 | `docs/superpowers/` | Design specification and implementation plans |
-| `scripts/` | Demonstration scripts — `demo-m1.sh` for the catalogue hop, `demo-m2.sh` for the saga |
+| `scripts/` | Demonstration scripts — `demo-m1.sh` for the catalogue hop, `demo-m2.sh` for the saga, `demo-ticketing.sh` for issuance, transfer and gate check-in |
 
 ## Project status
 
@@ -259,7 +299,7 @@ Docker Desktop is not running. Start it and wait for the whale icon to settle.
 | :--- | :--- | :--- |
 | M0 — Skeleton | 3–4 | ✅ Complete |
 | M1 — First event across a boundary | 5–6 | ✅ Complete |
-| M2 — The saga | 7–8 | 🟡 Registration half complete; payment and ticketing in progress |
+| M2 — The saga | 7–8 | 🟡 Registration and ticketing built; the ticket hop awaits live verification, payment outstanding |
 | M3 — Streams | 9–10 | ☐ |
 | M4 — Agents | 10–11 | ☐ |
 | M5 — Submission | 11–12 | ☐ |

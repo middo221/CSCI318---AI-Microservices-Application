@@ -17,6 +17,25 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  cloud:
+    function:
+      definition: registrationConfirmed
+    stream:
+      bindings:
+        registrationConfirmed-in-0:
+          destination: registration-confirmed
+          group: ticketing-service
+      kafka:
+        binder:
+          brokers: localhost:9092
+          # The binder defaults key.serializer to ByteArraySerializer, but
+          # DomainEvent.partitionKey() is a String, so every send fails with a
+          # SerializationException. The test binder moves the message in-JVM and never invokes a
+          # serialiser, so no test can catch this - only a live broker can, and it did, in M1.
+          # Serialising keys as strings also keeps ticket codes readable in Kafka UI, which the
+          # demonstration depends on.
+          producer-properties:
+            key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 logging:
   level:
