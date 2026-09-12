@@ -17,6 +17,14 @@ spring:
     console:
       enabled: true
       path: /h2-console
+    cloud:
+    function:
+      definition: registrationRequested
+    stream:
+      bindings:
+        registrationRequested-in-0:
+          destination: registration-requested
+          group: payment-service
 
 logging:
   level:
