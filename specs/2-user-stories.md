@@ -14,7 +14,7 @@ planned**, and it is maintained by hand.
 | `[~]` | Partially delivered — one side of the story exists, the other does not |
 | `[ ]` | Not started |
 
-**Last checked against the code:** 2026-09-11 — 10 delivered, 1 partial, 7 not started.
+**Last checked against the code:** 2026-09-15 — 10 delivered, 2 partial, 6 not started.
 
 ### Updating these checkboxes is part of delivering a story
 
@@ -49,7 +49,7 @@ crosses a service boundary is delivered when it has been observed crossing it.
 | **Event Catalog** | FR-05 | Browse and search the published catalogue | Attendee, Organiser | | `[x]` |
 | **Registration** | FR-06 | Register for one or more sessions | Attendee | | `[x]` |
 | **Registration** | FR-10 | Join a waitlist for a full session | Attendee | | `[ ]` |
-| **Payment** | FR-07 | Pay for a registration and receive a ticket | Attendee | | `[ ]` |
+| **Payment** | FR-07 | Pay for a registration and receive a ticket | Attendee | | `[~]` |
 | **Payment** | FR-11 | Request a refund | Attendee | | `[ ]` |
 | **Ticketing** | FR-12 | Transfer a ticket to another person | Attendee | | `[x]` |
 | **Ticketing** | FR-13 | Check in at a gate | Gate staff, Attendee | | `[x]` |
@@ -124,6 +124,15 @@ crosses a service boundary is delivered when it has been observed crossing it.
      full sessions fall through to the waitlist (FR-10).
   4. `RegistrationPricingService` sums the session prices into `totalAmount`.
   5. Emits `seats-reserved` and `registration-requested`.
+- **Refinement — how the attendee pays.** `CreateRegistrationRequest` carries an optional
+  `cardToken` (`TOK_OK`, `TOK_DECLINE`, `TOK_TIMEOUT`). It travels on `registration-requested`
+  and is not stored in `regdb`; a registration that costs money and has no token is refused with
+  `400 INVALID_REQUEST`. The story as written never said where FR-07's "opaque card token" comes
+  from, and no payment endpoint accepted one.
+- **Refinement — free registrations.** The catalogue allows a price of `0.00`, but a payment order
+  must be for more than zero (`3-domain-models.md` §4.1). A zero-total registration therefore skips
+  payment: it is confirmed immediately, emitting `seats-reserved` and `registration-confirmed`, so
+  ticketing still issues its tickets.
 
 ### FR-10: Join a waitlist for a full session
 - [ ] **Not started** — M3. No `Waitlist` aggregate exists yet; see `3-domain-models.md` §3.3.
@@ -137,8 +146,25 @@ crosses a service boundary is delivered when it has been observed crossing it.
 ## Payment Service
 
 ### FR-07: Pay for a registration and receive a ticket
-- [ ] **Not started** — `payment-service` is still an empty skeleton (`PaymentApplication` only).
-  Unblocked: `registration-requested` is live on the broker.
+- [~] **Implemented and tested; not yet live-verified.** `RegistrationEventConsumers.registrationRequested`
+  raises a `PaymentOrder` and charges it through the `PaymentGateway` port, whose
+  `SimulatedPaymentGateway` adapter is deterministic by token. Each attempt is recorded as a
+  `PaymentAttempt`; the order emits `payment-succeeded` or `payment-failed`, keyed by registration,
+  after commit. Read side: `GET /payment-orders/{id}` and
+  `GET /registrations/{registrationId}/payment-order`. Proven with the Spring Cloud Stream test
+  binder in `RegistrationEventConsumersTest`, but **not yet observed on a live broker**, so it stays
+  `[~]` until a note under `docs/verification/` exists. Run `scripts/demo-m2.sh` to produce one.
+- **Refinement — the charge happens on receipt, once.** There is no "pay" endpoint: the token
+  arrives with `registration-requested` (see FR-06). An order gets one attempt, because registration
+  cancels on the first `payment-failed`, so a retry would charge for seats already back on sale.
+  A registration is charged at most once, even when a replayed topic arrives after a restart has
+  emptied the processed-event table.
+- **Refinement — never charge for seats that are no longer held.** `registration-requested` carries
+  `holdExpiresAt`. Past it, payment records the order `FAILED` with reason `HOLD_EXPIRED` and never
+  calls the gateway, so a payment-service that was down longer than the hold window cannot take
+  money for seats registration has already released. A charge that lands in the few seconds
+  between the deadline and the sweeper's next run is still possible; closing that needs refunds
+  (FR-11).
 - **As an** Attendee, **I want to** pay for my registration, **so that** I receive tickets.
 - **Scenario:**
   1. `payment-service` consumes `registration-requested` and creates a `PaymentOrder`.
@@ -193,7 +219,8 @@ crosses a service boundary is delivered when it has been observed crossing it.
 ### FR-08: Confirm registration and issue tickets on payment
 - [~] **Both halves implemented; the hop is not yet live-verified.** Confirmation:
   `PaymentEventConsumers` emits `registration-confirmed`, live-verified in
-  `docs/verification/2026-m2-registration-saga.md`. Issuance:
+  `docs/verification/2026-m2-registration-saga.md` against a hand-injected `payment-succeeded`;
+  `payment-service` now produces that event itself (FR-07). Issuance:
   `RegistrationEventConsumers.registrationConfirmed` now consumes it and issues one `Ticket` per
   session, emitting a `ticket-issued` per ticket — proven with the Spring Cloud Stream test binder
   in `RegistrationEventConsumersTest`, but **not yet observed crossing a live broker.** This file
@@ -204,7 +231,9 @@ crosses a service boundary is delivered when it has been observed crossing it.
 
 ### FR-09: Release seats on payment failure or hold expiry
 - [x] **Delivered** — both paths. Payment failure via `PaymentEventConsumers`; hold expiry via
-  `HoldExpirySweeper.sweep()`. Both observed live — `seats-released:2` on the M2 verification run.
+  `HoldExpirySweeper.sweep()`. Both observed live — `seats-released:2` on the M2 verification run,
+  with `payment-failed` hand-injected. `payment-service` now emits it for `TOK_DECLINE` and
+  `TOK_TIMEOUT`; that producer is covered under FR-07.
 - **As the** System, **I want to** release held seats when payment fails or the hold window
   expires, **so that** abandoned registrations do not lock seats out of inventory.
 - **Acceptance:** the hold window is configuration (`conference.registration.hold-window`),

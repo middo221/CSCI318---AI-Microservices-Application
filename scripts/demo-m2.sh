@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
-# Converge M2 demonstration — the registration saga and both compensation paths.
+# Converge M2 demonstration — the registration saga end to end, and every compensation path.
 #
-# Shows a registration holding seats, being confirmed by payment, being compensated when payment
-# fails, and being swept away when nobody pays at all.
+# Shows a registration holding seats and being charged and confirmed with no HTTP call between the
+# services, a declined card returning the seats, and a hold that expires while payment-service is
+# down — after which payment refuses to charge for seats that are no longer held.
 #
 # Prerequisites (see README.md):
 #   docker compose up -d
@@ -11,13 +12,17 @@
 #   ./mvnw spring-boot:run -pl event-catalog-service                            (terminal A)
 #   CONFERENCE_REGISTRATION_HOLD_WINDOW=PT20S \
 #     ./mvnw spring-boot:run -pl registration-service                           (terminal B)
+#   ./mvnw spring-boot:run -pl payment-service                                  (terminal C)
 #
-# The short hold window is what makes step 8 finish inside a demonstration. The service default
+# The short hold window is what makes step 6 finish inside a demonstration. The service default
 # is PT2M and the stated business rule is PT15M.
 #
-# payment-service belongs to another member's branch and does not exist yet, so steps 6 and 7
-# hand-inject the events it will one day produce straight onto the broker. That is the same
-# technique every member uses to verify their own service without waiting on anyone else.
+# The attendee pays as they register: the card token travels on registration-requested and
+# payment-service charges it the moment it arrives. The simulated gateway is deterministic —
+# TOK_OK succeeds, TOK_DECLINE is declined, TOK_TIMEOUT times out.
+#
+# Step 6 asks you to stop payment-service (Ctrl+C in terminal C) and step 7 to start it again.
+# SKIP_EXPIRY=1 leaves both steps out.
 #
 # Then:  ./scripts/demo-m2.sh              run straight through
 #        ./scripts/demo-m2.sh --pause      stop after every step
@@ -26,7 +31,9 @@ set -u
 
 CATALOG="http://localhost:8081/api/v1"
 REGISTRATION="http://localhost:8082/api/v1"
+PAYMENT="http://localhost:8083/api/v1"
 HOLD_WINDOW_SECONDS="${HOLD_WINDOW_SECONDS:-20}"
+SKIP_EXPIRY="${SKIP_EXPIRY:-0}"
 
 bold=$'\033[1m'; dim=$'\033[2m'; green=$'\033[32m'; cyan=$'\033[36m'; yellow=$'\033[33m'; off=$'\033[0m'
 
@@ -34,6 +41,7 @@ step()  { printf '\n%s───────────────────�
 run()   { printf '%s$ %s%s\n' "$cyan" "$1" "$off"; }
 note()  { printf '%s   %s%s\n' "$dim" "$1" "$off"; }
 ok()    { printf '%s   %s%s\n' "$green" "$1" "$off"; }
+warn()  { printf '%s   %s%s\n' "$yellow" "$1" "$off"; }
 
 PAUSE_MODE=0
 case "${1:-}" in --pause|-p) PAUSE_MODE=1 ;; esac
@@ -53,7 +61,7 @@ jsonval() { python -c "import sys,json;print(json.load(sys.stdin)$1)"; }
 offsets() {
   docker ps --format '{{.Names}}' 2>/dev/null | grep -q converge-kafka || return 0
   printf '%s   broker:%s\n' "$dim" "$off"
-  for t in registration-requested seats-reserved seats-released \
+  for t in registration-requested payment-succeeded payment-failed seats-reserved seats-released \
            registration-confirmed registration-cancelled registration-expired; do
     line=$(MSYS_NO_PATHCONV=1 docker exec converge-kafka \
       /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 \
@@ -62,22 +70,38 @@ offsets() {
   done
 }
 
-# Publishes one keyed message onto a topic, standing in for payment-service.
-inject() {
-  MSYS_NO_PATHCONV=1 docker exec -i converge-kafka \
-    /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 \
-    --topic "$1" --property parse.key=true --property key.separator='|' >/dev/null 2>&1 <<<"$2|$3"
-}
-
 availability() { curl -s "$REGISTRATION/sessions/$SESSION_ID/availability"; }
 statusOf()     { curl -s "$REGISTRATION/registrations/$1" | jsonval "['status']"; }
 reserved()     { availability | jsonval "['reservedSeats']"; }
+paymentOrder() { curl -s "$PAYMENT/registrations/$1/payment-order"; }
+
+# register <attendeeId> <name> <email> <quantity> <cardToken>
+register() {
+  curl -s -X POST "$REGISTRATION/registrations" -H "Content-Type: application/json" \
+    -d "{\"attendeeId\":\"$1\",\"attendeeName\":\"$2\",\"attendeeEmail\":\"$3\",\"eventId\":\"$EVENT_ID\",\"cardToken\":\"$5\",\"sessions\":[{\"sessionId\":\"$SESSION_ID\",\"quantity\":$4}]}"
+}
+
+paymentUp()   { curl -s -o /dev/null -w '%{http_code}' "$PAYMENT/payment-orders/x" 2>/dev/null | grep -q '404'; }
+paymentDown() { ! paymentUp; }
+reg3HasOrder() { curl -s -o /dev/null -w '%{http_code}' "$PAYMENT/registrations/$REG_3_ID/payment-order" | grep -q '200'; }
+
+# wait_for <condition-function> <seconds>
+wait_for() {
+  local waited=0
+  until "$1"; do
+    waited=$((waited + 1))
+    [ "$waited" -ge "$2" ] && return 1
+    sleep 1
+  done
+}
 
 require_up() {
   curl -sf "$CATALOG/events" >/dev/null 2>&1 || {
     printf '%sevent-catalog-service is not answering on 8081.%s\n' "$yellow" "$off"; exit 1; }
   curl -s -o /dev/null -w '%{http_code}' "$REGISTRATION/registrations/x" | grep -q '404' || {
     printf '%sregistration-service is not answering on 8082.%s\n' "$yellow" "$off"; exit 1; }
+  paymentUp || {
+    printf '%spayment-service is not answering on 8083.%s\n' "$yellow" "$off"; exit 1; }
 }
 
 require_up
@@ -96,60 +120,78 @@ note "session $SESSION_ID, capacity 10 at \$49.50, replicated to 8082 over Kafka
 availability | pretty
 pause "The replica on 8082 knows the session. No HTTP call was made to 8081."
 
-step "2. Register for three seats  (FR-06)"
-run "POST $REGISTRATION/registrations"
-REG_1=$(curl -s -X POST "$REGISTRATION/registrations" -H "Content-Type: application/json" \
-  -d "{\"attendeeId\":\"att-1042\",\"attendeeName\":\"Dana Okafor\",\"attendeeEmail\":\"dana@example.com\",\"eventId\":\"$EVENT_ID\",\"sessions\":[{\"sessionId\":\"$SESSION_ID\",\"quantity\":3}]}")
+step "2. Register for three seats, paying with TOK_OK  (FR-06, FR-07)"
+run "POST $REGISTRATION/registrations   { ..., \"cardToken\": \"TOK_OK\" }"
+REG_1=$(register att-1042 "Dana Okafor" dana@example.com 3 TOK_OK)
 echo "$REG_1" | pretty
 REG_1_ID=$(echo "$REG_1" | jsonval "['id']")
-ok "PENDING_PAYMENT, 3 seats HELD, total \$148.50 = 3 x \$49.50"
-offsets
-pause "registration-requested +1 (for payment) and seats-reserved +1 (for analytics)."
+ok "201 PENDING_PAYMENT, 3 seats HELD, total \$148.50 = 3 x \$49.50"
+note "That is the state at the instant of the response. The token left with registration-requested."
+pause "registration-requested carries the amount, the hold deadline and the card token."
 
-step "3. The seats are out of inventory"
-run "GET $REGISTRATION/sessions/$SESSION_ID/availability"
-availability | pretty
-ok "reservedSeats 3, availableSeats 7 — nobody else can take those seats"
-pause "Seat inventory moved without any call to the catalogue."
-
-step "4. Payment succeeds  (FR-08)"
-note "payment-service is another member's branch, so we hand-inject the event it will produce."
-run "kafka-console-producer.sh --topic payment-succeeded"
-inject payment-succeeded "$REG_1_ID" \
-  "{\"eventId\":\"$(uuidgen 2>/dev/null || echo occ-$RANDOM)\",\"occurredAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"paymentOrderId\":\"pay-1\",\"registrationId\":\"$REG_1_ID\",\"amount\":148.50,\"currency\":\"AUD\"}"
+step "3. payment-service charged the card on its own  (FR-07)"
 sleep 3
+run "GET $PAYMENT/registrations/$REG_1_ID/payment-order"
+paymentOrder "$REG_1_ID" | pretty
+ok "PAID, one SUCCEEDED attempt with a gateway reference — and no card token in the response"
+pause "Port 8083 raised and charged an order. Nobody called it."
+
+step "4. The registration is confirmed  (FR-08)"
+run "GET $REGISTRATION/registrations/$REG_1_ID"
 curl -s "$REGISTRATION/registrations/$REG_1_ID" | pretty
-ok "CONFIRMED, and every hold is CONFIRMED. registration-confirmed emitted for ticketing."
+ok "CONFIRMED, every hold CONFIRMED. registration-confirmed is on its way to ticketing."
+note "reservedSeats stays at $(reserved) — the seats are paid for now"
 offsets
-pause "Seats stay taken — they are paid for now."
+pause "registration-requested -> payment-succeeded -> registration-confirmed, with no HTTP between services."
 
-step "5. A second registration, this time the card is declined  (FR-09)"
-run "POST $REGISTRATION/registrations   then inject payment-failed"
-REG_2_ID=$(curl -s -X POST "$REGISTRATION/registrations" -H "Content-Type: application/json" \
-  -d "{\"attendeeId\":\"att-2000\",\"attendeeName\":\"Sam Reyes\",\"attendeeEmail\":\"sam@example.com\",\"eventId\":\"$EVENT_ID\",\"sessions\":[{\"sessionId\":\"$SESSION_ID\",\"quantity\":4}]}" | jsonval "['id']")
-note "reservedSeats is now $(reserved) of 10"
-inject payment-failed "$REG_2_ID" \
-  "{\"eventId\":\"$(uuidgen 2>/dev/null || echo occ-$RANDOM)\",\"occurredAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"paymentOrderId\":\"pay-2\",\"registrationId\":\"$REG_2_ID\",\"reason\":\"CARD_DECLINED\"}"
+step "5. A second attendee's card is declined  (FR-09)"
+run "POST $REGISTRATION/registrations   { ..., \"cardToken\": \"TOK_DECLINE\" }"
+REG_2_ID=$(register att-2000 "Sam Reyes" sam@example.com 4 TOK_DECLINE | jsonval "['id']")
 sleep 3
+run "GET $PAYMENT/registrations/$REG_2_ID/payment-order"
+paymentOrder "$REG_2_ID" | pretty
+ok "FAILED, one DECLINED attempt, reason CARD_DECLINED"
 curl -s "$REGISTRATION/registrations/$REG_2_ID" | pretty
 ok "CANCELLED, holds RELEASED, and reservedSeats is back to $(reserved)"
 offsets
-pause "seats-released +1 and registration-cancelled +1. The compensation path ran itself."
+pause "payment-failed +1, seats-released +1, registration-cancelled +1. The compensation ran itself."
 
-step "6. A third registration that nobody ever pays for  (FR-09, hold expiry)"
-run "POST $REGISTRATION/registrations   then wait out the hold window"
-REG_3_ID=$(curl -s -X POST "$REGISTRATION/registrations" -H "Content-Type: application/json" \
-  -d "{\"attendeeId\":\"att-3000\",\"attendeeName\":\"Ali Haddad\",\"attendeeEmail\":\"ali@example.com\",\"eventId\":\"$EVENT_ID\",\"sessions\":[{\"sessionId\":\"$SESSION_ID\",\"quantity\":2}]}" | jsonval "['id']")
-note "reservedSeats is now $(reserved) of 10 — status $(statusOf "$REG_3_ID")"
-printf '%s   waiting %ss for the hold window to elapse, then the sweeper runs...%s\n' \
-  "$dim" "$((HOLD_WINDOW_SECONDS + 15))" "$off"
-sleep $((HOLD_WINDOW_SECONDS + 15))
-curl -s "$REGISTRATION/registrations/$REG_3_ID" | pretty
-ok "EXPIRED without anybody touching it, and reservedSeats is back to $(reserved)"
-offsets
-pause "registration-expired, NOT registration-cancelled. Abandonment and failure are different events."
+if [ "$SKIP_EXPIRY" = "1" ]; then
+  note "SKIP_EXPIRY=1 — leaving out the hold-expiry steps"
+else
+  step "6. Seats held while payment-service is down  (FR-09, hold expiry)"
+  warn "Stop payment-service now: Ctrl+C in terminal C."
+  if wait_for paymentDown 120; then
+    ok "payment-service has stopped"
+    run "POST $REGISTRATION/registrations   { ..., \"cardToken\": \"TOK_OK\" }"
+    REG_3_ID=$(register att-3000 "Ali Haddad" ali@example.com 2 TOK_OK | jsonval "['id']")
+    note "reservedSeats is now $(reserved) of 10 — status $(statusOf "$REG_3_ID"), and nobody is charging it"
+    printf '%s   waiting %ss for the hold window to elapse, then the sweeper runs...%s\n' \
+      "$dim" "$((HOLD_WINDOW_SECONDS + 15))" "$off"
+    sleep $((HOLD_WINDOW_SECONDS + 15))
+    curl -s "$REGISTRATION/registrations/$REG_3_ID" | pretty
+    ok "EXPIRED without anybody touching it, and reservedSeats is back to $(reserved)"
+    offsets
+    pause "registration-expired, NOT registration-cancelled. Abandonment and failure are different events."
 
-step "7. What is actually on the broker"
+    step "7. payment-service comes back and refuses to charge for seats that are gone"
+    warn "Start payment-service again in terminal C:  ./mvnw spring-boot:run -pl payment-service"
+    if wait_for paymentUp 240 && wait_for reg3HasOrder 60; then
+      note "it picked up the registration-requested it missed while it was down"
+      run "GET $PAYMENT/registrations/$REG_3_ID/payment-order"
+      paymentOrder "$REG_3_ID" | pretty
+      ok "FAILED, reason HOLD_EXPIRED, and NO attempt — the gateway was never called"
+      note "registration is still $(statusOf "$REG_3_ID"). Nobody paid for seats they no longer hold."
+    else
+      warn "payment-service did not come back with an order for $REG_3_ID; skipping"
+    fi
+    pause "The hold deadline travels on registration-requested, so a late charge is refused, not taken."
+  else
+    warn "payment-service is still answering on 8083; skipping the hold-expiry steps"
+  fi
+fi
+
+step "8. What is actually on the broker"
 offsets
 echo
 run "kafka-console-consumer.sh --topic seats-reserved   (key :: value)"
@@ -160,11 +202,14 @@ MSYS_NO_PATHCONV=1 docker exec converge-kafka \
 echo
 note "Every seat event is keyed by SESSION, not by registration. That is what co-partitions"
 note "seats-reserved and seats-released with session-capacity-changed, so the M3 fill-rate"
-note "join needs no repartition topic."
+note "join needs no repartition topic. Every saga event is keyed by REGISTRATION instead."
 
 step "Done"
-note "Kafka UI: http://localhost:8080 — the Topics tab shows all six saga topics."
+note "Kafka UI: http://localhost:8080 — the Topics tab shows every saga topic."
 note "H2 console for the registrations: http://localhost:8082/h2-console"
 note "  JDBC URL: jdbc:h2:mem:regdb    user: sa    password: (blank)"
 note "  then:     SELECT * FROM REGISTRATIONS;  and  SELECT * FROM SEAT_HOLDS;"
+note "H2 console for the payments: http://localhost:8083/h2-console"
+note "  JDBC URL: jdbc:h2:mem:paydb    user: sa    password: (blank)"
+note "  then:     SELECT * FROM PAYMENT_ORDERS;  and  SELECT * FROM PAYMENT_ATTEMPTS;"
 echo

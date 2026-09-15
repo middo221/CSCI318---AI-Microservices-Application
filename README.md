@@ -195,45 +195,46 @@ creation as well as on the edit, so the topic carries the complete history every
 
 ### The M2 walkthrough — the registration saga
 
-Start Kafka and both services, then run:
-
-```bash
-./scripts/demo-m2.sh
-```
-
-It seeds a published session of capacity 10 and drives three registrations down the three paths a
-registration can take: one is paid for and confirmed, one has its card declined and is compensated,
-and one is never paid for at all and is swept away when its hold window elapses. Seat inventory
-moves and comes back each time.
-
-`payment-service` is still being built on another branch, so the script hand-injects the two events
-it will produce:
-
-```bash
-MSYS_NO_PATHCONV=1 docker exec -i converge-kafka /opt/kafka/bin/kafka-console-producer.sh   --bootstrap-server localhost:9092 --topic payment-succeeded   --property parse.key=true --property key.separator='|'
-```
-
-To watch the third path finish inside the demonstration, start registration with a short hold
-window. The service default is `PT2M` and the stated business rule is `PT15M`:
+Start Kafka, then catalog on 8081, registration on 8082 and payment on 8083. To watch a hold expire
+inside the demonstration, start registration with a short hold window; the service default is
+`PT2M` and the stated business rule is `PT15M`:
 
 ```bash
 CONFERENCE_REGISTRATION_HOLD_WINDOW=PT20S ./mvnw spring-boot:run -pl registration-service
+./mvnw spring-boot:run -pl payment-service
+./scripts/demo-m2.sh
+```
+
+The attendee pays as they register. `POST /registrations` carries a `cardToken` for the simulated
+gateway: `TOK_OK` succeeds, `TOK_DECLINE` is declined, `TOK_TIMEOUT` times out. The token travels on
+`registration-requested` and `payment-service` charges it the moment it arrives. A free
+registration needs no token and is confirmed immediately.
+
+The script seeds a published session of capacity 10 and drives registrations down every path: one
+paid and confirmed, one declined and compensated, and one whose hold expires while
+`payment-service` is stopped. When payment is restarted it reads the request it missed and refuses
+to charge it, because `registration-requested` carries the hold deadline. The script tells you when
+to stop and restart payment; `SKIP_EXPIRY=1` leaves those steps out.
+
+```bash
+# What payment did for a registration
+curl -s http://localhost:8083/api/v1/registrations/<REGISTRATION_ID>/payment-order
 ```
 
 Add `--pause` to step through it in front of an audience.
 
 ### The ticketing walkthrough — issuance, transfer and the gate
 
-Start Kafka, then catalog on 8081, registration on 8082 and ticketing on 8084:
+Start Kafka, then catalog on 8081, registration on 8082, payment on 8083 and ticketing on 8084:
 
 ```bash
 ./scripts/demo-ticketing.sh
 ```
 
-It registers one attendee for **two** sessions, hand-injects the `payment-succeeded` that
-`payment-service` will one day produce, and then reads port **8084** — where two tickets have
-appeared, one per confirmed session, each with its own code. No HTTP request passed between
-`registration-service` and `ticketing-service`; everything ticketing knows arrived as a
+It registers one attendee for **two** sessions and pays with `TOK_OK`, and then reads port
+**8084** — where two tickets have appeared, one per confirmed session, each with its own code. No
+HTTP request passed between any of the services: payment charged from `registration-requested`,
+registration confirmed from `payment-succeeded`, and everything ticketing knows arrived as a
 `registration-confirmed` event.
 
 It goes on to hand the second ticket to a colleague (FR-12) and admit them at a gate (FR-13),

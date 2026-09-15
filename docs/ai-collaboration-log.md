@@ -324,3 +324,33 @@ than delegation.
 | **Decision** | **Modified** — three defects fixed before the feature was accepted |
 | **Rationale** | The most useful half-hour of the milestone, and the clearest evidence that a green suite is not the same as a working feature. (1) The free Gemini tier allows **five requests per minute per model**, and a ReAct loop spends one request per turn; the first run took seven turns and was refused on the sixth with `429 RESOURCE_EXHAUSTED`. This is an architectural property of agentic designs, not a configuration slip — an agent that reasons in many small steps costs more requests than one that plans in few. The system prompt was rewritten to ask for batched tool calls, taking a run from seven turns to four, and the model then issued **four parallel `searchSessions` calls in a single turn**. (2) `RateLimitException` was unmapped, so Gemini's 429 escaped as a bare **500 carrying Spring's default error body**, breaking the `{code, message}` contract every other service honours; now `429 LLM_RATE_LIMITED` with a `LangChain4jException` catch-all behind it. (3) The demonstration script's own clash check piped into a heredoc, so it read its own source as stdin, threw `JSONDecodeError`, and printed "the guarantee held" **without having checked anything** — including on the failed 500 run. None of the three was reachable by any test against a scripted model, because all three live in the gap between the stub and the real provider. |
 | **Artefact** | `GlobalExceptionHandler`; `AgendaBuilder` system message; `scripts/demo-m4.sh`; `docs/verification/2026-m4-agenda-builder.md`, "The defects the first live run caught" |
+
+---
+
+## 2026-09-15 — Reviewing the first payment commit found a consumer that was never bound
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-15 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5) |
+| **SDLC phase** | Code review, testing (M2) |
+| **What was asked** | Work out what `registration-service` needed now that the first payment commit (`11b2ce9`) was on `main` |
+| **What was proposed** | The assumption going in was that registration needed changing. Review found it did not: its `payment-succeeded` / `payment-failed` consumers had existed since M2. The gaps were in payment and in the contract between the two |
+| **Decision** | **Modified** — the question was re-scoped before any code was written, and each finding was proven before it was acted on |
+| **Rationale** | Four findings. (1) In `payment-service/application.yml` the `cloud:` block was indented under `h2:`. That is still valid YAML, so nothing failed at startup, but the consumer bound to a destination named after its bean, not `registration-requested`. This was **proven with a throwaway test before anything was changed**: `InputDestination.send(..., "registration-requested")` threw a `NullPointerException` because the test binder had no such channel, meaning payment would never have received a registration. (2) Nothing produced `payment-succeeded` or `payment-failed`, so the saga still could not complete. (3) No request, event or endpoint carried the card token the design's `TOK_OK` demonstration depends on. (4) The catalogue allows a price of zero, but a payment order must be for more than zero, so a free registration would throw in the consumer and quietly expire. The same code also saved an aggregate with a pre-assigned id and would have drained its events from the copy `save()` returned — the M2 merge-copy defect, one service over. |
+| **Artefact** | `payment-service/src/test/.../RegistrationEventConsumersTest.java`; `payment-service/src/main/resources/application.yml` |
+
+## 2026-09-15 — The AI's own payment design would have charged attendees for released seats
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-09-15 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5) |
+| **SDLC phase** | Architecture, implementation (M2) |
+| **What was asked** | Rebuild `payment-service` in the style of the other contexts, choosing how the card token reaches payment |
+| **What was proposed** | Put the token on `registration-requested` and charge on receipt, which matches the design's saga diagram and removes the need for a second call by the attendee |
+| **Decision** | **Modified** — a guard was added after the flaw was found while rewriting the demonstration script |
+| **Rationale** | Charging on receipt removes the "abandoned at the payment step" case that hold expiry was designed for; expiry now only happens when payment-service is down. That exposed a worse failure. Kafka keeps the messages payment missed, so when payment-service restarts it consumes them — and would have charged every attendee whose hold had already expired and whose seats registration had already put back on sale. Registration would then refuse the late confirmation, leaving money taken with no ticket and no refund path until FR-11. The fix puts `holdExpiresAt` on the event. Past that deadline payment records the order `FAILED` with reason `HOLD_EXPIRED` and never calls the gateway. It also protects a fresh consumer group reading an old topic from the start. A window of a few seconds remains between the deadline and the sweeper's next run, and it is documented rather than claimed closed. Two smaller decisions went the other way: a free registration skips payment entirely instead of payment accepting a zero order, because `3-domain-models.md` §4.1 says an order is for more than zero; and an order gets a single attempt, because registration cancels on the first `payment-failed` and a retry would charge for seats already released. |
+| **Artefact** | `PaymentOrder.pay`; `RegistrationRequested.holdExpiresAt`; `specs/2-user-stories.md` FR-06 and FR-07 refinements; `scripts/demo-m2.sh` steps 6–7 |
