@@ -86,7 +86,8 @@ class HoldExpirySweeperTest {
         Registration registration = registrations.request(new RequestRegistrationCommand(
                 new AttendeeRef("att-" + UUID.randomUUID(), "Dana", "dana@example.com"),
                 "conf-1",
-                List.of(new SessionRequest(sessionId, seats))));
+                List.of(new SessionRequest(sessionId, seats)),
+                "TOK_OK"));
         outbound.clear();
         return registration;
     }

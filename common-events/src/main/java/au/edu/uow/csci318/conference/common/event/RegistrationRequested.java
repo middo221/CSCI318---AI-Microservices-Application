@@ -19,6 +19,15 @@ import java.time.Instant;
  *
  * <p>{@code conferenceEventId} is carried so that billing can evaluate a refund against the days
  * remaining until the event without calling back into the Programme context.
+ *
+ * <p><strong>{@link #cardToken()} is how the attendee pays.</strong> Billing charges the order the
+ * moment this event arrives, so the token it charges travels with the request rather than through a
+ * second call the attendee would have to make before their hold expired. It is an opaque token for
+ * the simulated gateway ({@code TOK_OK}, {@code TOK_DECLINE}, {@code TOK_TIMEOUT}), never a card
+ * number, and the Registration context passes it through without storing it.
+ *
+ * <p>A free registration never produces this event: a payment order must be for more than zero,
+ * so {@code registration-service} confirms a zero-total registration on the spot instead.
  */
 public record RegistrationRequested(
         String eventId,
@@ -27,7 +36,8 @@ public record RegistrationRequested(
         String attendeeId,
         String conferenceEventId,
         BigDecimal totalAmount,
-        String currency) implements DomainEvent {
+        String currency,
+        String cardToken) implements DomainEvent {
 
     @Override
     public String partitionKey() {

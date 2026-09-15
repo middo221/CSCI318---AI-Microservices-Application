@@ -83,7 +83,8 @@ public class RegistrationApplicationService {
                 command.attendee(),
                 command.conferenceEventId(),
                 holds,
-                total);
+                total,
+                command.cardToken());
 
         // Drain before saving. Spring Data sees an id that is already assigned, so save() takes
         // the merge path and hands back a different managed copy — and domainEvents is @Transient,

@@ -38,6 +38,11 @@ public record Money(BigDecimal amount, String currency) {
         return new Money(new BigDecimal(amount), "AUD");
     }
 
+    /** True for a zero amount — a free registration, which has nothing to pay. */
+    public boolean isZero() {
+        return amount.signum() == 0;
+    }
+
     /**
      * @throws IllegalArgumentException if the currencies differ, so a mismatch fails loudly
      *                                  instead of silently adding unlike amounts

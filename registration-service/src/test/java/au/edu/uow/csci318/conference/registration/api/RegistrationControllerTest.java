@@ -52,6 +52,7 @@ class RegistrationControllerTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
         givenSession("ses-1", 120, "49.50", 0);
         givenSession("ses-full", 1, "10.00", 1);
+        givenSession("ses-free", 500, "0.00", 0);
     }
 
     private void givenSession(String id, int capacity, String price, int reserved) {
@@ -69,9 +70,14 @@ class RegistrationControllerTest {
                   "attendeeName": "Dana Okafor",
                   "attendeeEmail": "dana@example.com",
                   "eventId": "conf-1",
+                  "cardToken": "TOK_OK",
                   "sessions": [{ "sessionId": "%s", "quantity": %d }]
                 }
                 """.formatted(attendeeId, sessionId, quantity);
+    }
+
+    private static String bodyWithoutCardToken(String attendeeId, String sessionId, int quantity) {
+        return body(attendeeId, sessionId, quantity).replace("\"cardToken\": \"TOK_OK\",", "");
     }
 
     private String register(String attendeeId) throws Exception {
@@ -188,5 +194,24 @@ class RegistrationControllerTest {
         mockMvc.perform(get("/api/v1/attendees/att-nobody/registrations"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void refusesAPaidRegistrationWithNoCardToken() throws Exception {
+        mockMvc.perform(post("/api/v1/registrations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bodyWithoutCardToken("att-1042", "ses-1", 1)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    void confirmsAFreeRegistrationWithoutACardToken() throws Exception {
+        mockMvc.perform(post("/api/v1/registrations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bodyWithoutCardToken("att-free", "ses-free", 2)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.seatHolds[0].status").value("CONFIRMED"));
     }
 }

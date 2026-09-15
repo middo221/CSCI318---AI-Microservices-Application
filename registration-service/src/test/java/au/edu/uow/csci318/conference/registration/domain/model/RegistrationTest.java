@@ -27,7 +27,8 @@ class RegistrationTest {
                 "conf-1",
                 List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES),
                         SeatHold.hold("h-2", "ses-2", 1, EXPIRES)),
-                Money.aud("148.50"));
+                Money.aud("148.50"),
+                "TOK_OK");
     }
 
     @Test
@@ -53,6 +54,7 @@ class RegistrationTest {
             assertThat(requested.conferenceEventId()).isEqualTo("conf-1");
             assertThat(requested.totalAmount()).isEqualByComparingTo("148.50");
             assertThat(requested.currency()).isEqualTo("AUD");
+            assertThat(requested.cardToken()).isEqualTo("TOK_OK");
         });
         assertThat(events.subList(1, 3))
                 .allSatisfy(event -> assertThat(event).isInstanceOf(SeatsReserved.class));
@@ -68,9 +70,53 @@ class RegistrationTest {
     @Test
     void refusesARegistrationHoldingNoSeats() {
         assertThatThrownBy(() -> Registration.request(
-                "reg-1", ATTENDEE, "conf-1", List.of(), Money.aud("0.00")))
+                "reg-1", ATTENDEE, "conf-1", List.of(), Money.aud("0.00"), "TOK_OK"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("at least one");
+    }
+
+    /** A paid registration opens the saga, and payment charges on receipt — so it needs a token. */
+    @Test
+    void refusesAPaidRegistrationWithNoCardToken() {
+        assertThatThrownBy(() -> Registration.request(
+                "reg-1", ATTENDEE, "conf-1",
+                List.of(SeatHold.hold("h-1", "ses-1", 1, EXPIRES)), Money.aud("49.50"), " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("card token");
+    }
+
+    /**
+     * The catalogue allows free sessions, but a payment order must be for more than zero. A free
+     * registration therefore never opens the saga: it is confirmed on the spot, and ticketing issues
+     * its tickets from the same {@code registration-confirmed} a paid one produces.
+     */
+    @Test
+    void confirmsAFreeRegistrationImmediatelyWithoutAskingForPayment() {
+        Registration registration = Registration.request(
+                "reg-free", ATTENDEE, "conf-1",
+                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null);
+
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
+        assertThat(registration.getSeatHolds())
+                .allSatisfy(hold -> assertThat(hold.getStatus()).isEqualTo(SeatHoldStatus.CONFIRMED));
+
+        List<DomainEvent> events = registration.pullDomainEvents();
+        assertThat(events).noneMatch(event -> event instanceof RegistrationRequested);
+        assertThat(events).filteredOn(event -> event instanceof SeatsReserved).hasSize(1);
+        assertThat(events).filteredOn(event -> event instanceof RegistrationConfirmed)
+                .singleElement()
+                .satisfies(event -> assertThat(((RegistrationConfirmed) event).sessionIds())
+                        .containsExactly("ses-1"));
+    }
+
+    /** Nothing about a free registration is left for the hold-expiry sweep to find. */
+    @Test
+    void neverExpiresAFreeRegistration() {
+        Registration registration = Registration.request(
+                "reg-free", ATTENDEE, "conf-1",
+                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null);
+
+        assertThat(registration.isExpiredAt(EXPIRES.plusSeconds(3600))).isFalse();
     }
 
     @Test

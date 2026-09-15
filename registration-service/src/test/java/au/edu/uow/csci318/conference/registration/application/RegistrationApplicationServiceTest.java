@@ -1,6 +1,7 @@
 package au.edu.uow.csci318.conference.registration.application;
 
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
+import au.edu.uow.csci318.conference.common.event.RegistrationConfirmed;
 import au.edu.uow.csci318.conference.common.event.RegistrationRequested;
 import au.edu.uow.csci318.conference.common.event.SeatsReserved;
 import au.edu.uow.csci318.conference.registration.application.command.RequestRegistrationCommand;
@@ -105,7 +106,7 @@ class RegistrationApplicationServiceTest {
     }
 
     private static RequestRegistrationCommand requesting(SessionRequest... sessions) {
-        return new RequestRegistrationCommand(DANA, "conf-1", List.of(sessions));
+        return new RequestRegistrationCommand(DANA, "conf-1", List.of(sessions), "TOK_OK");
     }
 
     @Test
@@ -216,7 +217,7 @@ class RegistrationApplicationServiceTest {
         service.request(requesting(new SessionRequest("ses-1", 1)));
         service.request(new RequestRegistrationCommand(
                 new AttendeeRef("att-2000", "Sam", "sam@example.com"), "conf-1",
-                List.of(new SessionRequest("ses-1", 1))));
+                List.of(new SessionRequest("ses-1", 1)), "TOK_OK"));
 
         assertThat(service.findByAttendee("att-1042")).hasSize(1);
         assertThat(service.findByAttendee("att-2000")).hasSize(1);
@@ -231,5 +232,34 @@ class RegistrationApplicationServiceTest {
                 new SessionRequest("ses-1", 1), new SessionRequest("ses-1", 2)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("only once");
+    }
+
+    @Test
+    void confirmsAFreeRegistrationOnTheSpotAndNeverAsksPaymentForAnything() {
+        givenSession("ses-free", 50, "0.00");
+
+        Registration registration = service.request(new RequestRegistrationCommand(
+                DANA, "conf-1", List.of(new SessionRequest("ses-free", 2)), null));
+
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
+        assertThat(published).noneMatch(event -> event instanceof RegistrationRequested);
+        assertThat(published).anyMatch(event -> event instanceof RegistrationConfirmed);
+        assertThat(views.get("ses-free").getReservedSeats())
+                .as("a free seat is still a seat")
+                .isEqualTo(2);
+    }
+
+    @Test
+    void refusesAPaidRegistrationWithNoCardTokenAndWritesNothing() {
+        givenSession("ses-1", 120, "49.50");
+
+        assertThatThrownBy(() -> service.request(new RequestRegistrationCommand(
+                DANA, "conf-1", List.of(new SessionRequest("ses-1", 1)), null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("card token");
+
+        assertThat(stored).isEmpty();
+        assertThat(published).isEmpty();
+        assertThat(views.get("ses-1").getReservedSeats()).isZero();
     }
 }

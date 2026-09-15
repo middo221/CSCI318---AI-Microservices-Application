@@ -16,7 +16,8 @@ class RegistrationRequestedTest {
             "att-1042",
             "conf-1",
             new BigDecimal("99.00"),
-            "AUD");
+            "AUD",
+            "TOK_OK");
 
     @Test
     void publishesToTheRegistrationRequestedTopic() {
@@ -35,5 +36,11 @@ class RegistrationRequestedTest {
         assertThat(REQUESTED.conferenceEventId()).isEqualTo("conf-1");
         assertThat(REQUESTED.totalAmount()).isEqualByComparingTo("99.00");
         assertThat(REQUESTED.currency()).isEqualTo("AUD");
+    }
+
+    /** Payment charges on receipt, so the token it charges has to arrive with the request. */
+    @Test
+    void carriesTheCardTokenPaymentCharges() {
+        assertThat(REQUESTED.cardToken()).isEqualTo("TOK_OK");
     }
 }

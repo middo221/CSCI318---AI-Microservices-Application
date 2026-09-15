@@ -117,17 +117,28 @@ public class Registration {
      * Opens a registration with seats already held for it (FR-06).
      *
      * <p>Records a {@code RegistrationRequested} — which is what {@code payment-service} consumes
-     * to raise an order — followed by one {@code SeatsReserved} per session. One event per session,
-     * not per registration, because the seat topics are keyed by {@code sessionId} so the analytics
-     * join stays co-partitioned.
+     * to raise and charge an order — followed by one {@code SeatsReserved} per session. One event
+     * per session, not per registration, because the seat topics are keyed by {@code sessionId} so
+     * the analytics join stays co-partitioned.
      *
-     * @throws IllegalArgumentException if any attribute is missing, or no seats are held
+     * <p><strong>A free registration skips the saga.</strong> The catalogue allows a session price
+     * of zero, but a payment order must be for more than zero, so there is nothing to pay and nobody
+     * to wait for. It is confirmed on the spot: {@code SeatsReserved} and then
+     * {@code RegistrationConfirmed}, the same event a paid registration ends with, so ticketing
+     * issues its tickets without knowing the difference.
+     *
+     * <p>{@code cardToken} is passed through onto the event and deliberately not stored. It is
+     * Billing's concern; this context only carries it to the service that charges it.
+     *
+     * @throws IllegalArgumentException if any attribute is missing, no seats are held, or a
+     *                                  registration that costs money has no card token
      */
     public static Registration request(String id,
                                        AttendeeRef attendee,
                                        String conferenceEventId,
                                        List<SeatHold> seatHolds,
-                                       Money totalAmount) {
+                                       Money totalAmount,
+                                       String cardToken) {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("registration id must be supplied");
         }
@@ -144,7 +155,19 @@ public class Registration {
             throw new IllegalArgumentException("registration total must be supplied");
         }
 
+        boolean free = totalAmount.isZero();
+        if (!free && (cardToken == null || cardToken.isBlank())) {
+            throw new IllegalArgumentException(
+                    "a card token must be supplied to pay for a registration costing "
+                            + totalAmount.amount() + " " + totalAmount.currency());
+        }
+
         Registration registration = new Registration(id, attendee, conferenceEventId, seatHolds, totalAmount);
+        if (free) {
+            registration.recordSeatsReserved();
+            registration.confirm();
+            return registration;
+        }
         registration.domainEvents.add(new RegistrationRequested(
                 UUID.randomUUID().toString(),
                 Instant.now(),
@@ -152,14 +175,19 @@ public class Registration {
                 attendee.attendeeId(),
                 conferenceEventId,
                 totalAmount.amount(),
-                totalAmount.currency()));
-        registration.seatHolds.forEach(hold -> registration.domainEvents.add(new SeatsReserved(
+                totalAmount.currency(),
+                cardToken.trim()));
+        registration.recordSeatsReserved();
+        return registration;
+    }
+
+    private void recordSeatsReserved() {
+        seatHolds.forEach(hold -> domainEvents.add(new SeatsReserved(
                 UUID.randomUUID().toString(),
                 Instant.now(),
                 id,
                 hold.getSessionId(),
                 hold.getQuantity())));
-        return registration;
     }
 
     /**

@@ -9,10 +9,14 @@ import java.util.List;
  *
  * <p>Carries domain types rather than transport types, so the application layer never sees the
  * shape of the HTTP request. The API layer is responsible for the translation.
+ *
+ * <p>{@code cardToken} is not validated here. Whether one is needed depends on the total, which
+ * only exists once the sessions are priced, so the {@code Registration} aggregate decides.
  */
 public record RequestRegistrationCommand(AttendeeRef attendee,
                                          String conferenceEventId,
-                                         List<SessionRequest> sessions) {
+                                         List<SessionRequest> sessions,
+                                         String cardToken) {
 
     public RequestRegistrationCommand {
         if (attendee == null) {

@@ -36,10 +36,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Proves the consuming half of the saga, and the compensation paths, without a broker.
  *
- * <p>Payment-service does not exist yet — it is another member's branch — so these tests drive the
- * saga by pushing the events it will one day produce straight onto the input destination. The same
- * events are hand-injected onto a live broker in the M2 verification, which is what proves the
- * binder configuration these tests structurally cannot.
+ * <p>These tests drive the saga by pushing the events {@code payment-service} produces straight onto
+ * the input destination, so registration's half is proven independently of payment's. The binder
+ * configuration is something they structurally cannot prove; only a live broker can.
  */
 @SpringBootTest
 @EnableTestBinder
@@ -79,7 +78,8 @@ class PaymentEventConsumersTest {
         Registration registration = registrations.request(new RequestRegistrationCommand(
                 new AttendeeRef("att-" + UUID.randomUUID(), "Dana", "dana@example.com"),
                 "conf-1",
-                List.of(new SessionRequest(sessionId, seats))));
+                List.of(new SessionRequest(sessionId, seats)),
+                "TOK_OK"));
         outbound.clear();
         return registration;
     }

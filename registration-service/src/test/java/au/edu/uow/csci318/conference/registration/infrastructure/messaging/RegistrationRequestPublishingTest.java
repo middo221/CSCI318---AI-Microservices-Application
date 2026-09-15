@@ -89,7 +89,8 @@ class RegistrationRequestPublishingTest {
         return registrations.request(new RequestRegistrationCommand(
                 new AttendeeRef("att-" + UUID.randomUUID(), "Dana", "dana@example.com"),
                 "conf-1",
-                List.of(requested)));
+                List.of(requested),
+                "TOK_OK"));
     }
 
     @Test
@@ -106,6 +107,9 @@ class RegistrationRequestPublishingTest {
         assertThat(payload.get("registrationId").asText()).isEqualTo(registration.getId());
         assertThat(payload.get("totalAmount").decimalValue()).isEqualByComparingTo("148.50");
         assertThat(payload.get("currency").asText()).isEqualTo("AUD");
+        assertThat(payload.get("cardToken").asText())
+                .as("payment charges on receipt, so the token must survive serialisation")
+                .isEqualTo("TOK_OK");
     }
 
     @Test
