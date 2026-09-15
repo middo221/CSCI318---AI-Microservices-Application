@@ -1,13 +1,19 @@
 package au.edu.uow.csci318.conference.payment.api;
 
+import au.edu.uow.csci318.conference.payment.api.dto.PaymentOrderResponse;
 import au.edu.uow.csci318.conference.payment.application.PaymentApplicationService;
-import au.edu.uow.csci318.conference.payment.domain.model.PaymentOrder;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * The Billing read surface (FR-07).
+ *
+ * <p>Read-only by design. There is no "pay" endpoint: payment is started by
+ * {@code registration-requested}, carrying the card token the attendee gave when registering. These
+ * endpoints exist so an attendee — and, in M4, the support agent — can see what happened.
+ */
 @RestController
 @RequestMapping("/api/v1")
 public class PaymentController {
@@ -18,19 +24,13 @@ public class PaymentController {
         this.payments = payments;
     }
 
-    @GetMapping("/payment-orders/{id}")
-    public ResponseEntity<PaymentOrder> getPaymentOrder(@PathVariable String id) {
-        return payments.findById(id)
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+    @GetMapping("/payment-orders/{paymentOrderId}")
+    public PaymentOrderResponse byId(@PathVariable String paymentOrderId) {
+        return PaymentOrderResponse.from(payments.findById(paymentOrderId));
     }
 
     @GetMapping("/registrations/{registrationId}/payment-order")
-    public ResponseEntity<PaymentOrder> getPaymentOrderByRegistration(
-            @PathVariable String registrationId) {
-
-        return payments.findByRegistrationId(registrationId)
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+    public PaymentOrderResponse byRegistration(@PathVariable String registrationId) {
+        return PaymentOrderResponse.from(payments.findByRegistrationId(registrationId));
     }
 }

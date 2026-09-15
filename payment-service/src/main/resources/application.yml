@@ -17,7 +17,11 @@ spring:
     console:
       enabled: true
       path: /h2-console
-    cloud:
+  # `cloud` must sit directly under `spring`. The first version of this file indented it under
+  # `h2`, which is still valid YAML - so nothing complained, and the consumer bound to a destination
+  # named after the bean instead of `registration-requested`. RegistrationEventConsumersTest now
+  # fails if that happens again.
+  cloud:
     function:
       definition: registrationRequested
     stream:
@@ -25,6 +29,15 @@ spring:
         registrationRequested-in-0:
           destination: registration-requested
           group: payment-service
+      kafka:
+        binder:
+          brokers: localhost:9092
+          # The binder defaults key.serializer to ByteArraySerializer, but
+          # DomainEvent.partitionKey() is a String, so every send fails with a
+          # SerializationException. The test binder moves the message in-JVM and never invokes a
+          # serialiser, so no test can catch this - only a live broker can, and it did, in M1.
+          producer-properties:
+            key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 logging:
   level:
