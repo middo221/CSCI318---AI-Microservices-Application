@@ -7,6 +7,7 @@ import au.edu.uow.csci318.conference.payment.domain.gateway.ChargeResult;
 import au.edu.uow.csci318.conference.payment.domain.gateway.PaymentGateway;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,6 +18,8 @@ class PaymentOrderTest {
 
     private static final Money AMOUNT = Money.aud("148.50");
     private static final CardToken TOKEN = new CardToken("TOK_OK");
+    private static final Instant NOW = Instant.parse("2026-09-15T10:00:00Z");
+    private static final Instant HOLD_EXPIRES = NOW.plusSeconds(120);
 
     private final List<CardToken> charged = new ArrayList<>();
 
@@ -29,7 +32,7 @@ class PaymentOrderTest {
     }
 
     private static PaymentOrder order() {
-        return PaymentOrder.raise("pay-1", "reg-1", AMOUNT);
+        return PaymentOrder.raise("pay-1", "reg-1", AMOUNT, HOLD_EXPIRES);
     }
 
     @Test
@@ -39,6 +42,7 @@ class PaymentOrderTest {
         assertThat(order.getId()).isEqualTo("pay-1");
         assertThat(order.getRegistrationId()).isEqualTo("reg-1");
         assertThat(order.getAmount()).isEqualTo(AMOUNT);
+        assertThat(order.getHoldExpiresAt()).isEqualTo(HOLD_EXPIRES);
         assertThat(order.getStatus()).isEqualTo(PaymentStatus.PENDING);
         assertThat(order.getAttempts()).isEmpty();
         assertThat(order.pullDomainEvents()).isEmpty();
@@ -47,23 +51,30 @@ class PaymentOrderTest {
     /** Specification section 4.1: a payment order is for more than zero. */
     @Test
     void refusesAnOrderForNothing() {
-        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", "reg-1", Money.aud("0.00")))
+        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", "reg-1", Money.aud("0.00"), HOLD_EXPIRES))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("more than zero");
     }
 
     @Test
     void refusesAnOrderForNoRegistration() {
-        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", " ", AMOUNT))
+        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", " ", AMOUNT, HOLD_EXPIRES))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("registration");
+    }
+
+    @Test
+    void refusesAnOrderWithNoHoldDeadline() {
+        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", "reg-1", AMOUNT, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("hold");
     }
 
     @Test
     void becomesPaidAndAnnouncesItWhenTheChargeSucceeds() {
         PaymentOrder order = order();
 
-        order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-1")));
+        order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-1")), NOW);
 
         assertThat(order.getStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(order.getAttempts()).singleElement().satisfies(attempt -> {
@@ -91,7 +102,7 @@ class PaymentOrderTest {
         PaymentOrder order = order();
 
         order.pay(new CardToken("TOK_DECLINE"),
-                gatewayAnswering(ChargeResult.declined("sim-2", "CARD_DECLINED")));
+                gatewayAnswering(ChargeResult.declined("sim-2", "CARD_DECLINED")), NOW);
 
         assertThat(order.getStatus()).isEqualTo(PaymentStatus.FAILED);
         assertThat(order.getAttempts()).singleElement().satisfies(attempt -> {
@@ -111,11 +122,40 @@ class PaymentOrderTest {
         PaymentOrder order = order();
 
         order.pay(new CardToken("TOK_TIMEOUT"),
-                gatewayAnswering(ChargeResult.timedOut("sim-3", "GATEWAY_TIMEOUT")));
+                gatewayAnswering(ChargeResult.timedOut("sim-3", "GATEWAY_TIMEOUT")), NOW);
 
         assertThat(order.getStatus()).isEqualTo(PaymentStatus.FAILED);
         assertThat(order.getAttempts().get(0).getOutcome()).isEqualTo(AttemptOutcome.TIMED_OUT);
         assertThat(((PaymentFailed) order.pullDomainEvents().get(0)).reason()).isEqualTo("GATEWAY_TIMEOUT");
+    }
+
+    /**
+     * Payment may be consuming a backlog after an outage, long after registration expired the hold
+     * and put the seats back on sale. Charging then would take money for nothing, with no refund
+     * path until FR-11 — so the card is never presented to the gateway at all.
+     */
+    @Test
+    void refusesToChargeOnceTheSeatsAreNoLongerHeld() {
+        PaymentOrder order = order();
+
+        order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-1")), HOLD_EXPIRES.plusSeconds(1));
+
+        assertThat(charged).as("the gateway must never be called").isEmpty();
+        assertThat(order.getAttempts()).as("no charge was attempted").isEmpty();
+        assertThat(order.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(order.pullDomainEvents()).singleElement()
+                .isInstanceOfSatisfying(PaymentFailed.class,
+                        failed -> assertThat(failed.reason()).isEqualTo("HOLD_EXPIRED"));
+    }
+
+    /** A hold is live for its whole window, exactly as {@code SeatHold.isExpiredAt} defines it. */
+    @Test
+    void stillChargesAtTheDeadlineItself() {
+        PaymentOrder order = order();
+
+        order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-1")), HOLD_EXPIRES);
+
+        assertThat(order.getStatus()).isEqualTo(PaymentStatus.PAID);
     }
 
     /**
@@ -126,10 +166,10 @@ class PaymentOrderTest {
     void neverChargesAnOrderThatIsNoLongerPending() {
         PaymentOrder order = order();
         PaymentGateway gateway = gatewayAnswering(ChargeResult.succeeded("sim-1"));
-        order.pay(TOKEN, gateway);
+        order.pay(TOKEN, gateway, NOW);
         order.pullDomainEvents();
 
-        assertThatThrownBy(() -> order.pay(TOKEN, gateway))
+        assertThatThrownBy(() -> order.pay(TOKEN, gateway, NOW))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("PAID");
 
@@ -141,9 +181,9 @@ class PaymentOrderTest {
     @Test
     void neverRetriesAFailedOrder() {
         PaymentOrder order = order();
-        order.pay(TOKEN, gatewayAnswering(ChargeResult.declined("sim-2", "CARD_DECLINED")));
+        order.pay(TOKEN, gatewayAnswering(ChargeResult.declined("sim-2", "CARD_DECLINED")), NOW);
 
-        assertThatThrownBy(() -> order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-9"))))
+        assertThatThrownBy(() -> order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-9")), NOW))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(order.getStatus()).isEqualTo(PaymentStatus.FAILED);
     }
@@ -151,7 +191,7 @@ class PaymentOrderTest {
     @Test
     void drainsItsEventsOnlyOnce() {
         PaymentOrder order = order();
-        order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-1")));
+        order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-1")), NOW);
 
         assertThat(order.pullDomainEvents()).hasSize(1);
         assertThat(order.pullDomainEvents()).isEmpty();
@@ -160,7 +200,7 @@ class PaymentOrderTest {
     @Test
     void exposesItsAttemptsReadOnly() {
         PaymentOrder order = order();
-        order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-1")));
+        order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-1")), NOW);
 
         assertThatThrownBy(() -> order.getAttempts().clear())
                 .isInstanceOf(UnsupportedOperationException.class);

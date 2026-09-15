@@ -59,6 +59,7 @@ public class RegistrationEventConsumers {
                 PaymentOrder order = payments.payForRegistration(new PayForRegistrationCommand(
                         event.registrationId(),
                         new Money(event.totalAmount(), event.currency()),
+                        event.holdExpiresAt(),
                         new CardToken(event.cardToken())));
                 log.info("payment order {} for registration {} is {} ({} {})",
                         order.getId(), order.getRegistrationId(), order.getStatus(),

@@ -62,8 +62,13 @@ class RegistrationEventConsumersTest {
     }
 
     private static RegistrationRequested requested(String registrationId, String cardToken) {
+        return requested(registrationId, cardToken, Instant.now().plusSeconds(900));
+    }
+
+    private static RegistrationRequested requested(String registrationId, String cardToken,
+                                                   Instant holdExpiresAt) {
         return new RegistrationRequested(UUID.randomUUID().toString(), Instant.now(), registrationId,
-                "att-1042", "conf-1", new BigDecimal("148.50"), "AUD", cardToken);
+                "att-1042", "conf-1", new BigDecimal("148.50"), "AUD", holdExpiresAt, cardToken);
     }
 
     private void send(RegistrationRequested event) {
@@ -105,6 +110,27 @@ class RegistrationEventConsumersTest {
                 .isEqualTo("CARD_DECLINED");
         assertThat(payments.findByRegistrationId(registrationId).getStatus())
                 .isEqualTo(PaymentStatus.FAILED);
+    }
+
+    /**
+     * The outage case: payment was down past the hold window and is now reading the backlog. The
+     * seats are already back on sale, so the answer is a failure — and no money moves.
+     */
+    @Test
+    void refusesToChargeForSeatsWhoseHoldHasAlreadyExpired() throws Exception {
+        String registrationId = "reg-" + UUID.randomUUID();
+
+        send(requested(registrationId, "TOK_OK", Instant.now().minusSeconds(60)));
+
+        Message<byte[]> message = outbound.receive(2000, "payment-failed");
+        assertThat(message).isNotNull();
+        assertThat(objectMapper.readTree(message.getPayload()).get("reason").asText())
+                .isEqualTo("HOLD_EXPIRED");
+        assertThat(outbound.receive(500, "payment-succeeded")).isNull();
+
+        PaymentOrder order = payments.findByRegistrationId(registrationId);
+        assertThat(order.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(order.getAttempts()).as("the gateway was never called").isEmpty();
     }
 
     /** Kafka delivers at least once. A second delivery must charge nothing and announce nothing. */

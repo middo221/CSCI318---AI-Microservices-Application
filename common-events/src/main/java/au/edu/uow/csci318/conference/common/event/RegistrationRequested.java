@@ -26,6 +26,12 @@ import java.time.Instant;
  * the simulated gateway ({@code TOK_OK}, {@code TOK_DECLINE}, {@code TOK_TIMEOUT}), never a card
  * number, and the Registration context passes it through without storing it.
  *
+ * <p><strong>{@link #holdExpiresAt()} is the deadline for charging it</strong> — the earliest expiry
+ * among the registration's seat holds. Kafka keeps what an absent consumer missed, so a
+ * payment-service that was down longer than the hold window would otherwise wake up and charge
+ * attendees for seats registration has already expired and put back on sale. Past this instant,
+ * Billing refuses the charge instead of taking it.
+ *
  * <p>A free registration never produces this event: a payment order must be for more than zero,
  * so {@code registration-service} confirms a zero-total registration on the spot instead.
  */
@@ -37,6 +43,7 @@ public record RegistrationRequested(
         String conferenceEventId,
         BigDecimal totalAmount,
         String currency,
+        Instant holdExpiresAt,
         String cardToken) implements DomainEvent {
 
     @Override

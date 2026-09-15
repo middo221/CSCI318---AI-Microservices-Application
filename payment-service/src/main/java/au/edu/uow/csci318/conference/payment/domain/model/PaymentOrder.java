@@ -33,9 +33,16 @@ import java.util.UUID;
  *
  * <p>Raised when {@code registration-requested} arrives and charged immediately with the card token
  * that event carries. The order owns its {@link PaymentAttempt} entities and the transition between
- * statuses, so the rule that matters most here is enforceable in one place: <strong>a card is
- * charged only while the order is {@link PaymentStatus#PENDING}</strong>, and the check runs before
- * the gateway is called, not after.
+ * statuses, so the two rules that matter most are enforceable in one place, and both are checked
+ * <em>before</em> the gateway is called:
+ *
+ * <ul>
+ *   <li><strong>a card is charged only while the order is {@link PaymentStatus#PENDING}</strong>;</li>
+ *   <li><strong>a card is never charged after {@link #holdExpiresAt}.</strong> Past that instant
+ *       registration has released the seats, so the order fails with {@code HOLD_EXPIRED} and no
+ *       attempt is made. This is what makes a payment-service outage safe: the backlog it reads on
+ *       restart cannot take money for seats that are back on sale.</li>
+ * </ul>
  *
  * <p><strong>One attempt per order.</strong> The first failure is final. Registration cancels the
  * registration and releases its seats on the first {@code payment-failed}, so a retry would be
@@ -53,6 +60,8 @@ import java.util.UUID;
 @Table(name = "payment_orders")
 public class PaymentOrder {
 
+    static final String HOLD_EXPIRED = "HOLD_EXPIRED";
+
     @Id
     @Column(name = "id", nullable = false, length = 64)
     private String id;
@@ -67,6 +76,10 @@ public class PaymentOrder {
             @AttributeOverride(name = "currency", column = @Column(name = "currency", nullable = false, length = 3))
     })
     private Money amount;
+
+    /** When registration releases the seats this order pays for. Nothing is charged after it. */
+    @Column(name = "hold_expires_at", nullable = false)
+    private Instant holdExpiresAt;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 16)
@@ -87,10 +100,11 @@ public class PaymentOrder {
         // required by JPA
     }
 
-    private PaymentOrder(String id, String registrationId, Money amount) {
+    private PaymentOrder(String id, String registrationId, Money amount, Instant holdExpiresAt) {
         this.id = id;
         this.registrationId = registrationId;
         this.amount = amount;
+        this.holdExpiresAt = holdExpiresAt;
         this.status = PaymentStatus.PENDING;
         this.createdAt = Instant.now();
     }
@@ -101,7 +115,7 @@ public class PaymentOrder {
      * @throws IllegalArgumentException if any attribute is missing, or the amount is zero —
      *                                  specification section 4.1 requires more than zero
      */
-    public static PaymentOrder raise(String id, String registrationId, Money amount) {
+    public static PaymentOrder raise(String id, String registrationId, Money amount, Instant holdExpiresAt) {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("payment order id must be supplied");
         }
@@ -115,25 +129,38 @@ public class PaymentOrder {
             throw new IllegalArgumentException(
                     "a payment order must be for more than zero; a free registration has nothing to pay");
         }
-        return new PaymentOrder(id, registrationId.trim(), amount);
+        if (holdExpiresAt == null) {
+            throw new IllegalArgumentException("payment order must know when the seat hold expires");
+        }
+        return new PaymentOrder(id, registrationId.trim(), amount, holdExpiresAt);
     }
 
     /**
      * Charges the order through the gateway and records the outcome (FR-07).
      *
      * <p>Records a {@code PaymentSucceeded} or a {@code PaymentFailed}, both keyed by registration
-     * so they share a partition with the rest of that registration's saga.
+     * so they share a partition with the rest of that registration's saga. If {@code now} is past
+     * the hold deadline the order fails with {@code HOLD_EXPIRED} and the gateway is never called.
      *
      * @throws IllegalStateException if the order is no longer pending — before the gateway is called
      */
-    public void pay(CardToken cardToken, PaymentGateway gateway) {
+    public void pay(CardToken cardToken, PaymentGateway gateway, Instant now) {
         if (cardToken == null) {
             throw new IllegalArgumentException("card token must be supplied");
         }
         if (gateway == null) {
             throw new IllegalArgumentException("payment gateway must be supplied");
         }
+        if (now == null) {
+            throw new IllegalArgumentException("the current instant must be supplied");
+        }
         requirePending();
+
+        // Strictly after, matching SeatHold.isExpiredAt: a hold is live for its whole window.
+        if (now.isAfter(holdExpiresAt)) {
+            fail(HOLD_EXPIRED);
+            return;
+        }
 
         ChargeResult result = gateway.charge(id, amount, cardToken);
         attempts.add(PaymentAttempt.record(cardToken, result));
@@ -149,14 +176,18 @@ public class PaymentOrder {
                     amount.currency()));
         }
         else {
-            status = PaymentStatus.FAILED;
-            domainEvents.add(new PaymentFailed(
-                    UUID.randomUUID().toString(),
-                    Instant.now(),
-                    id,
-                    registrationId,
-                    result.failureReason()));
+            fail(result.failureReason());
         }
+    }
+
+    private void fail(String reason) {
+        status = PaymentStatus.FAILED;
+        domainEvents.add(new PaymentFailed(
+                UUID.randomUUID().toString(),
+                Instant.now(),
+                id,
+                registrationId,
+                reason));
     }
 
     private void requirePending() {
@@ -184,6 +215,10 @@ public class PaymentOrder {
 
     public Money getAmount() {
         return amount;
+    }
+
+    public Instant getHoldExpiresAt() {
+        return holdExpiresAt;
     }
 
     public PaymentStatus getStatus() {

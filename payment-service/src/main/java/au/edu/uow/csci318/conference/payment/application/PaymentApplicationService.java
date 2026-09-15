@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -54,6 +55,9 @@ public class PaymentApplicationService {
      * restart, and a replayed {@code registration-requested} must never take the attendee's money
      * a second time.
      *
+     * <p>A request that arrives after its hold has expired still raises an order, so there is a
+     * record of what happened, but the order fails with {@code HOLD_EXPIRED} and nothing is charged.
+     *
      * @throws IllegalArgumentException if the amount is zero
      */
     @Transactional
@@ -66,8 +70,9 @@ public class PaymentApplicationService {
         }
 
         PaymentOrder order = PaymentOrder.raise(
-                UUID.randomUUID().toString(), command.registrationId(), command.amount());
-        order.pay(command.cardToken(), gateway);
+                UUID.randomUUID().toString(), command.registrationId(), command.amount(),
+                command.holdExpiresAt());
+        order.pay(command.cardToken(), gateway, Instant.now());
 
         // Drain before saving. The id is already assigned, so save() merges and returns a different
         // managed copy, and domainEvents is @Transient — that copy carries nothing.

@@ -26,6 +26,7 @@ import jakarta.persistence.Transient;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -128,7 +129,9 @@ public class Registration {
      * issues its tickets without knowing the difference.
      *
      * <p>{@code cardToken} is passed through onto the event and deliberately not stored. It is
-     * Billing's concern; this context only carries it to the service that charges it.
+     * Billing's concern; this context only carries it to the service that charges it. The event
+     * also carries the earliest hold expiry, so Billing never charges for seats this aggregate has
+     * already released.
      *
      * @throws IllegalArgumentException if any attribute is missing, no seats are held, or a
      *                                  registration that costs money has no card token
@@ -176,9 +179,18 @@ public class Registration {
                 conferenceEventId,
                 totalAmount.amount(),
                 totalAmount.currency(),
+                registration.earliestHoldExpiry(),
                 cardToken.trim()));
         registration.recordSeatsReserved();
         return registration;
+    }
+
+    /**
+     * The deadline payment must charge by. The sweep expires the whole registration as soon as any
+     * one hold runs out, so it is the earliest hold that decides, not the latest.
+     */
+    private Instant earliestHoldExpiry() {
+        return seatHolds.stream().map(SeatHold::getExpiresAt).min(Comparator.naturalOrder()).orElseThrow();
     }
 
     private void recordSeatsReserved() {

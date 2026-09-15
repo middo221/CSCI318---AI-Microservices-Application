@@ -12,6 +12,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 
+import java.time.Instant;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -25,6 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Import(JpaPaymentOrderRepository.class)
 class JpaPaymentOrderRepositoryTest {
 
+    private static final Instant HOLD_EXPIRES = Instant.parse("2026-09-15T10:02:00Z");
+
     @Autowired
     private JpaPaymentOrderRepository orders;
 
@@ -37,8 +41,10 @@ class JpaPaymentOrderRepositoryTest {
     }
 
     private PaymentOrder paidOrder(String id, String registrationId) {
-        PaymentOrder order = PaymentOrder.raise(id, registrationId, Money.aud("148.50"));
-        order.pay(new CardToken("TOK_OK"), (orderId, amount, token) -> ChargeResult.succeeded("sim-" + id));
+        PaymentOrder order = PaymentOrder.raise(id, registrationId, Money.aud("148.50"), HOLD_EXPIRES);
+        order.pay(new CardToken("TOK_OK"),
+                (orderId, amount, token) -> ChargeResult.succeeded("sim-" + id),
+                HOLD_EXPIRES.minusSeconds(60));
         return order;
     }
 
@@ -51,6 +57,7 @@ class JpaPaymentOrderRepositoryTest {
         assertThat(loaded.getRegistrationId()).isEqualTo("reg-1");
         assertThat(loaded.getAmount()).isEqualTo(Money.aud("148.50"));
         assertThat(loaded.getStatus()).isEqualTo(PaymentStatus.PAID);
+        assertThat(loaded.getHoldExpiresAt()).isEqualTo(HOLD_EXPIRES);
         assertThat(loaded.getCreatedAt()).isNotNull();
         assertThat(loaded.getAttempts()).singleElement().satisfies(attempt -> {
             assertThat(attempt.getId()).isNotBlank();

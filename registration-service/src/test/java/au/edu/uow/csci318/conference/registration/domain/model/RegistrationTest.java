@@ -55,6 +55,7 @@ class RegistrationTest {
             assertThat(requested.totalAmount()).isEqualByComparingTo("148.50");
             assertThat(requested.currency()).isEqualTo("AUD");
             assertThat(requested.cardToken()).isEqualTo("TOK_OK");
+            assertThat(requested.holdExpiresAt()).isEqualTo(EXPIRES);
         });
         assertThat(events.subList(1, 3))
                 .allSatisfy(event -> assertThat(event).isInstanceOf(SeatsReserved.class));
@@ -73,6 +74,23 @@ class RegistrationTest {
                 "reg-1", ATTENDEE, "conf-1", List.of(), Money.aud("0.00"), "TOK_OK"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("at least one");
+    }
+
+    /**
+     * The sweeper expires a registration as soon as <em>any</em> of its holds runs out, so the
+     * earliest deadline is the one payment must respect.
+     */
+    @Test
+    void tellsPaymentTheEarliestHoldDeadline() {
+        Registration registration = Registration.request(
+                "reg-1", ATTENDEE, "conf-1",
+                List.of(SeatHold.hold("h-1", "ses-1", 1, EXPIRES.plusSeconds(60)),
+                        SeatHold.hold("h-2", "ses-2", 1, EXPIRES)),
+                Money.aud("20.00"), "TOK_OK");
+
+        RegistrationRequested requested = (RegistrationRequested) registration.pullDomainEvents().get(0);
+
+        assertThat(requested.holdExpiresAt()).isEqualTo(EXPIRES);
     }
 
     /** A paid registration opens the saga, and payment charges on receipt — so it needs a token. */

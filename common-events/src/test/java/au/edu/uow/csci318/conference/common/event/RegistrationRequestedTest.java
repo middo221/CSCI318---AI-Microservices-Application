@@ -17,6 +17,7 @@ class RegistrationRequestedTest {
             "conf-1",
             new BigDecimal("99.00"),
             "AUD",
+            Instant.parse("2026-09-03T02:17:30Z"),
             "TOK_OK");
 
     @Test
@@ -42,5 +43,11 @@ class RegistrationRequestedTest {
     @Test
     void carriesTheCardTokenPaymentCharges() {
         assertThat(REQUESTED.cardToken()).isEqualTo("TOK_OK");
+    }
+
+    /** Payment must never charge for seats registration has already released. */
+    @Test
+    void carriesTheDeadlineAfterWhichTheSeatsAreNoLongerHeld() {
+        assertThat(REQUESTED.holdExpiresAt()).isEqualTo(Instant.parse("2026-09-03T02:17:30Z"));
     }
 }

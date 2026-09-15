@@ -110,6 +110,9 @@ class RegistrationRequestPublishingTest {
         assertThat(payload.get("cardToken").asText())
                 .as("payment charges on receipt, so the token must survive serialisation")
                 .isEqualTo("TOK_OK");
+        assertThat(payload.hasNonNull("holdExpiresAt"))
+                .as("payment refuses to charge past this deadline, so it must survive serialisation")
+                .isTrue();
     }
 
     @Test

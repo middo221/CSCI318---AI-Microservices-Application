@@ -14,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -39,7 +40,8 @@ class PaymentControllerTest {
 
     private PaymentOrder givenAnOrder(String token) {
         return payments.payForRegistration(new PayForRegistrationCommand(
-                "reg-" + UUID.randomUUID(), Money.aud("148.50"), new CardToken(token)));
+                "reg-" + UUID.randomUUID(), Money.aud("148.50"),
+                Instant.now().plusSeconds(900), new CardToken(token)));
     }
 
     @Test
@@ -53,6 +55,7 @@ class PaymentControllerTest {
                 .andExpect(jsonPath("$.status").value("PAID"))
                 .andExpect(jsonPath("$.amount").value(148.5))
                 .andExpect(jsonPath("$.currency").value("AUD"))
+                .andExpect(jsonPath("$.holdExpiresAt").isNotEmpty())
                 .andExpect(jsonPath("$.attempts.length()").value(1))
                 .andExpect(jsonPath("$.attempts[0].outcome").value("SUCCEEDED"))
                 .andExpect(jsonPath("$.attempts[0].gatewayReference").isNotEmpty());
