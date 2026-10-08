@@ -1,0 +1,66 @@
+' Attendee assistance bounded context — concierge-service, package ...concierge.domain
+' Shared by domain-assistance.puml (full detail) and domain-model.puml (overview).
+' Non-persistent: every class here is an immutable record or a stateless service.
+' Second pass (FR-18): add the support agent's records (TicketSummary, RefundQuote, ...) here.
+
+package "Attendee assistance  (concierge-service)" as assistance {
+
+  class SessionSummary <<ValueObject>> {
+    sessionId : String
+    eventId : String
+    title : String
+    track : String
+    slot : TimeSlot
+    speakerId : String
+    seatCapacity : int
+    priceAmount : BigDecimal
+    priceCurrency : String
+    --
+    clashesWith(SessionSummary) : boolean
+  }
+
+  class "TimeSlot" as X_TimeSlot <<ValueObject>> {
+    start : LocalDateTime
+    end : LocalDateTime
+    --
+    day() : LocalDate
+    overlaps(TimeSlot) : boolean
+  }
+
+  class AvailabilitySummary <<ValueObject>> {
+    sessionId : String
+    title : String
+    capacity : int
+    reservedSeats : int
+    availableSeats : int
+    --
+    isFull() : boolean
+  }
+
+  class RegistrationSummary <<ValueObject>> {
+    registrationId : String
+    attendeeId : String
+    eventId : String
+    status : String
+    sessionIds : List<String>
+  }
+
+  class Clash <<ValueObject>> {
+    firstSessionId : String
+    firstTitle : String
+    secondSessionId : String
+    secondTitle : String
+    --
+    describe() : String
+  }
+
+  class ClashDetector <<DomainService>> {
+    + detect(List<SessionSummary>) : List<Clash>
+    + firstConflict(SessionSummary, List<SessionSummary>) : Optional<SessionSummary>
+    + clashFreePrefix(List<SessionSummary>) : List<SessionSummary>
+  }
+
+  SessionSummary *-- "1" X_TimeSlot : slot
+  ClashDetector ..> SessionSummary : compares slots
+  ClashDetector ..> Clash : creates
+}

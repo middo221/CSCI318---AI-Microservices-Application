@@ -1,0 +1,44 @@
+@startuml domain-billing
+' Report §2.4 — Billing bounded context in full. The classes come from
+' include/domain-billing.iuml, the same source the overview (domain-model.puml) uses.
+!pragma layout smetana
+!include include/style.iuml
+skinparam classAttributeIconSize 0
+hide empty members
+
+title Billing context (payment-service) — domain model
+
+!include include/domain-billing.iuml
+!include include/domain-published-language.iuml
+!$only = "billing"
+!include include/domain-event-links.iuml
+
+remove @unlinked
+hide <<DomainEvent>> members
+
+note top of PaymentOrder
+  <b>Invariants</b>
+  · amount is more than zero
+  · one order per registration (unique column);
+    a redelivered request returns the existing order
+  · charged only while PENDING
+  · past holdExpiresAt: FAILED with reason
+    HOLD_EXPIRED, gateway never called
+end note
+
+note bottom of PaymentGateway
+  Domain port. Its adapter, SimulatedPaymentGateway
+  (infrastructure), is deterministic by token:
+  TOK_OK → SUCCEEDED
+  TOK_TIMEOUT → TIMED_OUT, "GATEWAY_TIMEOUT"
+  anything else → DECLINED, "CARD_DECLINED"
+end note
+
+legend right
+  Value objects are Java records; Money and CardToken
+  are JPA @Embeddable. Money is duplicated from the
+  Registration context on purpose.
+  PaymentStatus.REFUNDED exists, but no use case on
+  main sets it (FR-11).
+endlegend
+@enduml

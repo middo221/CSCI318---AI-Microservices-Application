@@ -1,0 +1,77 @@
+' Billing bounded context — payment-service, package ...payment.domain
+' Shared by domain-billing.puml (full detail) and domain-model.puml (overview).
+' Second pass (FR-11): add Refund <<AggregateRoot>>, RefundDecision <<ValueObject>>,
+' DecisionMaker and RefundPolicyService <<DomainService>> here.
+
+package "Billing  (payment-service)" as billing {
+
+  class PaymentOrder <<AggregateRoot>> {
+    - id : String
+    - registrationId : String  {unique}
+    - amount : Money  {> 0}
+    - holdExpiresAt : Instant
+    - status : PaymentStatus
+    - attempts : List<PaymentAttempt>
+    - createdAt : Instant
+    --
+    + {static} raise(id, registrationId, Money, holdExpiresAt) : PaymentOrder
+    + pay(CardToken, PaymentGateway, Instant now) : void
+    + pullDomainEvents() : List<DomainEvent>
+  }
+
+  class PaymentAttempt <<Entity>> {
+    - id : String
+    - cardToken : CardToken
+    - outcome : AttemptOutcome
+    - failureReason : String
+    - gatewayReference : String
+    - occurredAt : Instant
+    --
+    ~ {static} record(CardToken, ChargeResult) : PaymentAttempt
+  }
+
+  class "Money" as B_Money <<ValueObject>> {
+    amount : BigDecimal  {>= 0, scale 2}
+    currency : String  {3 letters}
+    --
+    isZero() : boolean
+  }
+
+  class CardToken <<ValueObject>> {
+    value : String  {opaque; never card-number shaped}
+  }
+
+  class ChargeResult <<ValueObject>> {
+    outcome : AttemptOutcome
+    gatewayReference : String
+    failureReason : String
+    --
+    succeeded() : boolean
+  }
+
+  interface PaymentGateway <<Port>> {
+    + charge(paymentOrderId, Money, CardToken) : ChargeResult
+  }
+
+  enum PaymentStatus {
+    PENDING
+    PAID
+    FAILED
+    REFUNDED
+  }
+
+  enum AttemptOutcome {
+    SUCCEEDED
+    DECLINED
+    TIMED_OUT
+  }
+
+  PaymentOrder "1" *-- "0..*" PaymentAttempt : attempts
+  PaymentOrder *-- "1" B_Money : amount
+  PaymentOrder --> "1" PaymentStatus : status
+  PaymentAttempt *-- "1" CardToken
+  PaymentAttempt --> "1" AttemptOutcome : outcome
+  PaymentOrder ..> PaymentGateway : charges through\n(port, passed to pay)
+  PaymentGateway ..> ChargeResult : returns
+  PaymentAttempt ..> ChargeResult : recorded from
+}

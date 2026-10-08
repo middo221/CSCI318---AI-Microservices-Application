@@ -1,0 +1,118 @@
+' Registration bounded context — registration-service, package ...registration.domain
+' Shared by domain-registration.puml (full detail) and domain-model.puml (overview).
+' Second pass (FR-10): add Waitlist <<AggregateRoot>> and WaitlistEntry <<Entity>> here.
+
+package "Registration  (registration-service)" as registration_ctx {
+
+  class Registration <<AggregateRoot>> {
+    - id : String
+    - attendee : AttendeeRef
+    - conferenceEventId : String
+    - status : RegistrationStatus
+    - seatHolds : List<SeatHold>
+    - totalAmount : Money
+    - createdAt : Instant
+    --
+    + {static} request(id, AttendeeRef, conferenceEventId, List<SeatHold>, Money, cardToken) : Registration
+    + confirm() : void
+    + cancel() : void
+    + expire() : void
+    + isExpiredAt(Instant) : boolean
+    + heldSessionIds() : List<String>
+    + pullDomainEvents() : List<DomainEvent>
+  }
+
+  class SeatHold <<Entity>> {
+    - id : String
+    - sessionId : String
+    - quantity : int  {>= 1}
+    - expiresAt : Instant
+    - status : SeatHoldStatus
+    --
+    + {static} hold(id, sessionId, quantity, expiresAt) : SeatHold
+    + confirm() : void
+    + release() : void
+    + isExpiredAt(Instant) : boolean
+    + isHeld() : boolean
+  }
+
+  class SessionView <<ReadModel>> {
+    - sessionId : String
+    - eventId : String
+    - title : String
+    - timeSlot : TimeSlot
+    - capacity : int
+    - reservedSeats : int
+    - version : long  {@Version}
+    - price : Money
+    --
+    + {static} forSession(sessionId) : SessionView
+    + describe(eventId, title, TimeSlot, Money) : void
+    + setCapacity(int) : void
+    + canAccommodate(int) : boolean
+    + reserve(int) : void
+    + release(int) : void
+    + isComplete() : boolean
+    + getAvailableSeats() : int
+  }
+
+  class AttendeeRef <<ValueObject>> {
+    attendeeId : String
+    name : String
+    email : String
+  }
+
+  class "Money" as R_Money <<ValueObject>> {
+    amount : BigDecimal  {>= 0, scale 2}
+    currency : String  {3 letters}
+    --
+    isZero() : boolean
+    plus(Money) : Money
+  }
+
+  class HoldWindow <<ValueObject>> {
+    duration : Duration  {> 0}
+    --
+    expiresFrom(Instant) : Instant
+  }
+
+  class "TimeSlot" as R_TimeSlot <<ValueObject>> {
+    start : LocalDateTime
+    end : LocalDateTime
+  }
+
+  enum RegistrationStatus {
+    PENDING_PAYMENT
+    CONFIRMED
+    CANCELLED
+    EXPIRED
+    REFUNDED
+  }
+
+  enum SeatHoldStatus {
+    HELD
+    CONFIRMED
+    RELEASED
+  }
+
+  class SeatAllocationService <<DomainService>> {
+    + allocate(Map<String,Integer>, Map<String,SessionView>, HoldWindow, Instant) : List<SeatHold>
+  }
+
+  class RegistrationPricingService <<DomainService>> {
+    + total(Map<String,Integer>, Map<String,SessionView>) : Money
+  }
+
+  Registration "1" *-- "1..*" SeatHold : seatHolds
+  Registration *-- "1" AttendeeRef : attendee
+  Registration *-- "1" R_Money : totalAmount
+  Registration --> "1" RegistrationStatus : status
+  SeatHold --> "1" SeatHoldStatus : status
+  SessionView *-- "0..1" R_TimeSlot : timeSlot
+  SessionView *-- "0..1" R_Money : price
+  SeatHold "0..*" ..> "1" SessionView : sessionId\n(by id only)
+  SeatAllocationService ..> SessionView : canAccommodate
+  SeatAllocationService ..> HoldWindow
+  SeatAllocationService ..> SeatHold : creates
+  RegistrationPricingService ..> SessionView : price × quantity
+}

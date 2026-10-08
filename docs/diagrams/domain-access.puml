@@ -1,0 +1,43 @@
+@startuml domain-access
+' Report §2.4 — Access bounded context in full. The classes come from
+' include/domain-access.iuml, the same source the overview (domain-model.puml) uses.
+!pragma layout smetana
+!include include/style.iuml
+skinparam classAttributeIconSize 0
+hide empty members
+
+title Access context (ticketing-service) — domain model
+
+!include include/domain-access.iuml
+!include include/domain-published-language.iuml
+!$only = "access"
+!include include/domain-event-links.iuml
+
+remove @unlinked
+hide <<DomainEvent>> members
+
+note top of Ticket
+  <b>Invariants</b>
+  · one ticket per confirmed session, not per registration
+  · VOID: cannot be transferred or checked in
+  · USED: cannot be transferred or checked in again
+  · a TRANSFERRED ticket can be transferred again
+  · transfer history is append-only
+  · voidTicket() is a no-op on VOID or USED
+end note
+
+note bottom of CheckInPolicy
+  Enforces two of the three rules in specs/3 §5.4:
+  void tickets and duplicate check-ins. The third,
+  "outside the session window", needs programme data
+  this context does not hold (see specs/2 FR-13).
+end note
+
+legend right
+  Value objects are Java records, mapped as JPA
+  @Embeddable. CheckIn and TransferRecord are
+  entities inside the Ticket aggregate (cascade ALL,
+  orphanRemoval). checkedInAt - queuedAt is the
+  gate wait that FR-16 will aggregate.
+endlegend
+@enduml

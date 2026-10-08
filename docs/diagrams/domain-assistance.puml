@@ -1,0 +1,63 @@
+@startuml domain-assistance
+' Report §2.4 — Attendee assistance context. The domain classes come from
+' include/domain-assistance.iuml, the same source the overview (domain-model.puml) uses.
+' The agent types below are application-layer classes, drawn here because they are
+' how this context uses its domain.
+!pragma layout smetana
+!include include/style.iuml
+skinparam classAttributeIconSize 0
+hide empty members
+
+title Attendee assistance context (concierge-service) — domain model and Agenda Builder agent
+
+!include include/domain-assistance.iuml
+
+package "application.agent  (not domain: the LangChain4j agent around it)" as agent_pkg {
+  interface AgendaBuilder <<Agent>> {
+    @SystemMessage / @UserMessage
+    --
+    + buildAgenda(attendeeId, interests) : ProposedAgenda
+  }
+  class AgendaTools <<Agent>> {
+    - dossier : Map<String, SessionSummary>
+    --
+    + @Tool searchSessions(track, day, speaker, keyword) : List<SessionSummary>
+    + @Tool getSessionAvailability(sessionId) : AvailabilityAnswer
+    + @Tool getAttendeeRegistrations(attendeeId) : List<RegistrationSummary>
+    + @Tool detectTimeClashes(List<String> sessionIds) : List<Clash>
+  }
+  class ProposedAgenda <<record>> {
+    items : List<ProposedItem(sessionId, rationale)>
+    summary : String
+  }
+  class AgendaResult <<record>> {
+    attendeeId : String
+    summary : String
+    items : List<AgendaItem>
+    notes : List<String>
+  }
+}
+
+AgendaBuilder ..> AgendaTools : may call (tool use)
+AgendaBuilder ..> ProposedAgenda : structured output
+AgendaTools "1" o-- "0..*" SessionSummary : dossier\n(retrieved this request)
+AgendaTools ..> AvailabilitySummary : via RegistrationPort
+AgendaTools ..> RegistrationSummary : via RegistrationPort
+AgendaTools ..> ClashDetector : detectTimeClashes
+AgendaResult ..> SessionSummary : verified items only
+
+note bottom of ClashDetector
+  The clash-free guarantee is code, not prompt:
+  AgendaApplicationService re-runs firstConflict(...)
+  over the model's answer and drops any session that
+  overlaps one already accepted, or that the agent
+  never retrieved, or that repeats.
+end note
+
+legend right
+  Nothing in this context is persisted: every domain
+  class is an immutable record (or stateless service)
+  built from other services' REST responses.
+  This context publishes and consumes no events.
+endlegend
+@enduml

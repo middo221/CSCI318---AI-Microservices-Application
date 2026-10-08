@@ -1,0 +1,40 @@
+' Which aggregate publishes, and which reacts to, each Published Language event on main.
+' "publishes" = the aggregate records the event and the application layer sends it after commit.
+' "reacts to" = a consumer in that service turns the event into a change to this class.
+' A per-context detail diagram sets !$only = "<context>" before including this file, to get only
+' its own links; the overview leaves it unset and gets all of them.
+
+!$only ?= "all"
+
+!if ($only == "all") || ($only == "programme")
+Event ..> EventPublished : <<publishes>>
+Event ..> SessionAdded : <<publishes>>
+Event ..> SessionCapacityChanged : <<publishes>>
+!endif
+
+!if ($only == "all") || ($only == "registration")
+Registration ..> RegistrationRequested : <<publishes>>
+Registration ..> SeatsReserved : <<publishes>>
+Registration ..> SeatsReleased : <<publishes>>
+Registration ..> RegistrationConfirmed : <<publishes>>
+Registration ..> RegistrationCancelled : <<publishes>>
+Registration ..> RegistrationExpired : <<publishes>>
+SessionView ..> SessionAdded : <<reacts to>>
+SessionView ..> SessionCapacityChanged : <<reacts to>>
+Registration ..> PaymentSucceeded : <<reacts to>>\nconfirm()
+Registration ..> PaymentFailed : <<reacts to>>\ncancel()
+!endif
+
+!if ($only == "all") || ($only == "billing")
+PaymentOrder ..> PaymentSucceeded : <<publishes>>
+PaymentOrder ..> PaymentFailed : <<publishes>>
+PaymentOrder ..> RegistrationRequested : <<reacts to>>\nraise() + pay()
+!endif
+
+!if ($only == "all") || ($only == "access")
+Ticket ..> TicketIssued : <<publishes>>
+Ticket ..> TicketTransferred : <<publishes>>
+Ticket ..> AttendeeCheckedIn : <<publishes>>
+Ticket ..> TicketVoided : <<publishes>>\n(no caller on main)
+Ticket ..> RegistrationConfirmed : <<reacts to>>\nissue(), one per session
+!endif

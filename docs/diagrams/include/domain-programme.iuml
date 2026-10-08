@@ -1,0 +1,100 @@
+' Programme bounded context — event-catalog-service, package ...catalog.domain
+' Shared by domain-programme.puml (full detail) and domain-model.puml (overview).
+
+package "Programme  (event-catalog-service)" as programme {
+
+  class Event <<AggregateRoot>> {
+    - id : String
+    - name : String
+    - description : String
+    - status : EventStatus
+    - venue : Venue
+    - dateRange : DateRange
+    - sessions : List<Session>
+    --
+    + {static} createDraft(id, name, description, Venue, DateRange) : Event
+    + publish() : void
+    + addSession(sessionId, title, Track, TimeSlot, speakerId, SeatCapacity, Price) : Session
+    + changeSessionCapacity(sessionId, SeatCapacity) : Session
+    + pullDomainEvents() : List<DomainEvent>
+  }
+
+  class Session <<Entity>> {
+    - id : String
+    - title : String
+    - track : Track
+    - timeSlot : TimeSlot
+    - speakerId : String
+    - seatCapacity : SeatCapacity
+    - price : Price
+    --
+    ~ {static} create(...) : Session
+    ~ changeSeatCapacity(SeatCapacity) : void
+  }
+
+  class Speaker <<AggregateRoot>> {
+    - id : String
+    - name : String
+    - bio : String
+    - organisation : String
+    --
+    + {static} create(id, name, bio, organisation) : Speaker
+  }
+
+  class Venue <<ValueObject>> {
+    name : String
+    addressLine : String
+    city : String
+  }
+
+  class DateRange <<ValueObject>> {
+    start : LocalDate
+    end : LocalDate
+    --
+    contains(LocalDate) : boolean
+  }
+
+  class "TimeSlot" as P_TimeSlot <<ValueObject>> {
+    start : LocalDateTime
+    end : LocalDateTime
+    --
+    day() : LocalDate
+    overlaps(TimeSlot) : boolean
+  }
+
+  class Track <<ValueObject>> {
+    name : String
+    --
+    matches(String) : boolean
+  }
+
+  class SeatCapacity <<ValueObject>> {
+    value : int  {> 0}
+  }
+
+  class Price <<ValueObject>> {
+    amount : BigDecimal  {>= 0, scale 2}
+    currency : String  {3 letters}
+  }
+
+  enum EventStatus {
+    DRAFT
+    PUBLISHED
+    CANCELLED
+  }
+
+  class SessionSchedulingPolicy <<DomainService>> {
+    + {static} ensureSpeakerIsFree(speakerId, TimeSlot, Collection<Session>) : void
+  }
+
+  Event "1" *-- "0..*" Session : sessions
+  Event *-- "1" Venue
+  Event *-- "1" DateRange
+  Event --> "1" EventStatus : status
+  Session *-- "1" Track
+  Session *-- "1" P_TimeSlot
+  Session *-- "1" SeatCapacity
+  Session *-- "1" Price
+  Session "0..*" ..> "1" Speaker : speakerId\n(by id only)
+  SessionSchedulingPolicy ..> Session : no speaker\ndouble-booking
+}

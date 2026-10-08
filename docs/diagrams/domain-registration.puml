@@ -1,0 +1,57 @@
+@startuml domain-registration
+' Report §2.4 — Registration bounded context in full. The classes come from
+' include/domain-registration.iuml, the same source the overview (domain-model.puml) uses.
+!pragma layout smetana
+!include include/style.iuml
+skinparam classAttributeIconSize 0
+hide empty members
+
+title Registration context (registration-service) — domain model
+
+!include include/domain-registration.iuml
+!include include/domain-published-language.iuml
+!$only = "registration"
+!include include/domain-event-links.iuml
+
+remove @unlinked
+hide <<DomainEvent>> members
+
+note top of Registration
+  <b>Invariants</b>
+  · holds seats for at least one session
+  · a total above zero needs a card token
+    (it travels on registration-requested
+    and is never stored)
+  · a zero total is confirmed at once and
+    never emits registration-requested
+  · confirm / cancel / expire only from
+    PENDING_PAYMENT
+end note
+
+note bottom of SessionView
+  Local replica of catalogue data, fed by
+  session-added and session-capacity-changed,
+  so seat allocation never calls the catalogue.
+  reservedSeats is maintained here. @Version
+  serialises concurrent reservations.
+  isComplete() is false until session-added
+  has arrived (capacity may arrive first).
+end note
+
+note bottom of SeatAllocationService
+  Checks every requested session before
+  creating any hold: one full session
+  refuses the whole registration (409
+  SESSION_FULL). Holds expire at
+  now + HoldWindow (PT2M demo default).
+end note
+
+legend right
+  Value objects are Java records; AttendeeRef, Money
+  and TimeSlot are JPA @Embeddable. HoldWindow is
+  configuration (conference.registration.hold-window).
+  Money is duplicated in Billing on purpose.
+  RegistrationStatus.REFUNDED exists, but no use
+  case on main sets it (FR-11).
+endlegend
+@enduml
