@@ -158,6 +158,14 @@ public class SessionView {
         return Math.max(0, capacity - reservedSeats);
     }
 
+    /**
+     * True when no further seat can be taken — including a session over-subscribed by a capacity cut,
+     * whose existing holds are grandfathered. Only a full session has a waitlist worth joining.
+     */
+    public boolean isFull() {
+        return getAvailableSeats() == 0;
+    }
+
     public String getSessionId() {
         return sessionId;
     }

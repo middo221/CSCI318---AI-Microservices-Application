@@ -150,4 +150,27 @@ class SessionViewTest {
         assertThat(view.canAccommodate(1)).isFalse();
         assertThat(view.getAvailableSeats()).isZero();
     }
+
+    @Test
+    void isFullOnlyWhenNoSeatRemains() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.setCapacity(2);
+        view.reserve(1);
+
+        assertThat(view.isFull()).isFalse();
+        view.reserve(1);
+        assertThat(view.isFull()).isTrue();
+    }
+
+    /** A capacity cut below the seats already held grandfathers them — and leaves the session full. */
+    @Test
+    void countsAnOverSubscribedSessionAsFull() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.setCapacity(120);
+        view.reserve(100);
+
+        view.setCapacity(50);
+
+        assertThat(view.isFull()).isTrue();
+    }
 }
