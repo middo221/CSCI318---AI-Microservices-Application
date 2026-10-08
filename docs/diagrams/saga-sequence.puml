@@ -1,0 +1,121 @@
+@startuml saga-sequence
+' Report §3.5 — the registration saga as it runs on main: happy path, payment-failure
+' compensation, and hold expiry. Topic names and keys are those DomainEvent.eventType() and
+' partitionKey() produce. Every send happens after the sender's database commit
+' (@TransactionalEventListener AFTER_COMMIT), and every consumer that changes state first
+' records the event id in its processed_events table.
+' Second pass (FR-10, FR-11): add waitlist promotion on seats-released and the refund flow.
+!include include/style.iuml
+skinparam sequence {
+  ParticipantBackgroundColor #E8F0FE
+  ParticipantBorderColor #3D5A99
+  LifeLineBorderColor #9E9E9E
+  BoxBorderColor #9E9E9E
+  GroupBackgroundColor #F5F5F5
+}
+skinparam ParticipantPadding 12
+skinparam BoxPadding 8
+autonumber "<b>0."
+
+title Registration saga — happy path, payment failure, hold expiry (main, October 2026)
+
+actor Attendee as att
+box "registration-service :8082 (orchestrator)" #EDF7ED
+  participant "RegistrationController\nRegistrationApplicationService" as reg
+  participant "PaymentEventConsumers" as regc
+  participant "HoldExpirySweeper" as sweep
+  database "regdb" as regdb
+end box
+queue "Kafka broker" as kafka
+box "payment-service :8083" #FFF4E0
+  participant "RegistrationEventConsumers\nPaymentApplicationService" as pay
+  database "paydb" as paydb
+end box
+box "ticketing-service :8084" #F3ECF8
+  participant "RegistrationEventConsumers\nTicketApplicationService" as tkt
+  database "ticketdb" as tktdb
+end box
+
+== 1. Request (FR-06) ==
+att -> reg : POST /api/v1/registrations\n{attendee…, eventId, sessions[{sessionId, quantity}], cardToken}
+reg -> reg : SeatAllocationService.allocate against SessionView\n(409 SESSION_FULL if any session is full)\nRegistrationPricingService.total
+reg -> regdb : Registration PENDING_PAYMENT,\nSeatHold HELD per session (expiresAt = now + PT2M),\nSessionView.reserve(quantity)
+reg -> kafka : <b>registration-requested</b>  key = registrationId\n{totalAmount, currency, holdExpiresAt, cardToken}
+reg -> kafka : <b>seats-reserved</b> ×N  key = sessionId
+reg --> att : 201 Created (status PENDING_PAYMENT)
+note right of reg
+  A <b>zero-total</b> registration skips
+  payment: it is CONFIRMED at once and
+  emits seats-reserved and
+  registration-confirmed instead
+  (continue at section 3 below).
+end note
+
+== 2. Charge (FR-07) ==
+kafka -> pay : registration-requested
+pay -> paydb : processed_events: record eventId\n(a redelivery is ignored)
+pay -> paydb : PaymentOrder PENDING\n(an existing order for the registration is returned, never re-charged)
+
+alt happy path — hold still live and token TOK_OK
+  pay -> pay : SimulatedPaymentGateway.charge → SUCCEEDED
+  pay -> paydb : PaymentAttempt SUCCEEDED,\nPaymentOrder PAID
+  pay -> kafka : <b>payment-succeeded</b>  key = registrationId\n{paymentOrderId, amount, currency}
+
+  == 3. Confirm and issue (FR-08) ==
+  kafka -> regc : payment-succeeded
+  regc -> regdb : processed_events: record eventId
+  regc -> regdb : Registration.confirm():\nSeatHold HELD → CONFIRMED, Registration → CONFIRMED
+  regc -> kafka : <b>registration-confirmed</b>  key = registrationId\n{sessionIds, attendeeName, attendeeEmail}
+  kafka -> tkt : registration-confirmed
+  tkt -> tktdb : processed_events: record eventId
+  tkt -> tktdb : one Ticket ISSUED per sessionId\n(TicketCode "TKT-…"; skipped if one exists)
+  tkt -> kafka : <b>ticket-issued</b> ×N  key = ticketCode
+  att -> tkt : GET /api/v1/registrations/{id}/tickets
+  tkt --> att : 200 OK, one ticket per session
+
+else compensation — payment fails
+  note over pay
+    TOK_DECLINE (or any unknown token) → DECLINED, "CARD_DECLINED"
+    TOK_TIMEOUT → TIMED_OUT, "GATEWAY_TIMEOUT"
+    now after holdExpiresAt → "HOLD_EXPIRED", gateway not called
+  end note
+  pay -> paydb : PaymentOrder FAILED\n(+ PaymentAttempt unless HOLD_EXPIRED)
+  pay -> kafka : <b>payment-failed</b>  key = registrationId\n{paymentOrderId, reason}
+
+  == 4. Release on failure (FR-09) ==
+  kafka -> regc : payment-failed
+  regc -> regdb : processed_events: record eventId
+  regc -> regdb : Registration.cancel():\nSeatHold HELD → RELEASED, Registration → CANCELLED,\nSessionView.release(quantity)
+  regc -> kafka : <b>seats-released</b> ×N  key = sessionId
+  regc -> kafka : <b>registration-cancelled</b>  key = registrationId
+end
+
+== 5. Release on hold expiry (FR-09) ==
+loop every conference.registration.sweep-interval (PT10S)
+  sweep -> reg : expireOverdue(now)
+  reg -> regdb : find PENDING_PAYMENT registrations\nwith a SeatHold past expiresAt
+  opt at least one is overdue
+    reg -> regdb : Registration.expire():\nSeatHold HELD → RELEASED, Registration → EXPIRED,\nSessionView.release(quantity)
+    reg -> kafka : <b>seats-released</b> ×N  key = sessionId
+    reg -> kafka : <b>registration-expired</b>  key = registrationId
+  end
+end
+
+note over reg, pay
+  <b>Late outcomes are absorbed, not retried.</b> A payment-failed or payment-succeeded
+  that arrives after the sweeper has expired the registration finds it no longer
+  PENDING_PAYMENT: the consumer logs a warning and drops the message, so the partition is
+  never blocked. payment-service refuses to charge past holdExpiresAt (HOLD_EXPIRED); a
+  charge in the seconds between the deadline and the next sweep is still possible and
+  needs refunds (FR-11) to unwind.
+end note
+
+legend right
+  Keys: registrationId keeps every saga message for one registration on one partition,
+  in order. sessionId on the seat topics co-partitions them with session-capacity-changed
+  for the M3 fill-rate join. ticketCode keys the ticket topics.
+  No consumer on main reads seats-reserved, seats-released, registration-cancelled,
+  registration-expired or ticket-issued yet: analytics (M3) and waitlist promotion
+  (FR-10) will.
+endlegend
+@enduml
