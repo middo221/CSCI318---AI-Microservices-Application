@@ -1,0 +1,53 @@
+@startuml activity-fr-01
+' Report §2.1 — FR-01 Create a draft event.
+' Source: EventController.createDraft, CreateEventRequest, EventApplicationService.createDraft,
+' Event.createDraft, DateRange, GlobalExceptionHandler.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-01 — Create a draft event
+
+|Organiser|
+start
+:POST /api/v1/events
+{name, description,
+ venue {name, addressLine, city},
+ startDate, endDate};
+
+|event-catalog-service|
+:EventController.createDraft
+validates CreateEventRequest (@Valid);
+if (name blank, venue missing, a venue
+field blank, or a date missing?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:CreateEventRequest.toCommand()
+builds Venue and DateRange value objects;
+if (endDate before startDate?) then (yes)
+  $ERR:400 INVALID_REQUEST
+  "date range end must not precede its start";
+  stop
+else (no)
+endif
+:EventApplicationService.createDraft
+Event.createDraft(new UUID, name, description,
+venue, dateRange) → status DRAFT, no sessions;
+:EventRepository.save
+→ catalogdb.events;
+$OK:201 Created
+EventResponse (status "DRAFT", sessions []);
+
+|Organiser|
+:keeps the event id
+for FR-02 and FR-03;
+stop
+
+note right
+  A draft publishes no event:
+  nothing outside the Programme
+  context hears about it until
+  sessions are added (FR-02).
+end note
+@enduml

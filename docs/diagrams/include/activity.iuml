@@ -1,0 +1,29 @@
+' Conventions for the activity-fr-NN diagrams. Included after style.iuml.
+'
+'   :topic\nkey: k>     send signal  — a service publishes an event to Kafka (after commit)
+'   :topic<            accept event — a consumer receives an event from Kafka
+'   $ERR / $OK         fill colours for error and success HTTP responses
+'
+' Swimlanes are the actor, each service involved, and Kafka where an event crosses a boundary.
+' Decision nodes follow the real checks in the controllers and application services, in the
+' order the code makes them; every error branch names the HTTP status and ApiError code that
+' GlobalExceptionHandler returns.
+
+!$ERR = "#F8D7DA"
+!$OK = "#D4EDDA"
+!$EVT = "#EADCF5"
+
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #555555
+  FontSize 11
+  DiamondBackgroundColor #FFF8DC
+  DiamondBorderColor #B8A04A
+  DiamondFontSize 10
+}
+skinparam swimlane {
+  TitleFontSize 13
+  TitleFontStyle bold
+  BorderColor #9E9E9E
+}
+skinparam ActivityBarColor #3B3B3B

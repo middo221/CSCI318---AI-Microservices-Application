@@ -1,0 +1,114 @@
+@startuml activity-fr-02
+' Report §2.1 — FR-02 Add a session to a draft event.
+' Source: SpeakerController, EventController.addSession, CreateSessionRequest,
+' EventApplicationService.addSession, SessionSchedulingPolicy, Event.addSession,
+' StreamBridgeDomainEventPublisher, CatalogEventConsumers, SessionViewProjection.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-02 — Add a session to a draft event
+
+|Organiser|
+start
+if (speaker already registered?) then (no)
+  :POST /api/v1/speakers
+  {name, bio, organisation};
+  |event-catalog-service|
+  if (name blank?) then (yes)
+    $ERR:400 VALIDATION_FAILED;
+    stop
+  else (no)
+  endif
+  :SpeakerApplicationService.create
+  Speaker.create(new UUID, ...)
+  → catalogdb.speakers;
+  $OK:201 Created SpeakerResponse {id};
+  |Organiser|
+else (yes)
+endif
+:POST /api/v1/events/{id}/sessions
+{title, track, startsAt, endsAt, speakerId,
+ seatCapacity, priceAmount};
+
+|event-catalog-service|
+:EventController.addSession (@Valid);
+if (title, track or speakerId blank; a time missing;
+seatCapacity <= 0; or priceAmount missing or < 0?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:toCommand(): Track, TimeSlot,
+SeatCapacity, Price (currency AUD);
+if (endsAt not after startsAt?) then (yes)
+  $ERR:400 INVALID_REQUEST;
+  stop
+else (no)
+endif
+:EventApplicationService.addSession;
+if (event exists?) then (no)
+  $ERR:404 EVENT_NOT_FOUND;
+  stop
+else (yes)
+endif
+if (speaker exists?) then (no)
+  $ERR:404 SPEAKER_NOT_FOUND;
+  stop
+else (yes)
+endif
+:SessionSchedulingPolicy.ensureSpeakerIsFree
+against every session in the catalogue;
+if (speaker already in an overlapping slot?) then (yes)
+  $ERR:409 SPEAKER_DOUBLE_BOOKED;
+  stop
+else (no)
+endif
+:Event.addSession(...);
+if (event status DRAFT?) then (no)
+  $ERR:409 EVENT_ALREADY_PUBLISHED;
+  stop
+else (yes)
+endif
+if (slot inside the event's date range?) then (no)
+  $ERR:400 INVALID_REQUEST;
+  stop
+else (yes)
+endif
+:Session.create(new UUID, ...) joins the aggregate,
+record SessionAdded and SessionCapacityChanged;
+:EventRepository.save → catalogdb.sessions;
+:after commit, StreamBridge sends
+each recorded event;
+
+|Kafka|
+$EVT:session-added
+key: sessionId>
+$EVT:session-capacity-changed
+key: sessionId>
+
+fork
+  |event-catalog-service|
+  $OK:201 Created SessionResponse;
+  |Organiser|
+  :keeps the session id;
+fork again
+  |registration-service|
+  :session-added<
+  :SessionViewProjection.apply
+  find or create SessionView,
+  describe(eventId, title, slot, price);
+  :session-capacity-changed<
+  :SessionView.setCapacity(seatCapacity)
+  → regdb.session_views;
+end fork
+stop
+
+note right
+  The capacity snapshot is emitted at session
+  creation as well as on every later change, so
+  the topic alone carries every session's capacity.
+  The two topics share the sessionId key.
+  The registration replica is asynchronous: the
+  201 does not wait for it.
+end note
+@enduml

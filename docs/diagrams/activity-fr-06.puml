@@ -1,0 +1,109 @@
+@startuml activity-fr-06
+' Report §2.1 — FR-06 Register for one or more sessions.
+' Source: RegistrationController.register, CreateRegistrationRequest, RequestRegistrationCommand,
+' RegistrationApplicationService.request, SeatAllocationService, RegistrationPricingService,
+' Registration.request, SessionView.reserve.
+' Second pass (FR-10): a full session falls through to the waitlist instead of refusing all.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-06 — Register for one or more sessions
+
+|Attendee|
+start
+:POST /api/v1/registrations
+{attendeeId, attendeeName, attendeeEmail, eventId,
+ sessions [{sessionId, quantity}], cardToken?};
+
+|registration-service|
+if (a field blank, email malformed, no sessions,
+or a quantity below 1?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:toCommand(): AttendeeRef, SessionRequest list,
+RequestRegistrationCommand;
+if (same sessionId named twice?) then (yes)
+  $ERR:400 INVALID_REQUEST;
+  stop
+else (no)
+endif
+:RegistrationApplicationService.request;
+:load the SessionView of every requested session
+from the local replica (no call to the catalogue);
+if (every session replicated
+(session-added received)?) then (no)
+  $ERR:404 SESSION_NOT_FOUND;
+  stop
+else (yes)
+endif
+:SeatAllocationService.allocate
+checks every session before holding any;
+if (reservedSeats + quantity <= capacity
+for every session?) then (no)
+  $ERR:409 SESSION_FULL
+  (the whole registration is refused);
+  stop
+else (yes)
+endif
+:one SeatHold per session, status HELD,
+expiresAt = now + hold window (PT2M);
+:RegistrationPricingService.total
+Σ price × quantity → Money;
+:Registration.request(...);
+if (total > 0 and no cardToken?) then (yes)
+  $ERR:400 INVALID_REQUEST;
+  stop
+else (no)
+endif
+if (total = 0?) then (yes: free)
+  :record SeatsReserved per hold,
+  confirm(): holds CONFIRMED,
+  status CONFIRMED,
+  record RegistrationConfirmed;
+else (no: paid)
+  :status PENDING_PAYMENT,
+  record RegistrationRequested
+  (total, currency, holdExpiresAt =
+  earliest hold expiry, cardToken),
+  record SeatsReserved per hold;
+endif
+:save → regdb.registrations, seat_holds,
+SessionView.reserve(quantity) per session
+→ regdb.session_views (@Version);
+:after commit, StreamBridge sends;
+
+|Kafka|
+if (free?) then (no)
+  $EVT:registration-requested
+  key: registrationId>
+  $EVT:seats-reserved ×N
+  key: sessionId>
+else (yes)
+  $EVT:seats-reserved ×N
+  key: sessionId>
+  $EVT:registration-confirmed
+  key: registrationId>
+endif
+
+|registration-service|
+$OK:201 Created RegistrationResponse
+(status PENDING_PAYMENT or CONFIRMED,
+seat holds with expiresAt);
+
+|Attendee|
+:has seats held while payment
+is taken (FR-07), or tickets
+on the way if free (FR-08);
+stop
+
+note right
+  The card token travels on
+  registration-requested and is
+  never stored in regdb.
+  Concurrent reservations of one
+  session are serialised by the
+  @Version column on session_views.
+end note
+@enduml

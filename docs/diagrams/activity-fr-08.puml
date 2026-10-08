@@ -1,0 +1,103 @@
+@startuml activity-fr-08
+' Report §2.1 — FR-08 Confirm the registration and issue tickets on payment.
+' Source: PaymentEventConsumers.paymentSucceeded, RegistrationApplicationService.confirmPaid,
+' Registration.confirm, RegistrationEventConsumers.registrationConfirmed (ticketing),
+' TicketApplicationService.issue, Ticket.issue, TicketCode.generate, TicketController.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-08 — Confirm the registration and issue tickets
+
+|registration-service|
+start
+:payment-succeeded<
+:PaymentEventConsumers.paymentSucceeded;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:record eventId in processed_events;
+:RegistrationApplicationService.confirmPaid(registrationId);
+if (registration found and still
+PENDING_PAYMENT?) then (no)
+  :log a warning and drop
+  (e.g. its hold already EXPIRED);
+  stop
+else (yes)
+endif
+:Registration.confirm()
+every SeatHold HELD → CONFIRMED,
+status → CONFIRMED,
+record RegistrationConfirmed (sessionIds,
+attendeeId, attendeeName, attendeeEmail);
+:save → regdb.registrations, seat_holds;
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:registration-confirmed
+key: registrationId>
+
+|ticketing-service|
+:registration-confirmed<
+:RegistrationEventConsumers.registrationConfirmed;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:record eventId in processed_events;
+:TicketApplicationService.issue(IssueTicketsCommand);
+if (holder name or email blank,
+or no sessionIds?) then (yes)
+  :log a warning and drop;
+  stop
+else (no)
+endif
+repeat
+  :next sessionId;
+  if (ticket already exists for
+  (registrationId, sessionId)?) then (yes)
+    :skip it;
+  else (no)
+    :Ticket.issue(new UUID, TicketCode.generate() "TKT-…",
+    registrationId, sessionId, attendeeId, Holder)
+    → status ISSUED, record TicketIssued;
+    :save → ticketdb.tickets;
+  endif
+repeat while (more sessions?) is (yes) not (no)
+:after commit, StreamBridge sends one event per new ticket;
+
+|Kafka|
+$EVT:ticket-issued ×N
+key: ticketCode>
+note right
+  No consumer on main yet;
+  analytics reads it from M3.
+end note
+stop
+
+|Attendee|
+start
+:GET /api/v1/registrations/{registrationId}/tickets
+or GET /api/v1/tickets/{ticketCode};
+|ticketing-service|
+if (GET by code and code unknown?) then (yes)
+  $ERR:404 TICKET_NOT_FOUND;
+  stop
+else (no)
+endif
+$OK:200 OK TicketResponse(s)
+one per confirmed session;
+|Attendee|
+:presents a ticket code at the gate (FR-13);
+stop
+
+note right
+  A <b>free</b> registration skips payment:
+  POST /registrations emits
+  registration-confirmed directly (FR-06),
+  and ticketing issues its tickets the
+  same way from that point.
+end note
+@enduml

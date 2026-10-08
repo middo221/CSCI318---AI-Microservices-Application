@@ -1,0 +1,68 @@
+@startuml activity-fr-12
+' Report §2.1 — FR-12 Transfer a ticket to another person.
+' Source: TicketController.transfer, TransferTicketRequest, TicketApplicationService.transfer,
+' Ticket.transferTo, TransferRecord.record.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-12 — Transfer a ticket to another person
+
+|Attendee|
+start
+:POST /api/v1/tickets/{ticketCode}/transfer
+{toHolderName, toHolderEmail};
+
+|ticketing-service|
+if (name blank, or email blank
+or malformed?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:TicketApplicationService.transfer(command);
+if (ticket with this code?) then (no)
+  $ERR:404 TICKET_NOT_FOUND;
+  stop
+else (yes)
+endif
+:new Holder(toHolderName, toHolderEmail);
+:Ticket.transferTo(newHolder);
+if (status VOID?) then (yes)
+  $ERR:409 TICKET_VOID;
+  stop
+else (no)
+endif
+if (status USED (checked in)?) then (yes)
+  $ERR:409 ALREADY_CHECKED_IN;
+  stop
+else (no)
+endif
+:append TransferRecord(previous holder,
+new holder, now) — history is append-only,
+record TicketTransferred (from and to holder),
+holder → new holder, status → TRANSFERRED;
+:save → ticketdb.tickets, transfer_records;
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:ticket-transferred
+key: ticketCode>
+
+|ticketing-service|
+$OK:200 OK TicketResponse
+(new holder, transfers history);
+
+|Attendee|
+:hands the same ticket code
+to the new holder;
+stop
+
+note right
+  The ticket code does not change.
+  Only this session's ticket moves; the
+  registration's other tickets are untouched.
+  A TRANSFERRED ticket can be transferred
+  again. ticket-transferred has no consumer
+  on main yet (analytics, M3).
+end note
+@enduml
