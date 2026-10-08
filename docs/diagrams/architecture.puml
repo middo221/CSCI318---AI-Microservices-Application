@@ -1,0 +1,128 @@
+@startuml architecture
+' Report §3.1 — microservice architecture as it runs on main.
+' Topics listed are only those a class on main actually produces or consumes.
+' Second pass (M3/FR-18): add the analytics topologies' inputs and outputs, the refund and
+' waitlist topics, and the concierge support agent's REST calls in the marked places.
+!pragma layout smetana
+!include include/style.iuml
+
+title Converge — microservice architecture (main, October 2026)
+
+skinparam component {
+  BackgroundColor #E8F0FE
+  BorderColor #3D5A99
+}
+skinparam database {
+  BackgroundColor #FFF4E0
+  BorderColor #A67C00
+}
+skinparam queue {
+  BackgroundColor #F3ECF8
+  BorderColor #6A4C93
+}
+
+actor "Organiser" as organiser
+actor "Attendee" as attendee
+actor "Gate staff" as gatestaff
+
+component "concierge-service\n:8086 · Attendee assistance\nLangChain4j Agenda Builder\n<i>owns no database</i>" as concierge
+cloud "Google Gemini API\ngemini-2.5-flash" as gemini
+
+component "event-catalog-service\n:8081 · Programme" as catalog
+component "registration-service\n:8082 · Registration\nsaga orchestrator,\nHoldExpirySweeper" as registration
+component "payment-service\n:8083 · Billing\nSimulatedPaymentGateway" as payment
+component "ticketing-service\n:8084 · Access" as ticketing
+component "analytics-service\n:8085 · Operational insight\nKafka Streams read models (M3)\n<i>skeleton only on main;</i>\n<i>owns no database</i>" as analytics
+
+database "catalogdb\nH2 in-memory" as catalogdb
+database "regdb\nH2 in-memory" as regdb
+database "paydb\nH2 in-memory" as paydb
+database "ticketdb\nH2 in-memory" as ticketdb
+
+node "Kafka broker · apache/kafka:4.3.1 (KRaft) · Docker Compose · localhost:9092" as kafka {
+  rectangle "produced by event-catalog-service" as from_catalog {
+    queue "event-published\nkey: conferenceEventId" as t_event_published
+    queue "session-added\nkey: sessionId" as t_session_added
+    queue "session-capacity-changed\nkey: sessionId" as t_capacity_changed
+  }
+  rectangle "produced by payment-service" as from_payment {
+    queue "payment-succeeded\nkey: registrationId" as t_pay_succeeded
+    queue "payment-failed\nkey: registrationId" as t_pay_failed
+  }
+  rectangle "produced by registration-service" as from_registration {
+    queue "registration-requested\nkey: registrationId" as t_reg_requested
+    queue "registration-confirmed\nkey: registrationId" as t_reg_confirmed
+    queue "seats-reserved\nkey: sessionId" as t_seats_reserved
+    queue "seats-released\nkey: sessionId" as t_seats_released
+    queue "registration-cancelled\nkey: registrationId" as t_reg_cancelled
+    queue "registration-expired\nkey: registrationId" as t_reg_expired
+  }
+  rectangle "produced by ticketing-service" as from_ticketing {
+    queue "ticket-issued\nkey: ticketCode" as t_ticket_issued
+    queue "ticket-transferred\nkey: ticketCode" as t_ticket_transferred
+    queue "attendee-checked-in\nkey: sessionId" as t_checked_in
+  }
+}
+component "Kafka UI\nprovectuslabs/kafka-ui:v0.7.2\n:8080 (Docker Compose)" as kafkaui
+
+' ---- REST from people --------------------------------------------------------------------
+organiser --> catalog : REST\nevents, sessions,\nspeakers, capacity
+attendee --> catalog : REST\nGET /sessions/search
+attendee --> registration : REST\nPOST /registrations,\navailability
+attendee --> payment : REST\nGET payment order
+attendee --> ticketing : REST\ntickets, transfer
+attendee --> concierge : REST\nPOST /concierge/agenda
+gatestaff --> ticketing : REST\nPOST /gates/{gateId}/check-ins
+
+' ---- Concierge: synchronous REST and the LLM -----------------------------------------------
+concierge --> catalog : REST GET\n/api/v1/sessions/search
+concierge --> registration : REST GET\n/sessions/{id}/availability,\n/attendees/{id}/registrations
+concierge -right-> gemini : HTTPS\n(LangChain4j\ntool calling)
+' Second pass (FR-18): concierge --> payment and concierge --> ticketing, REST.
+
+' ---- Database per service -----------------------------------------------------------------
+catalog -left-> catalogdb : JPA
+registration -right-> regdb : JPA
+payment -right-> paydb : JPA
+ticketing -right-> ticketdb : JPA
+
+' ---- Publishing (StreamBridge, after the database commit) ----------------------------------
+catalog --> from_catalog : publish
+registration --> from_registration : publish
+payment --> from_payment : publish
+ticketing --> from_ticketing : publish
+
+' ---- Consuming (functional Consumer beans, one consumer group per service) ------------------
+' Written right-to-left so that the topic still ranks below the service in the layout.
+registration <-- t_event_published : consume
+registration <-- t_session_added : consume\n(SessionView\nreplica)
+registration <-- t_capacity_changed : consume\n(SessionView\nreplica)
+payment <-- t_reg_requested : consume
+registration <-- t_pay_succeeded : consume
+registration <-- t_pay_failed : consume
+ticketing <-- t_reg_confirmed : consume
+
+' ---- Planned, not on main ----------------------------------------------------------------
+analytics <.. kafka : <i>planned M3:</i>\nKafka Streams topologies
+kafkaui -up-> kafka : inspects topics
+
+note bottom of from_ticketing
+  No consumer on main yet for seats-reserved, seats-released,
+  registration-cancelled, registration-expired or any ticketing
+  topic: analytics-service (M3) is their reader.
+  <b>ticket-voided</b> (key ticketCode) is declared in common-events,
+  but no use case emits it yet.
+end note
+
+legend right
+  <b>Arrows</b>
+  solid = runs on main today
+  dotted = planned, not on main
+  Topics are created on first publish
+  (KAFKA_AUTO_CREATE_TOPICS_ENABLE).
+  Every key is DomainEvent.partitionKey(),
+  serialised as a String.
+  analytics-service and concierge-service
+  own no database.
+endlegend
+@enduml
