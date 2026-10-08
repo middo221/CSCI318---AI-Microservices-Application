@@ -4,6 +4,63 @@ server:
 spring:
   application:
     name: analytics-service
+  cloud:
+    function:
+      definition: sessionFillRate;gateThroughput;registrationFunnel
+    stream:
+      bindings:
+        sessionFillRate-in-0:
+          destination: seats-reserved
+        sessionFillRate-in-1:
+          destination: seats-released
+        sessionFillRate-in-2:
+          destination: session-capacity-changed
+        sessionFillRate-out-0:
+          destination: session-capacity-alert
+        gateThroughput-in-0:
+          destination: attendee-checked-in
+        gateThroughput-out-0:
+          destination: gate-congestion-alert
+        # One binding over four topics. The funnel takes each record's stage from the topic it
+        # arrived on and never reads a payload, so there is nothing here for a producer to break.
+        registrationFunnel-in-0:
+          destination: registration-requested,payment-succeeded,payment-failed,registration-expired
+      kafka:
+        streams:
+          binder:
+            brokers: localhost:9092
+            # A message this service cannot read is logged and skipped. The default, logAndFail,
+            # kills the stream thread, so one malformed record would stop every read model here.
+            deserialization-exception-handler: logAndContinue
+            configuration:
+              # The read model is rebuilt from the log on every start (design section 7), so it lives
+              # in memory: no RocksDB files under %TEMP% outlive a `docker compose down -v` and then
+              # disagree with a fresh broker.
+              dsl.store.suppliers.class: org.apache.kafka.streams.state.BuiltInDslStoreSuppliers$InMemoryDslStoreSuppliers
+              # No record cache and a one-second commit: a reservation reaches the fill rate, and an
+              # alert reaches its topic, within a second instead of up to thirty.
+              statestore.cache.max.bytes: 0
+              commit.interval.ms: 1000
+            # Without these, spring.application.name becomes the application.id of all three
+            # functions and puts three different topologies in one consumer group.
+            functions:
+              sessionFillRate:
+                application-id: analytics-session-fill-rate
+              gateThroughput:
+                application-id: analytics-gate-throughput
+              registrationFunnel:
+                application-id: analytics-registration-funnel
+
+conference:
+  analytics:
+    # FR-15: a session alerts once, the first time its fill rate reaches this share of capacity.
+    # Also the default threshold of GET /api/v1/analytics/sessions/at-risk.
+    capacity-alert-threshold: 0.9
+    # FR-16: a gate is congested while the average wait in its latest one-minute window exceeds
+    # this. PT2M is the demonstration default - reachable with a short burst of check-ins whose
+    # queuedAt is a few minutes old. For a real venue start with
+    #   --conference.analytics.gate-congestion-threshold=PT5M
+    gate-congestion-threshold: PT2M
 
 logging:
   level:
