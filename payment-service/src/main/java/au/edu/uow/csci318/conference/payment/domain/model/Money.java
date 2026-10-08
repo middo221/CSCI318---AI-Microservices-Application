@@ -43,4 +43,19 @@ public record Money(BigDecimal amount, String currency) {
     public boolean isZero() {
         return amount.signum() == 0;
     }
+
+    /**
+     * This amount scaled by a whole percentage, rounded half-up to the cent — the same rounding the
+     * constructor normalises with. Billing needs this and Registration never will, which is the
+     * concrete reason the two contexts' {@code Money} types are not shared.
+     *
+     * @throws IllegalArgumentException if {@code percent} is outside 0–100
+     */
+    public Money percentage(int percent) {
+        if (percent < 0 || percent > 100) {
+            throw new IllegalArgumentException("a percentage of money must be between 0 and 100, was " + percent);
+        }
+        return new Money(amount.multiply(BigDecimal.valueOf(percent))
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP), currency);
+    }
 }

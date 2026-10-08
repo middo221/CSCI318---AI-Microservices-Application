@@ -40,4 +40,19 @@ class MoneyTest {
         assertThat(Money.aud("0.00").isZero()).isTrue();
         assertThat(Money.aud("0.01").isZero()).isFalse();
     }
+
+    @Test
+    void takesAWholePercentageOfItself() {
+        assertThat(Money.aud("148.50").percentage(50)).isEqualTo(Money.aud("74.25"));
+        assertThat(Money.aud("148.50").percentage(100)).isEqualTo(Money.aud("148.50"));
+        assertThat(Money.aud("148.50").percentage(0)).isEqualTo(Money.aud("0.00"));
+    }
+
+    @Test
+    void refusesAPercentageOutsideNoughtToAHundred() {
+        assertThatThrownBy(() -> Money.aud("148.50").percentage(-1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Money.aud("148.50").percentage(101))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
