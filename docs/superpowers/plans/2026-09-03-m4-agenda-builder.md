@@ -1,5 +1,11 @@
 # Converge M4 — Agent 1, the Agenda Builder, Implementation Plan
 
+> **STATUS: COMPLETE** — merged to `main` on 2026-09-03 (`6b26cdf`). Task 9's live run against
+> Gemini was done the same day and is written up in `docs/verification/2026-m4-agenda-builder.md`.
+> The model never proposed a clashing pair live, so the dropped-session note was not exercised
+> against the real model; `isClashFreeEvenWhenTheModelNeverChecksForClashes` covers it offline.
+> The step checkboxes below were not kept current during execution.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
