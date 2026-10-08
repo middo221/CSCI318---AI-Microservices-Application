@@ -3,6 +3,7 @@ package au.edu.uow.csci318.conference.analytics.support;
 import au.edu.uow.csci318.conference.analytics.domain.event.GateCongestionAlert;
 import au.edu.uow.csci318.conference.analytics.domain.event.SessionCapacityAlert;
 import au.edu.uow.csci318.conference.analytics.domain.model.AlertThresholds;
+import au.edu.uow.csci318.conference.analytics.infrastructure.query.StateStoreLookup;
 import au.edu.uow.csci318.conference.analytics.infrastructure.streams.EventSerdes;
 import au.edu.uow.csci318.conference.analytics.infrastructure.streams.GateThroughputTopology;
 import au.edu.uow.csci318.conference.analytics.infrastructure.streams.RegistrationFunnelTopology;
@@ -23,8 +24,11 @@ import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.streams.TestOutputTopic;
 import org.apache.kafka.streams.TopologyConfig;
 import org.apache.kafka.streams.TopologyTestDriver;
+import org.apache.kafka.streams.errors.InvalidStateStoreException;
 import org.apache.kafka.streams.errors.LogAndContinueExceptionHandler;
 import org.apache.kafka.streams.state.BuiltInDslStoreSuppliers;
+import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
+import org.apache.kafka.streams.state.ReadOnlyWindowStore;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -101,5 +105,35 @@ public final class TopologyHarness {
 
     public static TestOutputTopic<String, String> rawOutput(TopologyTestDriver driver, String topic) {
         return driver.createOutputTopic(topic, new StringDeserializer(), new StringDeserializer());
+    }
+
+    /** Serves the driver's stores through the same seam interactive queries use in production. */
+    public static StateStoreLookup storesOf(TopologyTestDriver driver) {
+        return new StateStoreLookup() {
+            @Override
+            public <K, V> ReadOnlyKeyValueStore<K, V> keyValueStore(String storeName) {
+                return driver.getKeyValueStore(storeName);
+            }
+
+            @Override
+            public <K, V> ReadOnlyWindowStore<K, V> windowStore(String storeName) {
+                return driver.getWindowStore(storeName);
+            }
+        };
+    }
+
+    /** A lookup whose stores are mid-restore: every access fails as Kafka Streams fails it. */
+    public static StateStoreLookup unavailableStores() {
+        return new StateStoreLookup() {
+            @Override
+            public <K, V> ReadOnlyKeyValueStore<K, V> keyValueStore(String storeName) {
+                throw new InvalidStateStoreException("store " + storeName + " is restoring");
+            }
+
+            @Override
+            public <K, V> ReadOnlyWindowStore<K, V> windowStore(String storeName) {
+                throw new InvalidStateStoreException("store " + storeName + " is restoring");
+            }
+        };
     }
 }
