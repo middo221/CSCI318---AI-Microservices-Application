@@ -41,7 +41,7 @@ public record Escalation(String escalationId,
         attendeeMessage = attendeeMessage == null ? "" : attendeeMessage;
     }
 
-    private static String bounded(String text, int max, String fallback) {
+    public static String bounded(String text, int max, String fallback) {
         if (text == null || text.isBlank()) {
             return fallback;
         }
