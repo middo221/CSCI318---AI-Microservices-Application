@@ -79,6 +79,7 @@ public class SupportTools {
     private final List<Escalation> escalations = new ArrayList<>();
     private final List<String> refusals = new ArrayList<>();
     private boolean refundOutcomeUnknown;
+    private String unknownRefundRegistrationId;
 
     public SupportTools(String attendeeId, String attendeeMessage, RegistrationPort registrations,
                         PaymentPort payments, TicketingPort ticketing, RefundGuard refundGuard,
@@ -115,6 +116,35 @@ public class SupportTools {
      */
     public synchronized boolean refundOutcomeUnknown() {
         return refundOutcomeUnknown;
+    }
+
+    /** The registration whose refund outcome is unknown, or null when none is. */
+    public synchronized String unknownRefundRegistrationId() {
+        return unknownRefundRegistrationId;
+    }
+
+    /**
+     * Records an escalation written by the system rather than the model, for a refund whose outcome
+     * is unknown. Goes through the same store and record as {@link #escalateToOrganiser}, and does
+     * nothing if the conversation has already escalated.
+     *
+     * @return the escalation this conversation holds afterwards
+     */
+    public synchronized Escalation escalateUnknownRefund() {
+        if (!escalations.isEmpty()) {
+            return escalations.getFirst();
+        }
+        Escalation escalation = escalationStore.open(attendeeId, unknownRefundRegistrationId,
+                "A refund request got no answer; its outcome is unknown.",
+                ("Written by the system, not the assistant. A refund was requested on registration %s but the "
+                        + "registration service did not answer, so it is not known whether it was accepted. "
+                        + "Check the registration and the payment before anything else is done.")
+                        .formatted(unknownRefundRegistrationId),
+                attendeeMessage);
+        escalations.add(escalation);
+        log.warn("support conversation for {} escalated as {}: refund outcome unknown on {}",
+                attendeeId, escalation.escalationId(), unknownRefundRegistrationId);
+        return escalation;
     }
 
     /** True once a tool has changed something outside this conversation. */
@@ -248,6 +278,7 @@ public class SupportTools {
                     RefundAnswer.notRequested(explainRegistrationRefusal(rejected));
             case UpstreamResult.Unavailable<RefundReceipt> unavailable -> {
                 refundOutcomeUnknown = true;
+                unknownRefundRegistrationId = id;
                 log.warn("support conversation for {}: refund on {} got no answer; outcome unknown", attendeeId, id);
                 yield RefundAnswer.notRequested("The registration service did not answer, so it is UNKNOWN "
                         + "whether the refund was requested. Do not retry. Call escalateToOrganiser so a human "
