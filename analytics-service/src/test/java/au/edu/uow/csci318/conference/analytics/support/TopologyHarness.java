@@ -1,9 +1,12 @@
 package au.edu.uow.csci318.conference.analytics.support;
 
+import au.edu.uow.csci318.conference.analytics.domain.event.GateCongestionAlert;
 import au.edu.uow.csci318.conference.analytics.domain.event.SessionCapacityAlert;
 import au.edu.uow.csci318.conference.analytics.domain.model.AlertThresholds;
 import au.edu.uow.csci318.conference.analytics.infrastructure.streams.EventSerdes;
+import au.edu.uow.csci318.conference.analytics.infrastructure.streams.GateThroughputTopology;
 import au.edu.uow.csci318.conference.analytics.infrastructure.streams.SessionFillRateTopology;
+import au.edu.uow.csci318.conference.common.event.AttendeeCheckedIn;
 import au.edu.uow.csci318.conference.common.event.SeatsReleased;
 import au.edu.uow.csci318.conference.common.event.SeatsReserved;
 import au.edu.uow.csci318.conference.common.event.SessionCapacityChanged;
@@ -73,6 +76,14 @@ public final class TopologyHarness {
                         builder.table("session-capacity-changed",
                                 Consumed.with(Serdes.String(), EventSerdes.json(SessionCapacityChanged.class))))
                 .to("session-capacity-alert", Produced.with(Serdes.String(), EventSerdes.json(SessionCapacityAlert.class)));
+    }
+
+    /** Wires RT2 exactly as application.yml binds gateThroughput-in-0 and -out-0. */
+    public static void wireGateThroughput(StreamsBuilder builder, AlertThresholds thresholds) {
+        new GateThroughputTopology(thresholds)
+                .build(builder.stream("attendee-checked-in",
+                        Consumed.with(Serdes.String(), EventSerdes.json(AttendeeCheckedIn.class))))
+                .to("gate-congestion-alert", Produced.with(Serdes.String(), EventSerdes.json(GateCongestionAlert.class)));
     }
 
     public static TestInputTopic<String, byte[]> rawInput(TopologyTestDriver driver, String topic) {
