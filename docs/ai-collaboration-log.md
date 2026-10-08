@@ -29,7 +29,7 @@ than delegation.
 | Field | Content |
 | :--- | :--- |
 | **Date** | 2026-08-22 |
-| **Member** | *(fill in)* |
+| **Member** | Hayden |
 | **Tool** | Claude Code (Opus 5) |
 | **SDLC phase** | Requirements, domain modelling, architecture design |
 | **What was asked** | Turn the group's feature list for a conference registration platform into a design meeting the CSCI318 architectural requirements |
@@ -45,7 +45,7 @@ than delegation.
 | Field | Content |
 | :--- | :--- |
 | **Date** | 2026-08-22 |
-| **Member** | *(fill in)* |
+| **Member** | Hayden |
 | **Tool** | Claude Code (Opus 5) |
 | **SDLC phase** | Requirements, domain modelling |
 | **What was asked** | Self-review the design specification before writing the implementation plan |
@@ -61,7 +61,7 @@ than delegation.
 | Field | Content |
 | :--- | :--- |
 | **Date** | 2026-08-22 |
-| **Member** | *(fill in)* |
+| **Member** | Hayden |
 | **Tool** | Claude Code (Opus 5) |
 | **SDLC phase** | Implementation planning |
 | **What was asked** | Write a task-by-task implementation plan for milestone M0 |
@@ -77,7 +77,7 @@ than delegation.
 | Field | Content |
 | :--- | :--- |
 | **Date** | 2026-08-22 |
-| **Member** | *(fill in)* |
+| **Member** | Hayden |
 | **Tool** | Claude Code (Opus 5) |
 | **SDLC phase** | Implementation |
 | **What was asked** | Execute the M0 plan |
@@ -93,7 +93,7 @@ than delegation.
 | Field | Content |
 | :--- | :--- |
 | **Date** | 2026-08-22 |
-| **Member** | *(fill in)* |
+| **Member** | Hayden |
 | **Tool** | Claude Code (Opus 5) |
 | **SDLC phase** | Requirements, scope management |
 | **What was asked** | Whether the project needs a frontend. The team's initial assumption was yes; the AI's design had excluded one, initially justified only as "the specification states REST endpoints are the interface" |
@@ -109,7 +109,7 @@ than delegation.
 | Field | Content |
 | :--- | :--- |
 | **Date** | 2026-08-22 |
-| **Member** | *(fill in)* |
+| **Member** | Hayden |
 | **Tool** | Claude Code (Opus 5) |
 | **SDLC phase** | Architecture, dependency management |
 | **What was asked** | Whether `spring-boot-starter-validation` needed the coordinator's approval, since the specification does not name it |
@@ -125,7 +125,7 @@ than delegation.
 | Field | Content |
 | :--- | :--- |
 | **Date** | 2026-08-22 |
-| **Member** | *(fill in)* |
+| **Member** | Hayden |
 | **Tool** | Claude Code (Opus 5) |
 | **SDLC phase** | Implementation, integration testing (M1) |
 | **What was asked** | Publish an `EventPublished` domain event from `event-catalog-service` to Kafka and consume it in `registration-service` |
@@ -141,7 +141,7 @@ than delegation.
 | Field | Content |
 | :--- | :--- |
 | **Date** | 2026-08-22 |
-| **Member** | *(fill in)* |
+| **Member** | Hayden |
 | **Tool** | Claude Code (Opus 5) |
 | **SDLC phase** | Design refinement during implementation planning (M1) |
 | **What was asked** | Implement the `SessionView` read replica per `specs/3-domain-models.md` §3.4, which sources `capacity` from both `session-added` and `session-capacity-changed` |
@@ -157,7 +157,7 @@ than delegation.
 | Field | Content |
 | :--- | :--- |
 | **Date** | 2026-08-22 |
-| **Member** | *(fill in)* |
+| **Member** | Hayden |
 | **Tool** | Claude Code (Opus 5) |
 | **SDLC phase** | Verification (M1 Definition of Done) |
 | **What was asked** | Prove that `registration-service` never calls `event-catalog-service` |
