@@ -142,15 +142,47 @@ class SupportApplicationServiceTest {
         assertThat(result.notes()).singleElement().asString().contains("withheld");
     }
 
-    /** A claim that cannot be checked is not evidence of a false one. */
+    /** A claim that cannot be checked cannot be trusted either: the reply is written from the record. */
     @Test
-    void keepsTheReplyWhenTheClaimIsUnrecognised() {
+    void replacesTheReplyWhenTheClaimIsUnrecognised() {
         SupportResult result = handle(modelThat(
-                tools -> tools.lookupRegistration("reg-mine"),
-                new SupportReply("Your registration is confirmed.", "DONE")));
+                tools -> { },
+                new SupportReply("Your refund is on its way.", "REFUNDED")));
 
-        assertThat(result.reply()).isEqualTo("Your registration is confirmed.");
-        assertThat(result.notes()).isEmpty();
+        assertThat(result.outcome()).isEqualTo(SupportOutcome.RESOLVED);
+        assertThat(result.reply()).doesNotContain("on its way")
+                .contains("No refund has been requested").contains("nothing has been passed to an organiser");
+        assertThat(result.notes()).singleElement().asString().contains("withheld");
+    }
+
+    @Test
+    void replacesTheReplyWhenThereIsNoClaim() {
+        SupportResult result = handle(modelThat(
+                tools -> { },
+                new SupportReply("Your refund is on its way.", null)));
+
+        assertThat(result.reply()).doesNotContain("on its way");
+    }
+
+    @Test
+    void withholdsAResolvedClaimAfterARefundWasAccepted() {
+        SupportResult result = handle(modelThat(
+                tools -> tools.requestRefund("reg-mine", "Hospitalised"),
+                new SupportReply("Nothing more to do.", "RESOLVED")));
+
+        assertThat(result.outcome()).isEqualTo(SupportOutcome.REFUND_REQUESTED);
+        assertThat(result.reply()).contains("149.00 AUD").contains("reg-mine");
+        assertThat(result.notes()).anySatisfy(note -> assertThat(note).contains("withheld"));
+    }
+
+    @Test
+    void withholdsAResolvedClaimAfterAnEscalation() {
+        SupportResult result = handle(modelThat(
+                tools -> tools.escalateToOrganiser("reg-big", "Above the limit", ""),
+                new SupportReply("All sorted.", "RESOLVED")));
+
+        assertThat(result.outcome()).isEqualTo(SupportOutcome.ESCALATED);
+        assertThat(result.reply()).contains(result.escalations().getFirst().escalationId());
     }
 
     @Test
@@ -280,6 +312,91 @@ class SupportApplicationServiceTest {
         assertThat(result.outcome()).isEqualTo(SupportOutcome.ESCALATED);
         assertThat(store.all()).hasSize(1);
         assertThat(result.reply()).contains("reg-mine");
+    }
+
+    @Test
+    void anUnrelatedEscalationBeforeTheUnknownRefundDoesNotHideIt() {
+        registrations.withRefundsUnavailable();
+
+        SupportResult result = handle(modelThat(
+                tools -> {
+                    tools.escalateToOrganiser("reg-big", "Above the limit", "");
+                    tools.requestRefund("reg-mine", "Hospitalised");
+                    tools.escalateToOrganiser("reg-mine", "Refund outcome unknown", "");
+                },
+                new SupportReply("An organiser will check both.", "ESCALATED")));
+
+        assertThat(store.all()).extracting(e -> e.registrationId()).containsExactlyInAnyOrder("reg-big", "reg-mine");
+        assertThat(result.escalations()).hasSize(2);
+        String unknownRef = result.escalations().stream()
+                .filter(e -> "reg-mine".equals(e.registrationId())).findFirst().orElseThrow().escalationId();
+        assertThat(result.reply()).contains("reg-mine").contains(unknownRef);
+    }
+
+    @Test
+    void anUnrelatedEscalationAfterTheUnknownRefundDoesNotHideIt() {
+        registrations.withRefundsUnavailable();
+
+        SupportResult result = handle(modelThat(
+                tools -> {
+                    tools.requestRefund("reg-mine", "Hospitalised");
+                    tools.escalateToOrganiser("reg-big", "Above the limit", "");
+                },
+                new SupportReply("Passed on.", "ESCALATED")));
+
+        assertThat(store.all()).extracting(e -> e.registrationId()).containsExactlyInAnyOrder("reg-big", "reg-mine");
+        String unknownRef = result.escalations().stream()
+                .filter(e -> "reg-mine".equals(e.registrationId())).findFirst().orElseThrow().escalationId();
+        String bigRef = result.escalations().stream()
+                .filter(e -> "reg-big".equals(e.registrationId())).findFirst().orElseThrow().escalationId();
+        assertThat(result.reply()).contains("reg-mine").contains(unknownRef).doesNotContain(bigRef);
+    }
+
+    @Test
+    void doesNotKeepTheModelsReplyOnceTheServiceEscalatedForIt() {
+        registrations.withRefundsUnavailable();
+
+        SupportResult result = handle(modelThat(
+                tools -> tools.requestRefund("reg-mine", "Hospitalised"),
+                new SupportReply("Please try again later.", "RESOLVED")));
+
+        assertThat(result.outcome()).isEqualTo(SupportOutcome.ESCALATED);
+        assertThat(result.reply()).doesNotContain("try again later").contains("reg-mine");
+    }
+
+    @Test
+    void theEscalatedReplyAlsoMentionsARefundThatWasAccepted() {
+        SupportResult result = handle(modelThat(
+                tools -> {
+                    tools.requestRefund("reg-mine", "Hospitalised");
+                    tools.escalateToOrganiser("reg-big", "Above the limit", "");
+                },
+                new SupportReply("Done.", "RESOLVED")));
+
+        assertThat(result.outcome()).isEqualTo(SupportOutcome.ESCALATED);
+        assertThat(result.reply()).contains("149.00 AUD").contains("reg-mine")
+                .contains(result.escalations().getFirst().escalationId());
+    }
+
+    @Test
+    void escalatingAnUnknownRefundWhenThereIsNoneDoesNothing() {
+        toolsFactory.create(ME, MESSAGE).escalateUnknownRefund();
+
+        assertThat(store.all()).isEmpty();
+    }
+
+    @Test
+    void notesRecordAnUnknownRefundEvenWhenTheModelEscalatedIt() {
+        registrations.withRefundsUnavailable();
+
+        SupportResult result = handle(modelThat(
+                tools -> {
+                    tools.requestRefund("reg-mine", "Hospitalised");
+                    tools.escalateToOrganiser("reg-mine", "Refund outcome unknown", "Please check");
+                },
+                new SupportReply("An organiser will check.", "ESCALATED")));
+
+        assertThat(result.notes()).anySatisfy(note -> assertThat(note).contains("reg-mine").contains("unknown"));
     }
 
     @Test

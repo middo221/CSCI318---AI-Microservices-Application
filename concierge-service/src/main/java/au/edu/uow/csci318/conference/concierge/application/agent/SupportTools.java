@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -100,7 +101,7 @@ public class SupportTools {
         return List.copyOf(refundsRequested);
     }
 
-    /** Every escalation recorded during this conversation. At most one. */
+    /** Every escalation recorded: at most one from the model, plus one the system may add for an unknown refund. */
     public synchronized List<Escalation> escalations() {
         return List.copyOf(escalations);
     }
@@ -125,14 +126,20 @@ public class SupportTools {
 
     /**
      * Records an escalation written by the system rather than the model, for a refund whose outcome
-     * is unknown. Goes through the same store and record as {@link #escalateToOrganiser}, and does
-     * nothing if the conversation has already escalated.
+     * is unknown. Goes through the same store and record as {@link #escalateToOrganiser}, but is exempt
+     * from its one-escalation rule: a duplicate is safe, a miss is not. Does nothing when there is no
+     * unknown refund, or when this registration was already escalated.
      *
-     * @return the escalation this conversation holds afterwards
+     * @return the escalation for the unknown refund, or empty when there is no unknown refund
      */
-    public synchronized Escalation escalateUnknownRefund() {
-        if (!escalations.isEmpty()) {
-            return escalations.getFirst();
+    public synchronized Optional<Escalation> escalateUnknownRefund() {
+        if (unknownRefundRegistrationId == null) {
+            return Optional.empty();
+        }
+        Optional<Escalation> existing = escalations.stream()
+                .filter(e -> unknownRefundRegistrationId.equals(e.registrationId())).findFirst();
+        if (existing.isPresent()) {
+            return existing;
         }
         Escalation escalation = escalationStore.open(attendeeId, unknownRefundRegistrationId,
                 "A refund request got no answer; its outcome is unknown.",
@@ -144,7 +151,7 @@ public class SupportTools {
         escalations.add(escalation);
         log.warn("support conversation for {} escalated as {}: refund outcome unknown on {}",
                 attendeeId, escalation.escalationId(), unknownRefundRegistrationId);
-        return escalation;
+        return Optional.of(escalation);
     }
 
     /** True once a tool has changed something outside this conversation. */
