@@ -97,7 +97,7 @@ class RefundRequestControllerTest {
 
     private String givenAConfirmedRegistration() {
         Registration registration = givenARegistration("49.50");
-        registrations.confirmPaid(registration.getId());
+        registrations.settlePayment(registration.getId());
         outbound.clear();
         return registration.getId();
     }

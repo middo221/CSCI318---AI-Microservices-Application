@@ -19,7 +19,7 @@ spring:
       path: /h2-console
   cloud:
     function:
-      definition: eventPublished;sessionAdded;sessionCapacityChanged;paymentSucceeded;paymentFailed
+      definition: eventPublished;sessionAdded;sessionCapacityChanged;paymentSucceeded;paymentFailed;refundIssued;refundDeclined
     stream:
       bindings:
         eventPublished-in-0:
@@ -36,6 +36,12 @@ spring:
           group: registration-service
         paymentFailed-in-0:
           destination: payment-failed
+          group: registration-service
+        refundIssued-in-0:
+          destination: refund-issued
+          group: registration-service
+        refundDeclined-in-0:
+          destination: refund-declined
           group: registration-service
       kafka:
         binder:

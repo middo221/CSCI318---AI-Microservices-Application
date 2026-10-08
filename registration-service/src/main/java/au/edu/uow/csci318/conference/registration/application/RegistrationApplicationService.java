@@ -10,6 +10,7 @@ import au.edu.uow.csci318.conference.registration.domain.model.HoldWindow;
 import au.edu.uow.csci318.conference.registration.domain.model.Money;
 import au.edu.uow.csci318.conference.registration.domain.model.RefundRequester;
 import au.edu.uow.csci318.conference.registration.domain.model.Registration;
+import au.edu.uow.csci318.conference.registration.domain.model.RegistrationStatus;
 import au.edu.uow.csci318.conference.registration.domain.model.SeatHold;
 import au.edu.uow.csci318.conference.registration.domain.model.SessionView;
 import au.edu.uow.csci318.conference.registration.domain.repository.RegistrationRepository;
@@ -137,21 +138,76 @@ public class RegistrationApplicationService {
     }
 
     /**
-     * Confirms a registration whose payment succeeded (FR-08).
+     * Settles a {@code payment-succeeded} (FR-08), or reverses it when it came too late (FR-07).
      *
-     * <p>Seat counts on the replica are deliberately left alone: the seats were taken when the
-     * hold was created and they stay taken. Only the hold's status changes.
+     * <p>Payment refuses to charge past the hold deadline, but a charge can still land in the seconds
+     * between the deadline and the next sweep. By then the seats are back on sale, so the registration
+     * stays {@code EXPIRED} or {@code CANCELLED} and asks for the money back instead. A success for a
+     * registration already {@code CONFIRMED} or {@code REFUNDED} is a replay and changes nothing.
+     *
+     * <p>Seat counts on the replica are deliberately left alone when confirming: the seats were taken
+     * when the hold was created and they stay taken. Only the hold's status changes.
      *
      * @throws RegistrationNotFoundException if the id is unknown
-     * @throws IllegalStateException         if the registration is no longer awaiting payment
      */
     @Transactional
-    public void confirmPaid(String registrationId) {
+    public PaymentSettlement settlePayment(String registrationId) {
         Registration registration = findById(registrationId);
-        registration.confirm();
+        PaymentSettlement outcome = switch (registration.getStatus()) {
+            case PENDING_PAYMENT -> {
+                registration.confirm();
+                yield PaymentSettlement.CONFIRMED;
+            }
+            case EXPIRED, CANCELLED -> {
+                registration.requestLatePaymentReversal();
+                yield PaymentSettlement.REVERSAL_REQUESTED;
+            }
+            case CONFIRMED, REFUNDED -> PaymentSettlement.ALREADY_SETTLED;
+        };
         List<DomainEvent> recorded = registration.pullDomainEvents();
         registrations.save(registration);
         domainEvents.publishAll(recorded);
+        return outcome;
+    }
+
+    /**
+     * Applies a refund Billing issued (FR-11): the registration is refunded, its seats go back on sale,
+     * and one {@code seats-released} per session offers them to that session's waitlist.
+     *
+     * <p>A registration that is not {@code CONFIRMED} is left alone and {@code false} returned: that
+     * is a reversed late payment, whose seats were released long ago, or a redelivery.
+     *
+     * @throws RegistrationNotFoundException if the id is unknown
+     */
+    @Transactional
+    public boolean applyRefundIssued(String registrationId) {
+        Registration registration = findById(registrationId);
+        if (registration.getStatus() != RegistrationStatus.CONFIRMED) {
+            return false;
+        }
+        registration.refund();
+        List<DomainEvent> recorded = registration.pullDomainEvents();
+        registrations.save(registration);
+        returnSeats(registration);
+        domainEvents.publishAll(recorded);
+        return true;
+    }
+
+    /**
+     * Applies a refund Billing declined: the pending request is settled and nothing else changes.
+     *
+     * @return {@code true} if a pending request was cleared
+     * @throws RegistrationNotFoundException if the id is unknown
+     */
+    @Transactional
+    public boolean applyRefundDeclined(String registrationId) {
+        Registration registration = findById(registrationId);
+        if (!registration.isRefundRequested()) {
+            return false;
+        }
+        registration.clearRefundRequest();
+        registrations.save(registration);
+        return true;
     }
 
     /**

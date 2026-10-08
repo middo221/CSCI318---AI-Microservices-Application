@@ -213,8 +213,12 @@ class PaymentEventConsumersTest {
         assertThat(outbound.receive(500, "registration-confirmed")).isNull();
     }
 
+    /**
+     * The defect FR-07 recorded, closed: a charge that lands after the seats were released is not
+     * confirmed, and now the money is asked back instead of being kept.
+     */
     @Test
-    void absorbsAPaymentSuccessForARegistrationAlreadyCancelled() {
+    void asksForTheMoneyBackWhenAPaymentArrivesAfterTheSeatsWereReleased() throws Exception {
         Registration registration = givenAPendingRegistration(2);
         send(new PaymentFailed(UUID.randomUUID().toString(), Instant.now(),
                 "pay-1", registration.getId(), "CARD_DECLINED"), "payment-failed");
@@ -226,5 +230,26 @@ class PaymentEventConsumersTest {
         assertThat(outbound.receive(500, "registration-confirmed")).isNull();
         assertThat(registrations.findById(registration.getId()).getStatus())
                 .isEqualTo(RegistrationStatus.CANCELLED);
+        Message<byte[]> reversal = outbound.receive(2000, "refund-requested");
+        assertThat(reversal).as("money taken for released seats must be asked back").isNotNull();
+        JsonNode payload = objectMapper.readTree(reversal.getPayload());
+        assertThat(payload.get("registrationId").asText()).isEqualTo(registration.getId());
+        assertThat(payload.get("kind").asText()).isEqualTo("LATE_PAYMENT_REVERSAL");
+        assertThat(payload.get("requestedBy").asText()).isEqualTo("SYSTEM");
+    }
+
+    /** A second success for a confirmed registration is a replay, not a second payment. */
+    @Test
+    void ignoresASecondSuccessForARegistrationAlreadyConfirmed() {
+        Registration registration = givenAPendingRegistration(2);
+        send(new PaymentSucceeded(UUID.randomUUID().toString(), Instant.now(),
+                "pay-1", registration.getId(), new BigDecimal("99.00"), "AUD"), "payment-succeeded");
+        outbound.clear();
+
+        send(new PaymentSucceeded(UUID.randomUUID().toString(), Instant.now(),
+                "pay-1", registration.getId(), new BigDecimal("99.00"), "AUD"), "payment-succeeded");
+
+        assertThat(outbound.receive(500, "registration-confirmed")).isNull();
+        assertThat(outbound.receive(500, "refund-requested")).isNull();
     }
 }
