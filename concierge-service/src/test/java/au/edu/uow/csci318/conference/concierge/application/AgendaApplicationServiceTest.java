@@ -57,7 +57,9 @@ class AgendaApplicationServiceTest {
 
     private AgendaApplicationService serviceDrivenBy(AgendaAgentFactory agents, int maxItems) {
         return new AgendaApplicationService(toolsFactory, agents, new ClashDetector(),
-                new ConciergeProperties("http://catalog.test", "http://registration.test", maxItems));
+                new ConciergeProperties("http://catalog.test", "http://registration.test",
+                        "http://payment.test", "http://ticketing.test", maxItems,
+                        new java.math.BigDecimal("200.00"), "AUD"));
     }
 
     private AgendaResult build(AgendaAgentFactory agents) {
