@@ -1,6 +1,8 @@
 package au.edu.uow.csci318.conference.registration.api;
 
 import au.edu.uow.csci318.conference.registration.api.dto.CreateRegistrationRequest;
+import au.edu.uow.csci318.conference.registration.api.dto.RefundRequest;
+import au.edu.uow.csci318.conference.registration.api.dto.RefundRequestResponse;
 import au.edu.uow.csci318.conference.registration.api.dto.RegistrationResponse;
 import au.edu.uow.csci318.conference.registration.application.RegistrationApplicationService;
 import jakarta.validation.Valid;
@@ -35,6 +37,18 @@ public class RegistrationController {
     @ResponseStatus(HttpStatus.CREATED)
     public RegistrationResponse register(@Valid @RequestBody CreateRegistrationRequest request) {
         return RegistrationResponse.from(registrations.request(request.toCommand()));
+    }
+
+    /**
+     * Asks Billing for a confirmed registration's money back (FR-11). {@code 202} rather than
+     * {@code 201}: nothing has been refunded yet, and the decision arrives asynchronously.
+     */
+    @PostMapping("/registrations/{registrationId}/refund-requests")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public RefundRequestResponse requestRefund(@PathVariable String registrationId,
+                                               @Valid @RequestBody RefundRequest request) {
+        return RefundRequestResponse.from(
+                registrations.requestRefund(registrationId, request.reason(), request.requester()));
     }
 
     @GetMapping("/registrations/{registrationId}")

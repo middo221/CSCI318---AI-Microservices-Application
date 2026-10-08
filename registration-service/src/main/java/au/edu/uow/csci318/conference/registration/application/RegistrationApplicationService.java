@@ -8,6 +8,7 @@ import au.edu.uow.csci318.conference.registration.domain.SessionNotFoundExceptio
 import au.edu.uow.csci318.conference.registration.domain.event.DomainEventPublisher;
 import au.edu.uow.csci318.conference.registration.domain.model.HoldWindow;
 import au.edu.uow.csci318.conference.registration.domain.model.Money;
+import au.edu.uow.csci318.conference.registration.domain.model.RefundRequester;
 import au.edu.uow.csci318.conference.registration.domain.model.Registration;
 import au.edu.uow.csci318.conference.registration.domain.model.SeatHold;
 import au.edu.uow.csci318.conference.registration.domain.model.SessionView;
@@ -151,6 +152,30 @@ public class RegistrationApplicationService {
         List<DomainEvent> recorded = registration.pullDomainEvents();
         registrations.save(registration);
         domainEvents.publishAll(recorded);
+    }
+
+    /**
+     * Asks Billing for a confirmed registration's money back (FR-11).
+     *
+     * <p>Returns the instance it changed, which carries {@code refundRequestedAt}. The registration is
+     * not given up here: Billing decides, and the answer settles it when it arrives on
+     * {@code refund-issued} or {@code refund-declined}.
+     *
+     * @throws RegistrationNotFoundException if the id is unknown
+     * @throws au.edu.uow.csci318.conference.registration.domain.RegistrationNotConfirmedException
+     *         unless confirmed
+     * @throws au.edu.uow.csci318.conference.registration.domain.NothingToRefundException if free
+     * @throws au.edu.uow.csci318.conference.registration.domain.RefundAlreadyRequestedException
+     *         if a request is already undecided
+     */
+    @Transactional
+    public Registration requestRefund(String registrationId, String reason, RefundRequester requestedBy) {
+        Registration registration = findById(registrationId);
+        registration.requestRefund(reason, requestedBy, Instant.now());
+        List<DomainEvent> recorded = registration.pullDomainEvents();
+        registrations.save(registration);
+        domainEvents.publishAll(recorded);
+        return registration;
     }
 
     /**

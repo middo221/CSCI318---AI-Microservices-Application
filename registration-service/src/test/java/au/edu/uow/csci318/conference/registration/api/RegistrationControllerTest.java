@@ -104,7 +104,8 @@ class RegistrationControllerTest {
                 .andExpect(jsonPath("$.seatHolds[0].sessionId").value("ses-1"))
                 .andExpect(jsonPath("$.seatHolds[0].quantity").value(2))
                 .andExpect(jsonPath("$.seatHolds[0].status").value("HELD"))
-                .andExpect(jsonPath("$.seatHolds[0].expiresAt").isNotEmpty());
+                .andExpect(jsonPath("$.seatHolds[0].expiresAt").isNotEmpty())
+                .andExpect(jsonPath("$.refundRequested").value(false));
     }
 
     @Test
