@@ -78,6 +78,7 @@ public class SupportTools {
     private final List<RequestedRefund> refundsRequested = new ArrayList<>();
     private final List<Escalation> escalations = new ArrayList<>();
     private final List<String> refusals = new ArrayList<>();
+    private boolean refundOutcomeUnknown;
 
     public SupportTools(String attendeeId, String attendeeMessage, RegistrationPort registrations,
                         PaymentPort payments, TicketingPort ticketing, RefundGuard refundGuard,
@@ -106,6 +107,14 @@ public class SupportTools {
     /** Every time a guardrail here said no to something the model tried, in words for the attendee. */
     public synchronized List<String> refusals() {
         return List.copyOf(refusals);
+    }
+
+    /**
+     * True once a refund POST got no answer, so registration may or may not have committed it. From
+     * then on no further refund is requested in this conversation.
+     */
+    public synchronized boolean refundOutcomeUnknown() {
+        return refundOutcomeUnknown;
     }
 
     /** True once a tool has changed something outside this conversation. */
@@ -173,7 +182,7 @@ public class SupportTools {
             case Owned owned -> switch (payments.quoteRefund(owned.registration().registrationId())) {
                 case UpstreamResult.Ok<RefundQuote> ok -> {
                     RefundDecision decision = refundGuard.evaluate(ok.value(), alreadyRequested());
-                    yield new QuoteAnswer(true, ok.value(), decision.approved(), ok.value().describe() + " "
+                    yield new QuoteAnswer(true, QuoteView.of(ok.value()), decision.approved(), ok.value().describe() + " "
                             + (decision.approved() ? "requestRefund can approve this." : decision.reason()));
                 }
                 case UpstreamResult.Rejected<RefundQuote> rejected ->
@@ -203,6 +212,13 @@ public class SupportTools {
                     "A refund for registration %s has already been requested in this conversation.".formatted(id));
         }
 
+        if (refundOutcomeUnknown) {
+            refusals.add("Declined to request a refund on registration %s: an earlier refund's outcome is unknown."
+                    .formatted(id));
+            return RefundAnswer.notRequested("An earlier refund's outcome in this conversation is unknown, so no "
+                    + "further refund can be requested. Call escalateToOrganiser.");
+        }
+
         UpstreamResult<RefundQuote> quoted = payments.quoteRefund(id);
         if (!(quoted instanceof UpstreamResult.Ok<RefundQuote> ok)) {
             return RefundAnswer.notRequested(quoted instanceof UpstreamResult.Rejected<RefundQuote> rejected
@@ -230,9 +246,13 @@ public class SupportTools {
             }
             case UpstreamResult.Rejected<RefundReceipt> rejected ->
                     RefundAnswer.notRequested(explainRegistrationRefusal(rejected));
-            case UpstreamResult.Unavailable<RefundReceipt> unavailable -> RefundAnswer.notRequested(
-                    "The registration service could not be reached, so the refund was not requested. "
-                            + "Offer to escalate to an organiser.");
+            case UpstreamResult.Unavailable<RefundReceipt> unavailable -> {
+                refundOutcomeUnknown = true;
+                log.warn("support conversation for {}: refund on {} got no answer; outcome unknown", attendeeId, id);
+                yield RefundAnswer.notRequested("The registration service did not answer, so it is UNKNOWN "
+                        + "whether the refund was requested. Do not retry. Call escalateToOrganiser so a human "
+                        + "can check.");
+            }
         };
     }
 
@@ -355,7 +375,23 @@ public class SupportTools {
     public record TicketsAnswer(boolean known, List<TicketSummary> tickets, String explanation) {
     }
 
-    public record QuoteAnswer(boolean quoted, RefundQuote quote, boolean autoApprovable, String explanation) {
+    public record QuoteAnswer(boolean quoted, QuoteView quote, boolean autoApprovable, String explanation) {
+    }
+
+    /**
+     * The model's own view of a quote. The domain record has a nullable day count, and LangChain4j
+     * serialises tool results with nulls included, so the timing is given in words instead.
+     */
+    public record QuoteView(BigDecimal paidAmount, BigDecimal refundAmount, int refundPercent,
+                            String currency, boolean eligible, String rule, String timing) {
+
+        static QuoteView of(RefundQuote quote) {
+            String timing = quote.daysUntilEvent() == null
+                    ? "event date not known"
+                    : "%d days before the event".formatted(quote.daysUntilEvent());
+            return new QuoteView(quote.paidAmount(), quote.refundAmount(), quote.refundPercent(),
+                    quote.currency(), quote.eligible(), quote.rule(), timing);
+        }
     }
 
     public record RefundAnswer(boolean requested, String registrationId, BigDecimal refundAmount,

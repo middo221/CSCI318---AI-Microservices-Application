@@ -237,14 +237,21 @@ class SupportToolsTest {
     }
 
     @Test
-    void recordsNoRefundThatRegistrationNeverAccepted() {
+    void treatsAnUnansweredRefundAsUnknownAndRefusesAnyFurtherRefund() {
         registrations.withRefundsUnavailable();
 
         SupportTools.RefundAnswer answer = tools.requestRefund("reg-mine", "Hospitalised");
 
         assertThat(answer.requested()).isFalse();
-        assertThat(answer.explanation()).contains("could not be reached");
+        assertThat(answer.explanation()).contains("UNKNOWN").contains("Do not retry").contains("escalateToOrganiser");
+        assertThat(tools.refundOutcomeUnknown()).isTrue();
         assertThat(tools.refundsRequested()).isEmpty();
+
+        SupportTools.RefundAnswer second = tools.requestRefund("reg-small", "And this one");
+
+        assertThat(second.requested()).isFalse();
+        assertThat(second.explanation()).contains("outcome in this conversation is unknown");
+        assertThat(registrations.refundCalls()).extracting(RefundCall::registrationId).containsExactly("reg-mine");
     }
 
     @Test
@@ -281,7 +288,9 @@ class SupportToolsTest {
 
         assertThat(answer.quoted()).isTrue();
         assertThat(answer.autoApprovable()).isFalse();
-        assertThat(answer.quote().daysUntilEvent()).isNull();
+        assertThat(answer.quote().timing()).isEqualTo("event date not known");
+        String json = dev.langchain4j.internal.Json.toJson(answer);
+        assertThat(json).contains("event date not known").doesNotContain("null");
         assertThat(answer.explanation())
                 .contains("event date not known")
                 .contains("escalateToOrganiser")
