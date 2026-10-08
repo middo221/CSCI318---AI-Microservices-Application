@@ -1,0 +1,118 @@
+@startuml layers-catalog
+' Report §3.2 — event-catalog-service layers, from the classes on main.
+!pragma layout smetana
+!include include/style.iuml
+set separator ::
+hide empty members
+skinparam linetype polyline
+
+title event-catalog-service — layered architecture (au.edu.uow.csci318.conference.catalog)
+
+package "api  (presentation layer)" as api <<api>> {
+  class EventController <<@RestController>>
+  class SessionController <<@RestController>>
+  class SpeakerController <<@RestController>>
+  class GlobalExceptionHandler <<@RestControllerAdvice>>
+  package "api.dto" as api_dto {
+    class "CreateEventRequest\nCreateSessionRequest\nCreateSpeakerRequest\nUpdateCapacityRequest" as reqs <<record>>
+    class "EventResponse\nSessionResponse\nSpeakerResponse" as resps <<record>>
+  }
+}
+
+package "application  (service layer)" as application <<application>> {
+  class EventApplicationService <<@Service>>
+  class SpeakerApplicationService <<@Service>>
+  class CatalogSearchService <<@Service>>
+  package "application.command" as app_cmd {
+    class "CreateEventCommand\nAddSessionCommand\nCreateSpeakerCommand\nSessionSearchQuery" as cmds <<record>>
+  }
+}
+
+package "domain  (domain layer)" as domain <<domain>> {
+  package "domain.model" as dom_model {
+    class Event <<AggregateRoot>>
+    class Speaker <<AggregateRoot>>
+    class Session <<Entity>>
+    class "Venue · DateRange · TimeSlot\nTrack · SeatCapacity · Price" as vos <<ValueObject>>
+  }
+  package "domain.service" as dom_service {
+    class SessionSchedulingPolicy <<DomainService>>
+  }
+  package "domain.repository" as dom_repo {
+    interface EventRepository <<Port>>
+    interface SpeakerRepository <<Port>>
+  }
+  package "domain.event" as dom_event {
+    interface DomainEventPublisher <<Port>>
+  }
+}
+
+package "infrastructure  (infrastructure layer)" as infrastructure <<infrastructure>> {
+  package "infrastructure.persistence" as inf_persist {
+    class JpaEventRepository <<@Repository>>
+    class JpaSpeakerRepository <<@Repository>>
+    interface EventJpaRepository <<Spring Data>>
+    interface SpeakerJpaRepository <<Spring Data>>
+  }
+  package "infrastructure.messaging" as inf_msg {
+    class StreamBridgeDomainEventPublisher <<@Component>>
+  }
+}
+
+' api -> application
+EventController ..> EventApplicationService
+SpeakerController ..> SpeakerApplicationService
+SessionController ..> CatalogSearchService
+reqs ..> cmds : toCommand()
+reqs ..> vos : builds
+resps ..> Event : from(...)
+
+' application -> domain
+EventApplicationService ..> Event
+EventApplicationService ..> SessionSchedulingPolicy
+EventApplicationService ..> EventRepository
+EventApplicationService ..> SpeakerRepository
+EventApplicationService ..> DomainEventPublisher
+SpeakerApplicationService ..> SpeakerRepository
+CatalogSearchService ..> EventRepository
+CatalogSearchService ..> SpeakerRepository
+
+' domain internals
+Event *-- Session
+Session *-- vos
+SessionSchedulingPolicy ..> Session
+
+' infrastructure implements the domain's ports
+EventRepository <|.. JpaEventRepository
+SpeakerRepository <|.. JpaSpeakerRepository
+JpaEventRepository --> EventJpaRepository : delegates
+JpaSpeakerRepository --> SpeakerJpaRepository : delegates
+DomainEventPublisher <|.. StreamBridgeDomainEventPublisher
+
+note bottom of StreamBridgeDomainEventPublisher
+  Defers each send to AFTER_COMMIT
+  (@TransactionalEventListener), then
+  StreamBridge.send(eventType, payload)
+  with header KEY = partitionKey().
+  Topics: event-published,
+  session-added, session-capacity-changed.
+end note
+
+note bottom of dom_model
+  Domain exceptions (domain package root):
+  EventNotFoundException, EventAlreadyPublishedException,
+  EventHasNoSessionsException, SessionNotFoundException,
+  SpeakerNotFoundException. GlobalExceptionHandler maps
+  them to 404 / 409 with an ApiError {code, message}.
+  The domain imports only jakarta.persistence and
+  common-events — no Spring.
+end note
+
+legend right
+  <b>Dependency rule</b>
+  api ──> application ──> domain <── infrastructure
+  dashed arrow = depends on / calls
+  hollow triangle = implements a domain port
+  filled diamond = composition inside an aggregate
+endlegend
+@enduml

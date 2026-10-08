@@ -1,0 +1,133 @@
+@startuml layers-registration
+' Report §3.2 — registration-service layers, from the classes on main.
+' Second pass (FR-10, FR-11): add Waitlist/WaitlistEntry, the refund-request endpoint and the
+' seats-released / refund-issued consumers here.
+!pragma layout smetana
+!include include/style.iuml
+set separator ::
+hide empty members
+skinparam linetype polyline
+
+title registration-service — layered architecture (au.edu.uow.csci318.conference.registration)
+
+package "api  (presentation layer)" as api <<api>> {
+  class RegistrationController <<@RestController>>
+  class SessionAvailabilityController <<@RestController>>
+  class GlobalExceptionHandler <<@RestControllerAdvice>>
+  package "api.dto" as api_dto {
+    class "CreateRegistrationRequest\n(SessionLine)" as reqs <<record>>
+    class "RegistrationResponse\nSessionAvailabilityResponse" as resps <<record>>
+  }
+}
+
+package "application  (service layer)" as application <<application>> {
+  class RegistrationApplicationService <<@Service>>
+  class SessionAvailabilityService <<@Service>>
+  class SessionViewProjection <<@Service>>
+  package "application.command" as app_cmd {
+    class "RequestRegistrationCommand\nSessionRequest" as cmds <<record>>
+  }
+}
+
+package "domain  (domain layer)" as domain <<domain>> {
+  package "domain.model" as dom_model {
+    class Registration <<AggregateRoot>>
+    class SeatHold <<Entity>>
+    class SessionView <<ReadModel>>
+    class "AttendeeRef · Money\nHoldWindow · TimeSlot" as vos <<ValueObject>>
+  }
+  package "domain.service" as dom_service {
+    class SeatAllocationService <<DomainService>>
+    class RegistrationPricingService <<DomainService>>
+  }
+  package "domain.repository" as dom_repo {
+    interface RegistrationRepository <<Port>>
+    interface SessionViewRepository <<Port>>
+  }
+  package "domain.event" as dom_event {
+    interface DomainEventPublisher <<Port>>
+  }
+}
+
+package "infrastructure  (infrastructure layer)" as infrastructure <<infrastructure>> {
+  package "infrastructure.messaging" as inf_msg {
+    class CatalogEventConsumers <<@Configuration>>
+    class PaymentEventConsumers <<@Configuration>>
+    class ProcessedEventStore <<@Component>>
+    class ProcessedEvent <<@Entity>>
+    interface ProcessedEventJpaRepository <<Spring Data>>
+    class StreamBridgeDomainEventPublisher <<@Component>>
+  }
+  package "infrastructure.scheduling" as inf_sched {
+    class HoldExpirySweeper <<@Component>>
+  }
+  package "infrastructure.persistence" as inf_persist {
+    class JpaRegistrationRepository <<@Repository>>
+    class JpaSessionViewRepository <<@Repository>>
+    interface RegistrationJpaRepository <<Spring Data>>
+    interface SessionViewJpaRepository <<Spring Data>>
+  }
+}
+
+' api -> application
+RegistrationController ..> RegistrationApplicationService
+SessionAvailabilityController ..> SessionAvailabilityService
+reqs ..> cmds : toCommand()
+resps ..> Registration : from(...)
+
+' application -> domain
+RegistrationApplicationService ..> Registration
+RegistrationApplicationService ..> SeatAllocationService
+RegistrationApplicationService ..> RegistrationPricingService
+RegistrationApplicationService ..> RegistrationRepository
+RegistrationApplicationService ..> SessionViewRepository
+RegistrationApplicationService ..> DomainEventPublisher
+SessionAvailabilityService ..> SessionViewRepository
+SessionViewProjection ..> SessionViewRepository
+
+' domain internals
+Registration *-- SeatHold
+Registration *-- vos
+SeatAllocationService ..> SessionView
+SeatAllocationService ..> SeatHold : creates
+RegistrationPricingService ..> SessionView
+
+' infrastructure implements the domain's ports
+RegistrationRepository <|.. JpaRegistrationRepository
+SessionViewRepository <|.. JpaSessionViewRepository
+DomainEventPublisher <|.. StreamBridgeDomainEventPublisher
+JpaRegistrationRepository --> RegistrationJpaRepository : delegates
+JpaSessionViewRepository --> SessionViewJpaRepository : delegates
+ProcessedEventStore --> ProcessedEventJpaRepository
+ProcessedEventJpaRepository ..> ProcessedEvent
+
+' inbound adapters call the application layer, as the controllers do
+SessionViewProjection <.. CatalogEventConsumers : session-added,\nsession-capacity-changed
+RegistrationApplicationService <.. PaymentEventConsumers : payment-succeeded → confirmPaid\npayment-failed → cancelUnpaid
+RegistrationApplicationService <.. HoldExpirySweeper : expireOverdue(now)\nevery sweep-interval
+CatalogEventConsumers --> ProcessedEventStore : event-published only
+PaymentEventConsumers --> ProcessedEventStore : markProcessed(eventId)
+
+note bottom of StreamBridgeDomainEventPublisher
+  AFTER_COMMIT send, key = partitionKey().
+  Topics: registration-requested, seats-reserved,
+  seats-released, registration-confirmed,
+  registration-cancelled, registration-expired.
+end note
+
+note bottom of dom_model
+  Domain exceptions: SessionNotFoundException (404),
+  RegistrationNotFoundException (404),
+  SessionFullException (409 SESSION_FULL).
+end note
+
+legend right
+  <b>Dependency rule</b>
+  api ──> application ──> domain <── infrastructure
+  Kafka consumers and the scheduler are <i>inbound</i>
+  adapters: like controllers, they call the
+  application layer.
+  dashed arrow = depends on / calls
+  hollow triangle = implements a domain port
+endlegend
+@enduml

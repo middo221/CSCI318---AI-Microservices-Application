@@ -1,0 +1,128 @@
+@startuml layers-concierge
+' Report §3.2 — concierge-service layers, from the classes on main (Agent 1, FR-17).
+' Second pass (FR-18): add the support agent, its tools, and payment/ticketing REST clients.
+!pragma layout smetana
+!include include/style.iuml
+set separator ::
+hide empty members
+allowmixing
+skinparam linetype polyline
+
+title concierge-service — layered architecture (au.edu.uow.csci318.conference.concierge)
+
+package "api  (presentation layer)" as api <<api>> {
+  class ConciergeController <<@RestController>>
+  class GlobalExceptionHandler <<@RestControllerAdvice>>
+  package "api.dto" as api_dto {
+    class "AgendaRequest\nAgendaResponse" as dtos <<record>>
+  }
+}
+
+package "application  (service layer)" as application <<application>> {
+  class AgendaApplicationService <<@Service>>
+  class AgendaResult <<record>>
+  class LlmUnavailableException
+  package "application.command" as app_cmd {
+    class BuildAgendaCommand <<record>>
+  }
+  package "application.agent" as app_agent {
+    interface AgendaBuilder <<Agent>>
+    class AgendaTools <<Agent>>
+    class AgendaToolsFactory <<@Component>>
+    interface AgendaAgentFactory <<Port>>
+    class ProposedAgenda <<record>>
+  }
+  package "application.port" as app_port {
+    interface CatalogPort <<Port>>
+    interface RegistrationPort <<Port>>
+  }
+}
+
+package "domain  (domain layer)" as domain <<domain>> {
+  package "domain.model" as dom_model {
+    class "SessionSummary · TimeSlot\nAvailabilitySummary\nRegistrationSummary · Clash" as vos <<ValueObject>>
+  }
+  package "domain.service" as dom_service {
+    class ClashDetector <<DomainService>>
+  }
+}
+
+package "infrastructure  (infrastructure layer)" as infrastructure <<infrastructure>> {
+  package "infrastructure.agent" as inf_agent {
+    class LangChain4jAgendaAgentFactory <<@Component>>
+  }
+  package "infrastructure.client" as inf_client {
+    class RestCatalogClient
+    class RestRegistrationClient
+    class "CatalogSessionPayload\nAvailabilityPayload\nRegistrationPayload" as payloads <<record>>
+  }
+  package "infrastructure.config" as inf_config {
+    class ConciergeConfiguration <<@Configuration>>
+    class ConciergeProperties <<@ConfigurationProperties>>
+  }
+}
+
+component "event-catalog-service :8081" as catalog_svc
+component "registration-service :8082" as registration_svc
+cloud "Google Gemini API" as gemini
+
+' api -> application
+ConciergeController ..> AgendaApplicationService
+dtos ..> BuildAgendaCommand : toCommand()
+dtos ..> AgendaResult : from(...)
+
+' application internals and application -> domain
+AgendaApplicationService ..> AgendaToolsFactory : create() per request
+AgendaApplicationService ..> AgendaAgentFactory : agentFor(tools)
+AgendaApplicationService ..> ClashDetector : verify: firstConflict(...)
+AgendaApplicationService ..> AgendaResult : builds
+AgendaAgentFactory ..> AgendaBuilder : returns
+AgendaBuilder ..> ProposedAgenda : structured output
+AgendaToolsFactory ..> AgendaTools : new
+AgendaTools ..> CatalogPort : searchSessions
+AgendaTools ..> RegistrationPort : availability,\nregistrations
+AgendaTools ..> ClashDetector : detectTimeClashes
+ClashDetector ..> vos
+CatalogPort ..> vos
+RegistrationPort ..> vos
+
+' infrastructure implements the application's ports
+AgendaAgentFactory <|.. LangChain4jAgendaAgentFactory
+CatalogPort <|.. RestCatalogClient
+RegistrationPort <|.. RestRegistrationClient
+RestCatalogClient ..> payloads
+RestRegistrationClient ..> payloads
+ConciergeConfiguration ..> RestCatalogClient : @Bean
+ConciergeConfiguration ..> RestRegistrationClient : @Bean
+ConciergeConfiguration ..> ClashDetector : @Bean
+ConciergeConfiguration ..> ConciergeProperties
+
+' outbound calls
+RestCatalogClient --> catalog_svc : GET /api/v1/sessions/search
+RestRegistrationClient --> registration_svc : GET /api/v1/sessions/{id}/availability\nGET /api/v1/attendees/{id}/registrations
+LangChain4jAgendaAgentFactory --> gemini : AiServices + ChatModel\n(max 12 tool round trips)
+
+note right of app_port
+  Unlike the other services, the concierge's
+  ports live in the <b>application</b> layer
+  (application.port, application.agent), not in
+  domain. Its domain holds only immutable
+  records and ClashDetector — no repositories,
+  no persistence, no database.
+end note
+
+note bottom of AgendaTools
+  Not a Spring bean: a fresh instance per request,
+  so its "dossier" of sessions the agent actually
+  retrieved cannot leak between attendees.
+  @Tool methods: searchSessions, getSessionAvailability,
+  getAttendeeRegistrations, detectTimeClashes.
+end note
+
+legend right
+  <b>Dependency rule</b>
+  api ──> application ──> domain
+  infrastructure implements the application's ports
+  hollow triangle = implements a port
+endlegend
+@enduml

@@ -1,0 +1,47 @@
+@startuml layers-analytics
+' Report §3.2 — analytics-service layers. On main this module is a skeleton: the four layer
+' packages exist (each holds only a .gitkeep) and AnalyticsApplication is the only class.
+' Second pass (M3): replace the notes with the topology beans, state-store query services and
+' the analytics REST controller.
+!pragma layout smetana
+!include include/style.iuml
+set separator ::
+hide empty members
+
+title analytics-service — layered architecture (au.edu.uow.csci318.conference.analytics)
+
+class AnalyticsApplication <<@SpringBootApplication>>
+
+package "api  (presentation layer)" as api <<api>> {
+  class "(empty on main)" as api_empty
+}
+package "application  (service layer)" as application <<application>> {
+  class "(empty on main)" as app_empty
+}
+package "domain  (domain layer)" as domain <<domain>> {
+  class "(empty on main)" as dom_empty
+}
+package "infrastructure  (infrastructure layer)" as infrastructure <<infrastructure>> {
+  class "(empty on main)" as inf_empty
+}
+
+AnalyticsApplication -[hidden]-> api
+api -[hidden]-> application
+application -[hidden]-> domain
+domain -[hidden]-> infrastructure
+
+note right of AnalyticsApplication
+  Port 8085. application.yml sets only the port, the
+  application name and logging: no datasource, no
+  Kafka Streams binder configuration yet.
+  This service will own <b>no database</b> — its state will
+  live in Kafka Streams state stores (specs/5 §4).
+end note
+
+note right of infrastructure
+  Planned for M3 (specs/5 §4), not on main:
+  RT1 fill rate + 90% alert (FR-14, FR-15),
+  RT2 gate throughput (FR-16),
+  registration funnel — served by interactive queries.
+end note
+@enduml
