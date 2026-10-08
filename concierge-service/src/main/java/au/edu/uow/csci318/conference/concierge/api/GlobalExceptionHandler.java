@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -45,7 +46,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(LlmUnavailableException.class)
     public ResponseEntity<ApiError> handleLlmUnavailable(LlmUnavailableException ex) {
-        log.warn("agenda request refused: {}", ex.getMessage());
+        log.warn("concierge request refused: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(new ApiError("LLM_UNAVAILABLE", ex.getMessage()));
     }
@@ -110,5 +111,12 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining("; "));
         return ResponseEntity.badRequest()
                 .body(new ApiError("VALIDATION_FAILED", detail));
+    }
+
+    /** Unparseable JSON gets the common body too, rather than Spring's default error page. */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        return ResponseEntity.badRequest()
+                .body(new ApiError("INVALID_REQUEST", "The request body is missing or is not valid JSON."));
     }
 }
