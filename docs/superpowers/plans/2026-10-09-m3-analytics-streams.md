@@ -300,7 +300,7 @@ All Java paths below are relative to
 - Produces: the Kafka Streams binder, Spring Cloud Stream and `kafka-streams-test-utils` on the
   module classpath; an `InteractiveQueryService` bean in the context.
 
-- [ ] **Step 1: Record the baseline.** With Docker stopped:
+- [x] **Step 1: Record the baseline.** With Docker stopped:
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -309,7 +309,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 
 Expected: `BUILD SUCCESS`. Note the `Tests run:` total across modules; Task 12 compares against it.
 
-- [ ] **Step 2: Write the failing test.**
+- [x] **Step 2: Write the failing test.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.streams;
@@ -336,7 +336,7 @@ class OfflineStreamsContextTest {
 }
 ```
 
-- [ ] **Step 3: Run it to verify it fails.**
+- [x] **Step 3: Run it to verify it fails.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -345,7 +345,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 
 Expected: COMPILATION ERROR — `package org.springframework.cloud.stream.binder.kafka.streams does not exist`.
 
-- [ ] **Step 4: Add the dependencies.** In `analytics-service/pom.xml`, insert after the
+- [x] **Step 4: Add the dependencies.** In `analytics-service/pom.xml`, insert after the
   `common-events` dependency:
 
 ```xml
@@ -376,18 +376,18 @@ for every service except concierge, and a marker reading the POM should see it. 
 Kafka binder is added: this service neither sends through `StreamBridge` nor consumes with
 `Consumer<Message<T>>`, so nothing here needs `spring-cloud-stream-test-binder` either.
 
-- [ ] **Step 5: Record the allowlist row.** In `specs/1-technical-architecture.md`, in the
+- [x] **Step 5: Record the allowlist row.** In `specs/1-technical-architecture.md`, in the
   *Sub-modules of mandated dependencies* table, add after the `spring-boot-starter-test` row:
 
 ```markdown
 | `org.apache.kafka:kafka-streams-test-utils` | **Test scope only.** Supplies `TopologyTestDriver`, so the Kafka Streams topologies are tested offline against the exact bytes each producer writes. Version managed by the Spring Boot BOM (3.9.2, the same as the `kafka-streams` the binder brings). Approved by Hayden on 2026-10-09; to be disclosed to the coordinator. |
 ```
 
-- [ ] **Step 6: Run the test to verify it passes.** Same command as Step 3. Expected: PASS. With no
+- [x] **Step 6: Run the test to verify it passes.** Same command as Step 3. Expected: PASS. With no
   function beans yet the binder creates no bindings, so nothing contacts a broker; Task 8 adds the
   configuration that keeps it that way once bindings exist.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add analytics-service/pom.xml specs/1-technical-architecture.md \
@@ -434,7 +434,7 @@ EOF
     `double conversionRate()`; `double abandonmentRate()`; `double paymentFailureRate()`
   - `record AlertThresholds(double capacityAlertRate, Duration gateCongestionWait)`
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.domain.model;
@@ -641,7 +641,7 @@ class AlertThresholdsTest {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail.**
+- [x] **Step 2: Run them to verify they fail.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -650,7 +650,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 
 Expected: COMPILATION ERROR — `cannot find symbol: class FillRate` (and the other five).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.domain.model;
@@ -890,9 +890,9 @@ public record AlertThresholds(double capacityAlertRate, Duration gateCongestionW
 
 Then `git rm analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/domain/.gitkeep`.
 
-- [ ] **Step 4: Run them to verify they pass.** Same command as Step 2. Expected: PASS.
+- [x] **Step 4: Run them to verify they pass.** Same command as Step 2. Expected: PASS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/domain/model \
@@ -928,7 +928,7 @@ EOF
     long maxWaitMillis, long thresholdMillis) implements DomainEvent`;
     `static GateCongestionAlert raise(GateThroughput throughput, Duration threshold, Instant occurredAt)`
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.domain.event;
@@ -1023,7 +1023,7 @@ class GateCongestionAlertTest {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail.**
+- [x] **Step 2: Run them to verify they fail.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -1032,7 +1032,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 
 Expected: COMPILATION ERROR — `cannot find symbol: class SessionCapacityAlert`.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.domain.event;
@@ -1132,9 +1132,9 @@ public record GateCongestionAlert(
 }
 ```
 
-- [ ] **Step 4: Run them to verify they pass.** Same command as Step 2. Expected: PASS.
+- [x] **Step 4: Run them to verify they pass.** Same command as Step 2. Expected: PASS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/domain/event \
@@ -1183,7 +1183,7 @@ every serde this service uses is tested against those bytes.
     `rawInput(TopologyTestDriver, String topic)` → `TestInputTopic<String, byte[]>`,
     `rawOutput(TopologyTestDriver, String topic)` → `TestOutputTopic<String, String>`.
 
-- [ ] **Step 1: Write the test support.** None of it is production code; these three classes are the
+- [x] **Step 1: Write the test support.** None of it is production code; these three classes are the
   test-side contract every later task builds on.
 
 ```java
@@ -1365,7 +1365,7 @@ public final class TopologyHarness {
 }
 ```
 
-- [ ] **Step 2: Write the failing tests.**
+- [x] **Step 2: Write the failing tests.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.support;
@@ -1504,7 +1504,7 @@ class EventSerdesTest {
 }
 ```
 
-- [ ] **Step 3: Run them to verify they fail.**
+- [x] **Step 3: Run them to verify they fail.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -1514,7 +1514,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 Expected: COMPILATION ERROR — `cannot find symbol: variable EventSerdes`. (`ProducerWireTest`
 compiles; if `EventSerdesTest` is temporarily moved aside it passes, which is the anchor holding.)
 
-- [ ] **Step 4: Implement.**
+- [x] **Step 4: Implement.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.streams;
@@ -1566,9 +1566,9 @@ public final class EventSerdes {
 
 Then `git rm analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/infrastructure/.gitkeep`.
 
-- [ ] **Step 5: Run them to verify they pass.** Same command as Step 3. Expected: PASS — 9 tests.
+- [x] **Step 5: Run them to verify they pass.** Same command as Step 3. Expected: PASS — 9 tests.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/infrastructure \
@@ -1609,7 +1609,7 @@ EOF
   - `TopologyHarness.wireSessionFillRate(StreamsBuilder, AlertThresholds)` — sources and sink exactly
     as `application.yml` binds `sessionFillRate` (Task 8).
 
-- [ ] **Step 1: Add the harness wiring** to `support/TopologyHarness.java`:
+- [x] **Step 1: Add the harness wiring** to `support/TopologyHarness.java`:
 
 ```java
     /** Wires RT1 exactly as application.yml binds sessionFillRate-in-0, -in-1, -in-2 and -out-0. */
@@ -1636,7 +1636,7 @@ import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.Produced;
 ```
 
-- [ ] **Step 2: Write the failing test.**
+- [x] **Step 2: Write the failing test.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.streams;
@@ -1847,7 +1847,7 @@ class SessionFillRateTopologyTest {
 }
 ```
 
-- [ ] **Step 3: Run it to verify it fails.**
+- [x] **Step 3: Run it to verify it fails.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -1857,7 +1857,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 Expected: COMPILATION ERROR — `cannot find symbol: class SessionFillRateTopology` (from the harness)
 and `variable StoreNames`.
 
-- [ ] **Step 4: Implement.**
+- [x] **Step 4: Implement.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.streams;
@@ -2100,9 +2100,9 @@ public class SessionFillRateTopology {
 }
 ```
 
-- [ ] **Step 5: Run it to verify it passes.** Same command as Step 3. Expected: PASS — 12 tests.
+- [x] **Step 5: Run it to verify it passes.** Same command as Step 3. Expected: PASS — 12 tests.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/infrastructure/streams \
@@ -2141,7 +2141,7 @@ EOF
     Materialises `gate-throughput` as a `WindowStore<String, GateStats>` retained for one hour.
   - `TopologyHarness.wireGateThroughput(StreamsBuilder, AlertThresholds)`.
 
-- [ ] **Step 1: Add the harness wiring** to `support/TopologyHarness.java`:
+- [x] **Step 1: Add the harness wiring** to `support/TopologyHarness.java`:
 
 ```java
     /** Wires RT2 exactly as application.yml binds gateThroughput-in-0 and -out-0. */
@@ -2161,7 +2161,7 @@ import au.edu.uow.csci318.conference.analytics.infrastructure.streams.GateThroug
 import au.edu.uow.csci318.conference.common.event.AttendeeCheckedIn;
 ```
 
-- [ ] **Step 2: Write the failing test.**
+- [x] **Step 2: Write the failing test.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.streams;
@@ -2346,7 +2346,7 @@ class GateThroughputTopologyTest {
 }
 ```
 
-- [ ] **Step 3: Run it to verify it fails.**
+- [x] **Step 3: Run it to verify it fails.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -2355,7 +2355,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 
 Expected: COMPILATION ERROR — `cannot find symbol: class GateThroughputTopology`.
 
-- [ ] **Step 4: Implement.**
+- [x] **Step 4: Implement.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.streams;
@@ -2552,9 +2552,9 @@ public class GateThroughputTopology {
 }
 ```
 
-- [ ] **Step 5: Run it to verify it passes.** Same command as Step 3. Expected: PASS — 8 tests.
+- [x] **Step 5: Run it to verify it passes.** Same command as Step 3. Expected: PASS — 8 tests.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/infrastructure/streams \
@@ -2590,7 +2590,7 @@ EOF
   - `RegistrationFunnelTopology.STAGE_BY_TOPIC` (package-private `Map<String, FunnelStage>`).
   - `TopologyHarness.wireRegistrationFunnel(StreamsBuilder)`.
 
-- [ ] **Step 1: Add the harness wiring** to `support/TopologyHarness.java`:
+- [x] **Step 1: Add the harness wiring** to `support/TopologyHarness.java`:
 
 ```java
     /** Wires the funnel exactly as application.yml binds registrationFunnel-in-0: one stream, four topics. */
@@ -2609,7 +2609,7 @@ import au.edu.uow.csci318.conference.analytics.infrastructure.streams.Registrati
 import java.util.List;
 ```
 
-- [ ] **Step 2: Write the failing test.**
+- [x] **Step 2: Write the failing test.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.streams;
@@ -2705,7 +2705,7 @@ class RegistrationFunnelTopologyTest {
 }
 ```
 
-- [ ] **Step 3: Run it to verify it fails.**
+- [x] **Step 3: Run it to verify it fails.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -2714,7 +2714,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 
 Expected: COMPILATION ERROR — `cannot find symbol: class RegistrationFunnelTopology`.
 
-- [ ] **Step 4: Implement.**
+- [x] **Step 4: Implement.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.streams;
@@ -2820,9 +2820,9 @@ public class RegistrationFunnelTopology {
 }
 ```
 
-- [ ] **Step 5: Run it to verify it passes.** Same command as Step 3. Expected: PASS — 4 tests.
+- [x] **Step 5: Run it to verify it passes.** Same command as Step 3. Expected: PASS — 4 tests.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/infrastructure/streams/RegistrationFunnelTopology.java \
@@ -2869,7 +2869,7 @@ topology the binder itself assembled with the exact bytes each producer writes.
   - `Serde<T>` beans for `SeatsReserved`, `SeatsReleased`, `SessionCapacityChanged`,
     `AttendeeCheckedIn`, `SessionCapacityAlert`, `GateCongestionAlert`.
 
-- [ ] **Step 1: Write the failing tests.** Add to `AnalyticsApplicationTest`:
+- [x] **Step 1: Write the failing tests.** Add to `AnalyticsApplicationTest`:
 
 ```java
     @Autowired
@@ -3122,7 +3122,7 @@ class BinderWiringTest {
 }
 ```
 
-- [ ] **Step 2: Add the test-only offline configuration** at
+- [x] **Step 2: Add the test-only offline configuration** at
   `analytics-service/src/test/resources/config/application.yml`:
 
 ```yaml
@@ -3147,7 +3147,7 @@ spring:
             auto-create-topics: false
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail.**
+- [x] **Step 3: Run the tests to verify they fail.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -3158,7 +3158,7 @@ Expected: FAIL — `NoSuchBeanDefinitionException: No qualifying bean of type
 '...domain.model.AlertThresholds'` for `AnalyticsApplicationTest`, and
 `No bean named '&stream-builder-sessionFillRate' available` for `BinderWiringTest`.
 
-- [ ] **Step 4: Implement the configuration classes.**
+- [x] **Step 4: Implement the configuration classes.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.config;
@@ -3300,7 +3300,7 @@ public class StreamsTopologyConfiguration {
 }
 ```
 
-- [ ] **Step 5: Replace `analytics-service/src/main/resources/application.yml`** with:
+- [x] **Step 5: Replace `analytics-service/src/main/resources/application.yml`** with:
 
 ```yaml
 server:
@@ -3372,12 +3372,12 @@ logging:
     au.edu.uow.csci318.conference: DEBUG
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass.** Same command as Step 3. Expected: PASS —
+- [x] **Step 6: Run the tests to verify they pass.** Same command as Step 3. Expected: PASS —
   `BinderWiringTest` 16 tests (12 plus four funnel cases), `AnalyticsApplicationTest` 2. If the
   context takes more than a few seconds to start, something is contacting a broker: check that the
   test `config/application.yml` is on the test classpath (`target/test-classes/config/`).
 
-- [ ] **Step 7: Run the whole module with Docker stopped.**
+- [x] **Step 7: Run the whole module with Docker stopped.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -3387,7 +3387,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 Expected: `BUILD SUCCESS`, no `Connection to node -1 (localhost/127.0.0.1:9092) could not be
 established` lines in the output.
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/infrastructure/config \
@@ -3439,7 +3439,7 @@ EOF
     `InteractiveQueryStateStoreLookup`.
   - `TopologyHarness.storesOf(TopologyTestDriver)`, `TopologyHarness.unavailableStores()`.
 
-- [ ] **Step 1: Write the ports.** They have no behaviour to test on their own; the adapter tests
+- [x] **Step 1: Write the ports.** They have no behaviour to test on their own; the adapter tests
   below exercise them.
 
 ```java
@@ -3517,7 +3517,7 @@ public class ReadModelUnavailableException extends RuntimeException {
 }
 ```
 
-- [ ] **Step 2: Add the harness lookups** to `support/TopologyHarness.java`:
+- [x] **Step 2: Add the harness lookups** to `support/TopologyHarness.java`:
 
 ```java
     /** Serves the driver's stores through the same seam interactive queries use in production. */
@@ -3560,7 +3560,7 @@ import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
 import org.apache.kafka.streams.state.ReadOnlyWindowStore;
 ```
 
-- [ ] **Step 3: Write the failing tests.**
+- [x] **Step 3: Write the failing tests.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.query;
@@ -3873,7 +3873,7 @@ class InteractiveQueryStateStoreLookupTest {
 }
 ```
 
-- [ ] **Step 4: Run them to verify they fail.**
+- [x] **Step 4: Run them to verify they fail.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -3883,7 +3883,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 Expected: COMPILATION ERROR — `cannot find symbol: class StateStoreLookup` (from the harness),
 `StoreReads`, `SessionFillRateStore`.
 
-- [ ] **Step 5: Implement.**
+- [x] **Step 5: Implement.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.infrastructure.query;
@@ -4144,9 +4144,9 @@ public class RegistrationFunnelStore implements RegistrationFunnelCounts {
 }
 ```
 
-- [ ] **Step 6: Run them to verify they pass.** Same command as Step 4. Expected: PASS — 15 tests.
+- [x] **Step 6: Run them to verify they pass.** Same command as Step 4. Expected: PASS — 15 tests.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/domain/readmodel \
@@ -4190,7 +4190,7 @@ EOF
     `FakeGateThroughputs` (`put(GateThroughput)`, `clear()`),
     `FakeRegistrationFunnelCounts` (`set(RegistrationFunnel)`), and `@Primary` beans of each.
 
-- [ ] **Step 1: Write the fakes.**
+- [x] **Step 1: Write the fakes.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.support;
@@ -4298,7 +4298,7 @@ public class FakeReadModels {
 }
 ```
 
-- [ ] **Step 2: Write the failing test.**
+- [x] **Step 2: Write the failing test.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.application;
@@ -4415,7 +4415,7 @@ class AnalyticsQueryServiceTest {
 }
 ```
 
-- [ ] **Step 3: Run it to verify it fails.**
+- [x] **Step 3: Run it to verify it fails.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -4424,7 +4424,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 
 Expected: COMPILATION ERROR — `cannot find symbol: class AnalyticsQueryService`.
 
-- [ ] **Step 4: Implement.**
+- [x] **Step 4: Implement.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.domain.readmodel;
@@ -4536,9 +4536,9 @@ public class AnalyticsQueryService {
 
 Then `git rm analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/application/.gitkeep`.
 
-- [ ] **Step 5: Run it to verify it passes.** Same command as Step 3. Expected: PASS — 12 tests.
+- [x] **Step 5: Run it to verify it passes.** Same command as Step 3. Expected: PASS — 12 tests.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/application \
@@ -4589,7 +4589,7 @@ EOF
 | `IllegalArgumentException` | 400 | `INVALID_REQUEST` |
 | `MethodArgumentTypeMismatchException` | 400 | `INVALID_REQUEST` |
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.api;
@@ -4823,7 +4823,7 @@ class StoreRebuildingTest {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail.**
+- [x] **Step 2: Run them to verify they fail.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -4832,7 +4832,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 
 Expected: FAIL — every request answers `404` with an empty body (no handler mapped).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 
 ```java
 package au.edu.uow.csci318.conference.analytics.api.dto;
@@ -5013,10 +5013,10 @@ public class GlobalExceptionHandler {
 
 Then `git rm analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/api/.gitkeep`.
 
-- [ ] **Step 4: Run them to verify they pass.** Same command as Step 2. Expected: PASS — 12
+- [x] **Step 4: Run them to verify they pass.** Same command as Step 2. Expected: PASS — 12
   controller tests, 5 rebuilding cases.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/api \
@@ -5053,7 +5053,7 @@ changes.
 - Consumes: everything above.
 - Produces: nothing new in code.
 
-- [ ] **Step 1: Run the full suite with Docker stopped.**
+- [x] **Step 1: Run the full suite with Docker stopped.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -5063,7 +5063,7 @@ docker ps 2>/dev/null; ./mvnw clean test
 Expected: `docker ps` lists no Kafka container (or Docker is not running at all), then
 `BUILD SUCCESS`. The total `Tests run:` is the Task 1 baseline plus about 120.
 
-- [ ] **Step 2: Run the validation greps.** Each must print nothing except where stated:
+- [x] **Step 2: Run the validation greps.** Each must print nothing except where stated:
 
 ```bash
 grep -rn "org.springframework\|org.apache.kafka" analytics-service/src/main/java/au/edu/uow/csci318/conference/analytics/domain/
@@ -5071,7 +5071,7 @@ grep -rn '"seats-reserved"\|"seats-released"\|"session-capacity-changed"\|"atten
 grep -rn "new RegistrationRequested(" analytics-service/src/test   # exactly one line: support/TestEvents.java
 ```
 
-- [ ] **Step 3: Update `specs/2-user-stories.md`.** In the overview table set FR-14, FR-15 and FR-16
+- [x] **Step 3: Update `specs/2-user-stories.md`.** In the overview table set FR-14, FR-15 and FR-16
   to `` `[~]` ``. Replace each section's status line, keeping the story, acceptance and
   implementation lines that follow it:
 
@@ -5125,7 +5125,7 @@ Then update the counts line. **Recount from the overview table on the day** — 
 **Last checked against the code:** 2026-10-09 — 10 delivered, 5 partial, 3 not started.
 ```
 
-- [ ] **Step 4: Update `specs/4-api-endpoints.md` §5.** Remove the trailing ` *(M3)*` from each of
+- [x] **Step 4: Update `specs/4-api-endpoints.md` §5.** Remove the trailing ` *(M3)*` from each of
   the five rows, so they read:
 
 ```markdown
@@ -5136,9 +5136,9 @@ Then update the counts line. **Recount from the overview table on the day** — 
 | — | `GET` | `/analytics/funnel` | *None* | `200 OK` (`FunnelResponse`) | Registration conversion and abandonment |
 ```
 
-- [ ] **Step 5: Tick every checkbox in this plan.**
+- [x] **Step 5: Tick every checkbox in this plan.**
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add specs/2-user-stories.md specs/4-api-endpoints.md docs/superpowers/plans/2026-10-09-m3-analytics-streams.md

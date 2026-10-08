@@ -14,7 +14,7 @@ planned**, and it is maintained by hand.
 | `[~]` | Partially delivered — one side of the story exists, the other does not |
 | `[ ]` | Not started |
 
-**Last checked against the code:** 2026-09-15 — 10 delivered, 2 partial, 6 not started.
+**Last checked against the code:** 2026-10-09 — 10 delivered, 5 partial, 3 not started.
 
 ### Updating these checkboxes is part of delivering a story
 
@@ -55,9 +55,9 @@ crosses a service boundary is delivered when it has been observed crossing it.
 | **Ticketing** | FR-13 | Check in at a gate | Gate staff, Attendee | | `[x]` |
 | **System** | FR-08 | Confirm registration and issue tickets on payment | *(system)* | | `[~]` |
 | **System** | FR-09 | Release seats on payment failure or hold expiry | *(system)* | | `[x]` |
-| **Analytics** | FR-14 | View live per-session fill rate | Organiser | **Real-time** | `[ ]` |
-| **Analytics** | FR-15 | Receive a 90% capacity alert | Organiser | **Real-time** | `[ ]` |
-| **Analytics** | FR-16 | Monitor gate throughput and queue congestion | Organiser | **Real-time** | `[ ]` |
+| **Analytics** | FR-14 | View live per-session fill rate | Organiser | **Real-time** | `[~]` |
+| **Analytics** | FR-15 | Receive a 90% capacity alert | Organiser | **Real-time** | `[~]` |
+| **Analytics** | FR-16 | Monitor gate throughput and queue congestion | Organiser | **Real-time** | `[~]` |
 | **Concierge** | FR-17 | Build a personal agenda from natural language | Attendee | **Agentic AI** | `[x]` |
 | **Concierge** | FR-18 | Raise a support request handled by an agent | Attendee | **Agentic AI** | `[ ]` |
 
@@ -244,27 +244,51 @@ crosses a service boundary is delivered when it has been observed crossing it.
 ## Analytics Service — Real-time Analysis
 
 ### FR-14: View live per-session fill rate
-- [ ] **Not started** — M3. `analytics-service` is still an empty skeleton
-  (`AnalyticsApplication` only). Both of its inputs, `seats-reserved` and
-  `session-capacity-changed`, are already live on the broker, so it is unblocked.
+- [~] **Implemented and tested offline; live-broker run pending (M5 live run).** RT1 —
+  `SessionFillRateTopology`, bound as the `sessionFillRate` function — left-joins the
+  `session-capacity-changed` table with the summed seat deltas of `seats-reserved` and
+  `seats-released`, with no repartition topic. Served by
+  `GET /api/v1/analytics/sessions/{sessionId}/fill-rate` (`AnalyticsController`) from the
+  `session-fill-rates` store by interactive query. Proven by `SessionFillRateTopologyTest` and by
+  `BinderWiringTest`, which drives the topology the binder assembled with the exact bytes the
+  catalogue and registration write. Moves to `[x]` when observed against the live broker.
 - **As an** Organiser, **I want to** see each session's fill rate updating live, **so that** I
   can spot overflow risk during the event rather than afterwards.
 - **Implementation:** Kafka Streams join of a seat-delta stream against a session-capacity
   table, served by interactive query. See `5-events-and-streams.md` §RT1.
+- **Refinement:** a left join from capacity rather than design §7.1's inner join, so a session with
+  capacity and no reservations reports `0.0` instead of `404`; `404 SESSION_NOT_TRACKED` means no
+  capacity is on record. Reserved seats are shown clamped at zero when a release is processed
+  before its reservation. See `docs/superpowers/plans/2026-10-09-m3-analytics-streams.md`.
 
 ### FR-15: Receive a 90% capacity alert
-- [ ] **Not started** — M3. Same topology as FR-14, so the two land together.
+- [~] **Implemented and tested offline; live-broker run pending (M5 live run).** Same topology as
+  FR-14. `CapacityAlertOnce`, a `processValues` processor with its own changelogged
+  `capacity-alerts-sent` store, writes one `SessionCapacityAlert` to `session-capacity-alert`
+  (key `sessionId`) the first time a session reaches `conference.analytics.capacity-alert-threshold`
+  (default `0.9`). `GET /api/v1/analytics/sessions/at-risk` lists sessions at or above a threshold.
+  Proven by `SessionFillRateTopologyTest` and `BinderWiringTest`.
 - **As an** Organiser, **I want to** be alerted when a session crosses 90% of capacity,
   **so that** I can move it to a larger room before it overflows.
 - **Acceptance:** each session alerts **once**, not on every subsequent reservation.
+- **Refinement:** "once" is once per session for good — it survives restarts, and a session that
+  drops below 90% and climbs back does not alert again. A capacity cut that pushes a session over
+  the threshold alerts too.
 
 ### FR-16: Monitor gate throughput and queue congestion
-- [ ] **Not started** — M3. **No longer blocked:** FR-13 landed, so `ticketing-service` now emits
-  `attendee-checked-in` keyed by `sessionId`, carrying both `queuedAt` and `checkedInAt` so the
-  wait is derivable from the event alone. The RT2 topology still has to re-key to `gateId` itself.
+- [~] **Implemented and tested offline; live-broker run pending (M5 live run).** RT2 —
+  `GateThroughputTopology`, bound as `gateThroughput` — re-keys `attendee-checked-in` from
+  `sessionId` to `gateId` through one named repartition (`checkins-by-gate`) and aggregates
+  one-minute tumbling windows into the `gate-throughput` store. Served by
+  `GET /api/v1/analytics/gates/{gateId}/throughput` and `GET /api/v1/analytics/gates/congested`;
+  `gate-congestion-alert` (key `gateId`) carries at most one alert per gate per window while the
+  average wait exceeds `conference.analytics.gate-congestion-threshold` (default `PT2M`). Proven by
+  `GateThroughputTopologyTest` and `BinderWiringTest`.
 - **As an** Organiser, **I want to** see check-ins per minute and average wait per gate,
   **so that** I can open another gate before a queue delays the schedule.
 - **Implementation:** one-minute tumbling window keyed by gate. See §RT2.
+- **Refinement:** a gate's throughput is its most recent one-minute window, returned with
+  `windowStart` and `windowEnd` so a reader can see how fresh it is.
 
 ---
 

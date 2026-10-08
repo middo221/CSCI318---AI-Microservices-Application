@@ -83,13 +83,13 @@ All responses are served from **Kafka Streams interactive queries**, not a datab
 
 | Feature | Method | Endpoint Path | Request Body | Response (Success) | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **FR-14** | `GET` | `/analytics/sessions/{sessionId}/fill-rate` | *None* | `200 OK` (`FillRateResponse`) | Live fill rate for one session *(M3)* |
-| **FR-15** | `GET` | `/analytics/sessions/at-risk` | *None* | `200 OK` (`Array<FillRateResponse>`) | Sessions at or above `threshold` (default 0.9) *(M3)* |
-| **FR-16** | `GET` | `/analytics/gates/{gateId}/throughput` | *None* | `200 OK` (`GateThroughputResponse`) | Check-ins per minute and average wait *(M3)* |
-| **FR-16** | `GET` | `/analytics/gates/congested` | *None* | `200 OK` (`Array<GateThroughputResponse>`) | Gates above the congestion threshold *(M3)* |
-| — | `GET` | `/analytics/funnel` | *None* | `200 OK` (`FunnelResponse`) | Registration conversion and abandonment *(M3)* |
+| **FR-14** | `GET` | `/analytics/sessions/{sessionId}/fill-rate` | *None* | `200 OK` (`FillRateResponse`) | Live fill rate for one session |
+| **FR-15** | `GET` | `/analytics/sessions/at-risk` | *None* | `200 OK` (`Array<FillRateResponse>`) | Sessions at or above `threshold` (default 0.9) |
+| **FR-16** | `GET` | `/analytics/gates/{gateId}/throughput` | *None* | `200 OK` (`GateThroughputResponse`) | Check-ins per minute and average wait |
+| **FR-16** | `GET` | `/analytics/gates/congested` | *None* | `200 OK` (`Array<GateThroughputResponse>`) | Gates above the congestion threshold |
+| — | `GET` | `/analytics/funnel` | *None* | `200 OK` (`FunnelResponse`) | Registration conversion and abandonment |
 
-**Error responses:** `404` (`SESSION_NOT_TRACKED`, `GATE_NOT_TRACKED`), `503`
+**Error responses:** `400` (`INVALID_REQUEST` — an unusable `threshold`), `404` (`SESSION_NOT_TRACKED`, `GATE_NOT_TRACKED`), `503`
 (`STORE_REBUILDING` — the state store is still restoring after a restart).
 
 ---
