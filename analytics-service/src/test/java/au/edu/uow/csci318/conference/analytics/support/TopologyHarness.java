@@ -5,6 +5,7 @@ import au.edu.uow.csci318.conference.analytics.domain.event.SessionCapacityAlert
 import au.edu.uow.csci318.conference.analytics.domain.model.AlertThresholds;
 import au.edu.uow.csci318.conference.analytics.infrastructure.streams.EventSerdes;
 import au.edu.uow.csci318.conference.analytics.infrastructure.streams.GateThroughputTopology;
+import au.edu.uow.csci318.conference.analytics.infrastructure.streams.RegistrationFunnelTopology;
 import au.edu.uow.csci318.conference.analytics.infrastructure.streams.SessionFillRateTopology;
 import au.edu.uow.csci318.conference.common.event.AttendeeCheckedIn;
 import au.edu.uow.csci318.conference.common.event.SeatsReleased;
@@ -27,6 +28,7 @@ import org.apache.kafka.streams.state.BuiltInDslStoreSuppliers;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Properties;
 
 /**
@@ -84,6 +86,13 @@ public final class TopologyHarness {
                 .build(builder.stream("attendee-checked-in",
                         Consumed.with(Serdes.String(), EventSerdes.json(AttendeeCheckedIn.class))))
                 .to("gate-congestion-alert", Produced.with(Serdes.String(), EventSerdes.json(GateCongestionAlert.class)));
+    }
+
+    /** Wires the funnel exactly as application.yml binds registrationFunnel-in-0: one stream, four topics. */
+    public static void wireRegistrationFunnel(StreamsBuilder builder) {
+        new RegistrationFunnelTopology().build(builder.stream(
+                List.of("registration-requested", "payment-succeeded", "payment-failed", "registration-expired"),
+                Consumed.with(Serdes.String(), Serdes.ByteArray())));
     }
 
     public static TestInputTopic<String, byte[]> rawInput(TopologyTestDriver driver, String topic) {
