@@ -29,8 +29,9 @@ import java.util.Optional;
  *   <li><strong>What was done survives a model failure</strong> (plan refinement 4). If the model
  *       fails after a tool has acted, the attendee gets {@code 200} with the true outcome rather
  *       than an error inviting them to try again.</li>
- *   <li><strong>Uncertain money always reaches a human.</strong> If a refund request got no answer
- *       and the model did not escalate, the service escalates on its own account.</li>
+ *   <li><strong>Uncertain money always reaches a human.</strong> If a refund request got no answer,
+ *       the service always writes its own escalation for it, whatever the model or any earlier
+ *       escalation did, and the attendee is told in words written by code, never by the model.</li>
  * </ol>
  */
 @Service
@@ -84,21 +85,12 @@ public class SupportApplicationService {
     private SupportResult conclude(String attendeeId, SupportReply answer, SupportTools tools) {
         List<String> notes = new ArrayList<>(tools.refusals());
 
-        String unknown = tools.refundOutcomeUnknown() ? tools.unknownRefundRegistrationId() : null;
-        boolean serviceEscalated = false;
-        if (unknown != null) {
-            boolean modelEscalatedIt = tools.escalations().stream()
-                    .anyMatch(escalation -> unknown.equals(escalation.registrationId()));
-            if (modelEscalatedIt) {
-                notes.add("The refund on registration %s got no answer, so its outcome is unknown: it may or may not have been accepted."
-                        .formatted(unknown));
-            } else {
-                Escalation escalation = tools.escalateUnknownRefund().orElseThrow();
-                serviceEscalated = true;
-                notes.add(("The refund on registration %s got no answer, so it is not known whether it was "
-                        + "accepted. The case was escalated automatically as %s.")
-                        .formatted(unknown, escalation.escalationId()));
-            }
+        Escalation unknownEscalation = null;
+        if (tools.refundOutcomeUnknown()) {
+            unknownEscalation = tools.escalateUnknownRefund().orElseThrow();
+            notes.add(("The refund on registration %s got no answer, so its outcome is unknown: it may or may "
+                    + "not have been accepted. The case was escalated automatically as %s.")
+                    .formatted(unknownEscalation.registrationId(), unknownEscalation.escalationId()));
         }
 
         List<RequestedRefund> refunds = tools.refundsRequested();
@@ -110,10 +102,10 @@ public class SupportApplicationService {
         String reply;
         if (answer == null) {
             notes.add(INTERRUPTED);
-            reply = factualReply(outcome, refunds, escalations, unknown);
-        } else if (serviceEscalated) {
-            // The model's prose was written before the service escalated, so it cannot describe it.
-            reply = factualReply(outcome, refunds, escalations, unknown);
+            reply = factualReply(outcome, refunds, escalations, unknownEscalation);
+        } else if (unknownEscalation != null) {
+            // While money is uncertain the model's prose is not trusted: it cannot know the outcome.
+            reply = factualReply(outcome, refunds, escalations, unknownEscalation);
         } else {
             Optional<SupportOutcome> claimed = SupportOutcome.parse(answer.outcome());
             if (claimed.isEmpty()) {
@@ -121,16 +113,16 @@ public class SupportApplicationService {
                         attendeeId, answer.outcome());
                 notes.add("The assistant's reply was withheld: it did not state an outcome that could be checked. "
                         + "The outcome above is what was actually done.");
-                reply = factualReply(outcome, refunds, escalations, unknown);
+                reply = factualReply(outcome, refunds, escalations, unknownEscalation);
             } else if (!claimed.get().isBorneOutBy(refunded, escalated)
                     || (claimed.get() == SupportOutcome.RESOLVED && (refunded || escalated))) {
                 log.warn("support conversation for {}: model claimed {} but the outcome was {}; reply withheld",
                         attendeeId, claimed.get(), outcome);
                 notes.add(("The assistant's reply was withheld: it described the case as %s, but the record "
                         + "shows %s. The outcome above is what was actually done.").formatted(claimed.get(), outcome));
-                reply = factualReply(outcome, refunds, escalations, unknown);
+                reply = factualReply(outcome, refunds, escalations, unknownEscalation);
             } else if (answer.reply() == null || answer.reply().isBlank()) {
-                reply = factualReply(outcome, refunds, escalations, unknown);
+                reply = factualReply(outcome, refunds, escalations, unknownEscalation);
             } else {
                 reply = answer.reply().strip();
             }
@@ -140,27 +132,26 @@ public class SupportApplicationService {
 
     /** A reply written by code from the tools' record, for when the model's cannot be used. */
     private static String factualReply(SupportOutcome outcome, List<RequestedRefund> refunds,
-                                       List<Escalation> escalations, String unknownRefundRegistration) {
+                                       List<Escalation> escalations, Escalation unknownEscalation) {
         return switch (outcome) {
             case ESCALATED -> {
                 StringBuilder reply = new StringBuilder();
                 for (RequestedRefund refund : refunds) {
                     reply.append(refundSentence(refund)).append(' ');
                 }
-                if (unknownRefundRegistration != null) {
-                    String reference = escalations.stream()
-                            .filter(escalation -> unknownRefundRegistration.equals(escalation.registrationId()))
-                            .findFirst().orElseThrow().escalationId();
+                if (unknownEscalation != null) {
                     reply.append(("We could not confirm whether the refund for registration %s was received, so it "
                             + "has been passed to an organiser to check, reference %s. Please do not request it again.")
-                            .formatted(unknownRefundRegistration, reference));
+                            .formatted(unknownEscalation.registrationId(), unknownEscalation.escalationId()));
                 } else {
                     reply.append("Your request has been passed to an organiser, reference %s. They will be in touch."
                             .formatted(escalations.getFirst().escalationId()));
                 }
                 yield reply.toString();
             }
-            case REFUND_REQUESTED -> refundSentence(refunds.getFirst());
+            case REFUND_REQUESTED -> refunds.stream()
+                    .map(SupportApplicationService::refundSentence)
+                    .collect(java.util.stream.Collectors.joining(" "));
             case RESOLVED -> "Sorry, I could not give a reliable answer to that. No refund has been requested and "
                     + "nothing has been passed to an organiser. Please try again, or contact an organiser.";
         };

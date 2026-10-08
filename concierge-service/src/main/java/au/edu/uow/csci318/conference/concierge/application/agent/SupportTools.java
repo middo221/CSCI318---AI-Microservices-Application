@@ -81,6 +81,7 @@ public class SupportTools {
     private final List<String> refusals = new ArrayList<>();
     private boolean refundOutcomeUnknown;
     private String unknownRefundRegistrationId;
+    private Escalation unknownRefundEscalation;
 
     public SupportTools(String attendeeId, String attendeeMessage, RegistrationPort registrations,
                         PaymentPort payments, TicketingPort ticketing, RefundGuard refundGuard,
@@ -126,9 +127,10 @@ public class SupportTools {
 
     /**
      * Records an escalation written by the system rather than the model, for a refund whose outcome
-     * is unknown. Goes through the same store and record as {@link #escalateToOrganiser}, but is exempt
-     * from its one-escalation rule: a duplicate is safe, a miss is not. Does nothing when there is no
-     * unknown refund, or when this registration was already escalated.
+     * is unknown. Goes through the same store and record as {@link #escalateToOrganiser}, and is exempt
+     * from its one-escalation rule: a duplicate is safe, a miss is not, so an earlier escalation, even on the
+     * same registration, never stands in for it. Written once per conversation; does nothing when there is no
+     * unknown refund.
      *
      * @return the escalation for the unknown refund, or empty when there is no unknown refund
      */
@@ -136,10 +138,8 @@ public class SupportTools {
         if (unknownRefundRegistrationId == null) {
             return Optional.empty();
         }
-        Optional<Escalation> existing = escalations.stream()
-                .filter(e -> unknownRefundRegistrationId.equals(e.registrationId())).findFirst();
-        if (existing.isPresent()) {
-            return existing;
+        if (unknownRefundEscalation != null) {
+            return Optional.of(unknownRefundEscalation);
         }
         Escalation escalation = escalationStore.open(attendeeId, unknownRefundRegistrationId,
                 "A refund request got no answer; its outcome is unknown.",
@@ -149,6 +149,7 @@ public class SupportTools {
                         .formatted(unknownRefundRegistrationId),
                 attendeeMessage);
         escalations.add(escalation);
+        unknownRefundEscalation = escalation;
         log.warn("support conversation for {} escalated as {}: refund outcome unknown on {}",
                 attendeeId, escalation.escalationId(), unknownRefundRegistrationId);
         return Optional.of(escalation);

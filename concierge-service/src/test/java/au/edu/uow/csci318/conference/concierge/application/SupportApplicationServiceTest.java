@@ -38,6 +38,7 @@ class SupportApplicationServiceTest {
     private static final String MESSAGE = "I have been hospitalised. Can I get my money back?";
 
     private FakeRegistrations registrations;
+    private FakePayments payments;
     private InMemoryEscalationStore store;
     private SupportToolsFactory toolsFactory;
 
@@ -46,7 +47,7 @@ class SupportApplicationServiceTest {
         registrations = new FakeRegistrations()
                 .withDetails(confirmed("reg-mine", ME, "149.00"))
                 .withDetails(confirmed("reg-big", ME, "447.00"));
-        FakePayments payments = new FakePayments()
+        payments = new FakePayments()
                 .quoting(fullRefund("reg-mine", "149.00"))
                 .quoting(fullRefund("reg-big", "447.00"));
         store = new InMemoryEscalationStore(FIXED_CLOCK);
@@ -285,7 +286,7 @@ class SupportApplicationServiceTest {
     }
 
     @Test
-    void doesNotEscalateTwiceWhenTheModelAlreadyEscalatedAnUnknownRefund() {
+    void writesItsOwnEscalationEvenWhenTheModelAlreadyEscalatedAnUnknownRefund() {
         registrations.withRefundsUnavailable();
 
         SupportResult result = handle(modelThat(
@@ -296,9 +297,9 @@ class SupportApplicationServiceTest {
                 new SupportReply("An organiser will check.", "ESCALATED")));
 
         assertThat(result.outcome()).isEqualTo(SupportOutcome.ESCALATED);
-        assertThat(result.escalations()).hasSize(1);
-        assertThat(store.all()).hasSize(1);
-        assertThat(result.reply()).isEqualTo("An organiser will check.");
+        assertThat(result.escalations()).hasSize(2);
+        assertThat(store.all()).hasSize(2);
+        assertThat(result.reply()).doesNotContain("An organiser will check.").contains("reg-mine");
     }
 
     @Test
@@ -397,6 +398,56 @@ class SupportApplicationServiceTest {
                 new SupportReply("An organiser will check.", "ESCALATED")));
 
         assertThat(result.notes()).anySatisfy(note -> assertThat(note).contains("reg-mine").contains("unknown"));
+    }
+
+    @Test
+    void anEarlierEscalationOnTheSameRegistrationDoesNotStandInForTheUnknownRefund() {
+        registrations.withRefundsUnavailable();
+
+        SupportResult result = handle(modelThat(
+                tools -> {
+                    tools.escalateToOrganiser("reg-mine", "Wheelchair access", "");
+                    tools.requestRefund("reg-mine", "Hospitalised");
+                    tools.escalateToOrganiser("reg-mine", "Refund outcome unknown", "");
+                },
+                new SupportReply("An organiser will check.", "ESCALATED")));
+
+        var system = store.all().stream()
+                .filter(e -> e.summary().contains("not known whether")).toList();
+        assertThat(system).singleElement().satisfies(e -> assertThat(e.registrationId()).isEqualTo("reg-mine"));
+        assertThat(result.reply()).contains(system.getFirst().escalationId());
+        assertThat(result.reply()).doesNotContain("An organiser will check.");
+    }
+
+    @Test
+    void neverKeepsTheModelsProseWhileARefundIsUncertain() {
+        registrations.withRefundsUnavailable();
+
+        SupportResult result = handle(modelThat(
+                tools -> {
+                    tools.requestRefund("reg-mine", "Hospitalised");
+                    tools.escalateToOrganiser("reg-mine", "Refund outcome unknown", "");
+                },
+                new SupportReply("Your 149.00 AUD refund went through.", "ESCALATED")));
+
+        assertThat(result.reply()).doesNotContain("went through").contains("reg-mine");
+    }
+
+    @Test
+    void theRefundReplyListsEveryAcceptedRefund() {
+        registrations.withDetails(confirmed("reg-s1", ME, "40.00")).withDetails(confirmed("reg-s2", ME, "60.00"));
+        payments.quoting(fullRefund("reg-s1", "40.00")).quoting(fullRefund("reg-s2", "60.00"));
+
+        SupportResult result = handle(modelThat(
+                tools -> {
+                    tools.requestRefund("reg-s1", "Clash");
+                    tools.requestRefund("reg-s2", "Clash");
+                },
+                new SupportReply("All done.", "RESOLVED")));
+
+        assertThat(result.outcome()).isEqualTo(SupportOutcome.REFUND_REQUESTED);
+        assertThat(result.reply()).contains("40.00 AUD").contains("reg-s1")
+                .contains("60.00 AUD").contains("reg-s2");
     }
 
     @Test
