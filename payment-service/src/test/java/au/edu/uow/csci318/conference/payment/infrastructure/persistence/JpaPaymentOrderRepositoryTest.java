@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class JpaPaymentOrderRepositoryTest {
 
     private static final Instant HOLD_EXPIRES = Instant.parse("2026-09-15T10:02:00Z");
+    private static final Instant FIRST_SESSION = Instant.parse("2026-11-19T22:00:00Z");
 
     @Autowired
     private JpaPaymentOrderRepository orders;
@@ -41,11 +42,20 @@ class JpaPaymentOrderRepositoryTest {
     }
 
     private PaymentOrder paidOrder(String id, String registrationId) {
-        PaymentOrder order = PaymentOrder.raise(id, registrationId, Money.aud("148.50"), HOLD_EXPIRES);
+        PaymentOrder order = PaymentOrder.raise(id, registrationId, Money.aud("148.50"), HOLD_EXPIRES, FIRST_SESSION);
         order.pay(new CardToken("TOK_OK"),
                 (orderId, amount, token) -> ChargeResult.succeeded("sim-" + id),
                 HOLD_EXPIRES.minusSeconds(60));
         return order;
+    }
+
+    @Test
+    void roundTripsWhenTheFirstSessionStarts() {
+        orders.save(paidOrder("pay-2", "reg-2"));
+        detach();
+
+        assertThat(orders.findById("pay-2").orElseThrow().getFirstSessionStartsAt())
+                .isEqualTo(FIRST_SESSION);
     }
 
     @Test

@@ -20,6 +20,7 @@ class PaymentOrderTest {
     private static final CardToken TOKEN = new CardToken("TOK_OK");
     private static final Instant NOW = Instant.parse("2026-09-15T10:00:00Z");
     private static final Instant HOLD_EXPIRES = NOW.plusSeconds(120);
+    private static final Instant FIRST_SESSION = Instant.parse("2026-11-19T22:00:00Z");
 
     private final List<CardToken> charged = new ArrayList<>();
 
@@ -32,7 +33,7 @@ class PaymentOrderTest {
     }
 
     private static PaymentOrder order() {
-        return PaymentOrder.raise("pay-1", "reg-1", AMOUNT, HOLD_EXPIRES);
+        return PaymentOrder.raise("pay-1", "reg-1", AMOUNT, HOLD_EXPIRES, FIRST_SESSION);
     }
 
     @Test
@@ -48,24 +49,36 @@ class PaymentOrderTest {
         assertThat(order.pullDomainEvents()).isEmpty();
     }
 
+    @Test
+    void remembersWhenTheFirstSessionStartsForTheRefundPolicy() {
+        assertThat(order().getFirstSessionStartsAt()).isEqualTo(FIRST_SESSION);
+    }
+
+    /** An order raised from a message produced before the date travelled has no date. */
+    @Test
+    void acceptsAnOrderWhoseFirstSessionIsUnknown() {
+        assertThat(PaymentOrder.raise("pay-1", "reg-1", AMOUNT, HOLD_EXPIRES, null)
+                .getFirstSessionStartsAt()).isNull();
+    }
+
     /** Specification section 4.1: a payment order is for more than zero. */
     @Test
     void refusesAnOrderForNothing() {
-        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", "reg-1", Money.aud("0.00"), HOLD_EXPIRES))
+        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", "reg-1", Money.aud("0.00"), HOLD_EXPIRES, FIRST_SESSION))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("more than zero");
     }
 
     @Test
     void refusesAnOrderForNoRegistration() {
-        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", " ", AMOUNT, HOLD_EXPIRES))
+        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", " ", AMOUNT, HOLD_EXPIRES, FIRST_SESSION))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("registration");
     }
 
     @Test
     void refusesAnOrderWithNoHoldDeadline() {
-        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", "reg-1", AMOUNT, null))
+        assertThatThrownBy(() -> PaymentOrder.raise("pay-1", "reg-1", AMOUNT, null, FIRST_SESSION))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("hold");
     }

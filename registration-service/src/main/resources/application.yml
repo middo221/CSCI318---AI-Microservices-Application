@@ -54,6 +54,9 @@ conference:
     # The stated business rule is 15 minutes. PT2M is the demo default, because hold expiry
     # cannot be shown inside a ten-minute presentation otherwise. Tests override it to PT0.5S.
     hold-window: PT2M
+    # Catalogue session times are local wall-clock times with no zone. Registration reads them in
+    # this zone when it tells Billing when a registration's first session starts.
+    time-zone: Australia/Sydney
     sweep-interval: PT10S
 
 logging:

@@ -21,6 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,16 +49,19 @@ public class RegistrationApplicationService {
     private final SeatAllocationService allocation = new SeatAllocationService();
     private final RegistrationPricingService pricing = new RegistrationPricingService();
     private final HoldWindow holdWindow;
+    private final ZoneId timeZone;
 
     public RegistrationApplicationService(
             RegistrationRepository registrations,
             SessionViewRepository sessions,
             DomainEventPublisher domainEvents,
-            @Value("${conference.registration.hold-window:PT2M}") Duration holdWindow) {
+            @Value("${conference.registration.hold-window:PT2M}") Duration holdWindow,
+            @Value("${conference.registration.time-zone:Australia/Sydney}") String timeZone) {
         this.registrations = registrations;
         this.sessions = sessions;
         this.domainEvents = domainEvents;
         this.holdWindow = new HoldWindow(holdWindow);
+        this.timeZone = ZoneId.of(timeZone);
     }
 
     /**
@@ -84,7 +90,8 @@ public class RegistrationApplicationService {
                 command.conferenceEventId(),
                 holds,
                 total,
-                command.cardToken());
+                command.cardToken(),
+                firstSessionStart(views.values()));
 
         // Drain before saving. Spring Data sees an id that is already assigned, so save() takes
         // the merge path and hands back a different managed copy — and domainEvents is @Transient,
@@ -100,6 +107,22 @@ public class RegistrationApplicationService {
         });
         domainEvents.publishAll(recorded);
         return saved;
+    }
+
+    /**
+     * When the earliest of the requested sessions begins, as an instant.
+     *
+     * <p>The catalogue publishes wall-clock times with no zone, because a programme is read in local
+     * time. Billing needs an instant to count refund days back from, so the replica's times are read
+     * in the conference's own zone — configuration, not the JVM default, which on a developer's
+     * laptop or a CI runner could be anything.
+     */
+    private Instant firstSessionStart(Collection<SessionView> views) {
+        return views.stream()
+                .map(view -> view.getTimeSlot().start())
+                .min(Comparator.naturalOrder())
+                .map(start -> start.atZone(timeZone).toInstant())
+                .orElseThrow();
     }
 
     private Map<String, SessionView> loadViews(List<SessionRequest> requests) {

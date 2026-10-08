@@ -60,7 +60,8 @@ public class RegistrationEventConsumers {
                         event.registrationId(),
                         new Money(event.totalAmount(), event.currency()),
                         event.holdExpiresAt(),
-                        new CardToken(event.cardToken())));
+                        new CardToken(event.cardToken()),
+                        event.firstSessionStartsAt()));
                 log.info("payment order {} for registration {} is {} ({} {})",
                         order.getId(), order.getRegistrationId(), order.getStatus(),
                         order.getAmount().amount(), order.getAmount().currency());

@@ -20,6 +20,8 @@ class RegistrationTest {
     private static final AttendeeRef ATTENDEE = new AttendeeRef("att-1042", "Dana", "dana@example.com");
     private static final Instant EXPIRES = Instant.parse("2026-09-14T09:15:00Z");
 
+    private static final Instant FIRST_SESSION = Instant.parse("2026-11-19T22:00:00Z");
+
     private static Registration twoSessions() {
         return Registration.request(
                 "reg-1",
@@ -28,7 +30,8 @@ class RegistrationTest {
                 List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES),
                         SeatHold.hold("h-2", "ses-2", 1, EXPIRES)),
                 Money.aud("148.50"),
-                "TOK_OK");
+                "TOK_OK",
+                FIRST_SESSION);
     }
 
     @Test
@@ -56,6 +59,7 @@ class RegistrationTest {
             assertThat(requested.currency()).isEqualTo("AUD");
             assertThat(requested.cardToken()).isEqualTo("TOK_OK");
             assertThat(requested.holdExpiresAt()).isEqualTo(EXPIRES);
+            assertThat(requested.firstSessionStartsAt()).isEqualTo(FIRST_SESSION);
         });
         assertThat(events.subList(1, 3))
                 .allSatisfy(event -> assertThat(event).isInstanceOf(SeatsReserved.class));
@@ -71,7 +75,7 @@ class RegistrationTest {
     @Test
     void refusesARegistrationHoldingNoSeats() {
         assertThatThrownBy(() -> Registration.request(
-                "reg-1", ATTENDEE, "conf-1", List.of(), Money.aud("0.00"), "TOK_OK"))
+                "reg-1", ATTENDEE, "conf-1", List.of(), Money.aud("0.00"), "TOK_OK", FIRST_SESSION))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("at least one");
     }
@@ -86,7 +90,7 @@ class RegistrationTest {
                 "reg-1", ATTENDEE, "conf-1",
                 List.of(SeatHold.hold("h-1", "ses-1", 1, EXPIRES.plusSeconds(60)),
                         SeatHold.hold("h-2", "ses-2", 1, EXPIRES)),
-                Money.aud("20.00"), "TOK_OK");
+                Money.aud("20.00"), "TOK_OK", FIRST_SESSION);
 
         RegistrationRequested requested = (RegistrationRequested) registration.pullDomainEvents().get(0);
 
@@ -98,7 +102,7 @@ class RegistrationTest {
     void refusesAPaidRegistrationWithNoCardToken() {
         assertThatThrownBy(() -> Registration.request(
                 "reg-1", ATTENDEE, "conf-1",
-                List.of(SeatHold.hold("h-1", "ses-1", 1, EXPIRES)), Money.aud("49.50"), " "))
+                List.of(SeatHold.hold("h-1", "ses-1", 1, EXPIRES)), Money.aud("49.50"), " ", FIRST_SESSION))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("card token");
     }
@@ -112,7 +116,7 @@ class RegistrationTest {
     void confirmsAFreeRegistrationImmediatelyWithoutAskingForPayment() {
         Registration registration = Registration.request(
                 "reg-free", ATTENDEE, "conf-1",
-                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null);
+                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null, FIRST_SESSION);
 
         assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
         assertThat(registration.getSeatHolds())
@@ -132,7 +136,7 @@ class RegistrationTest {
     void neverExpiresAFreeRegistration() {
         Registration registration = Registration.request(
                 "reg-free", ATTENDEE, "conf-1",
-                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null);
+                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null, FIRST_SESSION);
 
         assertThat(registration.isExpiredAt(EXPIRES.plusSeconds(3600))).isFalse();
     }

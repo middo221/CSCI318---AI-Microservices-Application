@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -95,18 +96,42 @@ class RegistrationApplicationServiceTest {
     @BeforeEach
     void setUp() {
         service = new RegistrationApplicationService(
-                registrations, sessionViews, publisher, Duration.ofMinutes(15));
+                registrations, sessionViews, publisher, Duration.ofMinutes(15), "Australia/Sydney");
     }
 
     private void givenSession(String id, int capacity, String price) {
+        givenSession(id, capacity, price, MORNING);
+    }
+
+    private void givenSession(String id, int capacity, String price, TimeSlot slot) {
         SessionView view = SessionView.forSession(id);
-        view.describe("conf-1", "Session " + id, MORNING, Money.aud(price));
+        view.describe("conf-1", "Session " + id, slot, Money.aud(price));
         view.setCapacity(capacity);
         views.put(id, view);
     }
 
     private static RequestRegistrationCommand requesting(SessionRequest... sessions) {
         return new RequestRegistrationCommand(DANA, "conf-1", List.of(sessions), "TOK_OK");
+    }
+
+    /**
+     * Catalogue times are wall-clock times with no zone, and Billing counts refund days back from
+     * this instant. It is converted in conference time — and late November is after NSW moves to
+     * UTC+11 on 4 October 2026, so a fixed +10 would shift every policy boundary by an hour.
+     */
+    @Test
+    void tellsPaymentWhenTheFirstSessionStartsInConferenceTime() {
+        givenSession("ses-late", 120, "49.50", new TimeSlot(
+                LocalDateTime.parse("2026-11-21T14:00"), LocalDateTime.parse("2026-11-21T15:00")));
+        givenSession("ses-early", 120, "25.00", new TimeSlot(
+                LocalDateTime.parse("2026-11-20T09:00"), LocalDateTime.parse("2026-11-20T10:30")));
+
+        service.request(requesting(new SessionRequest("ses-late", 1), new SessionRequest("ses-early", 1)));
+
+        assertThat(published).filteredOn(RegistrationRequested.class::isInstance).singleElement()
+                .satisfies(event -> assertThat(((RegistrationRequested) event).firstSessionStartsAt())
+                        .as("09:00 AEDT on 20 November is 22:00 UTC the day before")
+                        .isEqualTo(Instant.parse("2026-11-19T22:00:00Z")));
     }
 
     @Test

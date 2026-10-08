@@ -71,7 +71,7 @@ public class PaymentApplicationService {
 
         PaymentOrder order = PaymentOrder.raise(
                 UUID.randomUUID().toString(), command.registrationId(), command.amount(),
-                command.holdExpiresAt());
+                command.holdExpiresAt(), command.firstSessionStartsAt());
         order.pay(command.cardToken(), gateway, Instant.now());
 
         // Drain before saving. The id is already assigned, so save() merges and returns a different

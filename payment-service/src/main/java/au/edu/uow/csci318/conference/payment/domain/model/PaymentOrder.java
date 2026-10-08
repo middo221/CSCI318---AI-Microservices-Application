@@ -81,6 +81,15 @@ public class PaymentOrder {
     @Column(name = "hold_expires_at", nullable = false)
     private Instant holdExpiresAt;
 
+    /**
+     * When the registration's first session begins — what the refund policy counts days back from.
+     * Nullable: an order raised from a {@code registration-requested} produced before this field
+     * existed has no date, and the policy then declines with {@code EVENT_DATE_UNKNOWN} rather than
+     * guessing.
+     */
+    @Column(name = "first_session_starts_at")
+    private Instant firstSessionStartsAt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 16)
     private PaymentStatus status;
@@ -100,11 +109,13 @@ public class PaymentOrder {
         // required by JPA
     }
 
-    private PaymentOrder(String id, String registrationId, Money amount, Instant holdExpiresAt) {
+    private PaymentOrder(String id, String registrationId, Money amount, Instant holdExpiresAt,
+                         Instant firstSessionStartsAt) {
         this.id = id;
         this.registrationId = registrationId;
         this.amount = amount;
         this.holdExpiresAt = holdExpiresAt;
+        this.firstSessionStartsAt = firstSessionStartsAt;
         this.status = PaymentStatus.PENDING;
         this.createdAt = Instant.now();
     }
@@ -112,10 +123,13 @@ public class PaymentOrder {
     /**
      * Raises an order for what a registration owes.
      *
+     * <p>{@code firstSessionStartsAt} is deliberately not checked: it may be null.
+     *
      * @throws IllegalArgumentException if any attribute is missing, or the amount is zero —
      *                                  specification section 4.1 requires more than zero
      */
-    public static PaymentOrder raise(String id, String registrationId, Money amount, Instant holdExpiresAt) {
+    public static PaymentOrder raise(String id, String registrationId, Money amount,
+                                     Instant holdExpiresAt, Instant firstSessionStartsAt) {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("payment order id must be supplied");
         }
@@ -132,7 +146,7 @@ public class PaymentOrder {
         if (holdExpiresAt == null) {
             throw new IllegalArgumentException("payment order must know when the seat hold expires");
         }
-        return new PaymentOrder(id, registrationId.trim(), amount, holdExpiresAt);
+        return new PaymentOrder(id, registrationId.trim(), amount, holdExpiresAt, firstSessionStartsAt);
     }
 
     /**
@@ -219,6 +233,11 @@ public class PaymentOrder {
 
     public Instant getHoldExpiresAt() {
         return holdExpiresAt;
+    }
+
+    /** {@code null} when the request that raised this order did not say. */
+    public Instant getFirstSessionStartsAt() {
+        return firstSessionStartsAt;
     }
 
     public PaymentStatus getStatus() {

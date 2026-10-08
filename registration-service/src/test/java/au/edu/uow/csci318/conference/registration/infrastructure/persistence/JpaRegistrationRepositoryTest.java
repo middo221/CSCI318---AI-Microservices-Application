@@ -46,7 +46,8 @@ class JpaRegistrationRepositoryTest {
                 List.of(SeatHold.hold(id + "-h1", "ses-1", 2, EXPIRES),
                         SeatHold.hold(id + "-h2", "ses-2", 1, EXPIRES)),
                 Money.aud("148.50"),
-                "TOK_OK");
+                "TOK_OK",
+                Instant.parse("2026-11-19T22:00:00Z"));
     }
 
     private void detach() {

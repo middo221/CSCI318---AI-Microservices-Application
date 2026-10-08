@@ -52,7 +52,8 @@ class RegistrationEventPublishingTest {
     void sendsARegistrationRequestToItsOwnTopicKeyedByRegistration() throws Exception {
         publisher.publishAll(List.<DomainEvent>of(new RegistrationRequested(
                 "occ-1", Instant.now(), "reg-1", "att-1042", "conf-1",
-                new BigDecimal("148.50"), "AUD", Instant.now().plusSeconds(120), "TOK_OK")));
+                new BigDecimal("148.50"), "AUD", Instant.now().plusSeconds(120), "TOK_OK",
+                Instant.parse("2026-11-19T22:00:00Z"))));
 
         Message<byte[]> message = outbound.receive(2000, "registration-requested");
 

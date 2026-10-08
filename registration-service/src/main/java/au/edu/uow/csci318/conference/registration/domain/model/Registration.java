@@ -133,6 +133,9 @@ public class Registration {
      * also carries the earliest hold expiry, so Billing never charges for seats this aggregate has
      * already released.
      *
+     * <p>{@code firstSessionStartsAt} is passed through to Billing, which counts refund days back
+     * from it; it is not stored here.
+     *
      * @throws IllegalArgumentException if any attribute is missing, no seats are held, or a
      *                                  registration that costs money has no card token
      */
@@ -141,7 +144,8 @@ public class Registration {
                                        String conferenceEventId,
                                        List<SeatHold> seatHolds,
                                        Money totalAmount,
-                                       String cardToken) {
+                                       String cardToken,
+                                       Instant firstSessionStartsAt) {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("registration id must be supplied");
         }
@@ -180,7 +184,8 @@ public class Registration {
                 totalAmount.amount(),
                 totalAmount.currency(),
                 registration.earliestHoldExpiry(),
-                cardToken.trim()));
+                cardToken.trim(),
+                firstSessionStartsAt));
         registration.recordSeatsReserved();
         return registration;
     }
