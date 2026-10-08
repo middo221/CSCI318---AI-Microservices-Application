@@ -20,14 +20,17 @@ spring:
   # `cloud` must sit directly under `spring`. The first version of this file indented it under
   # `h2`, which is still valid YAML - so nothing complained, and the consumer bound to a destination
   # named after the bean instead of `registration-requested`. RegistrationEventConsumersTest now
-  # fails if that happens again.
+  # fails if that happens again, and RefundRequestedConsumerTest does the same for refund-requested.
   cloud:
     function:
-      definition: registrationRequested
+      definition: registrationRequested;refundRequested
     stream:
       bindings:
         registrationRequested-in-0:
           destination: registration-requested
+          group: payment-service
+        refundRequested-in-0:
+          destination: refund-requested
           group: payment-service
       kafka:
         binder:

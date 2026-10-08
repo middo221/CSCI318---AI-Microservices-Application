@@ -68,7 +68,8 @@ public class RefundApplicationService {
     /**
      * Decides a {@code refund-requested} and announces the outcome.
      *
-     * <p><strong>Never throws for a request it cannot honour.</strong> Registration holds the request
+     * <p><strong>Never throws for a request it cannot honour</strong>, except a lost concurrent race,
+     * which surfaces at commit and is retried by the consumer. Registration holds the request
      * open until it hears back, so a request with no order, an unpaid order or one already refunded
      * is answered with a {@code refund-declined} carrying that reason. No aggregate exists to record
      * those refusals, so this service publishes them itself.
