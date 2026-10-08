@@ -19,11 +19,14 @@ spring:
       path: /h2-console
   cloud:
     function:
-      definition: registrationConfirmed
+      definition: registrationConfirmed;refundIssued
     stream:
       bindings:
         registrationConfirmed-in-0:
           destination: registration-confirmed
+          group: ticketing-service
+        refundIssued-in-0:
+          destination: refund-issued
           group: ticketing-service
       kafka:
         binder:
