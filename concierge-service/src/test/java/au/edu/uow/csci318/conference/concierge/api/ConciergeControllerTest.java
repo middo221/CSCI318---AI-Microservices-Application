@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import static au.edu.uow.csci318.conference.concierge.support.Sessions.at;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -192,5 +193,24 @@ class ConciergeControllerTest {
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.code").value("LLM_UNAVAILABLE"))
                 .andExpect(jsonPath("$.message").exists());
+    }
+
+    /**
+     * Regression: a model that never stops asking for tools used to escape as a bare 500 with
+     * Spring's default body, because LangChain4j reports its round-trip ceiling as a plain
+     * RuntimeException rather than a LangChain4jException.
+     */
+    @Test
+    void reportsARunawayAgentLoopInThePlatformErrorShape() throws Exception {
+        model.thenKeepsCallingTool("searchSessions", "{\"track\":\"PLATFORM\"}");
+
+        mockMvc.perform(post("/api/v1/concierge/agenda")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody("streams")))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("LLM_LOOP_LIMIT"))
+                .andExpect(jsonPath("$.message").exists());
+
+        assertThat(model.turns()).isLessThanOrEqualTo(13);
     }
 }

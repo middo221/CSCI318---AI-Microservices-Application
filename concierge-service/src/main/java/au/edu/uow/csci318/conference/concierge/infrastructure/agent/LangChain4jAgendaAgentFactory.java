@@ -64,10 +64,12 @@ public class LangChain4jAgendaAgentFactory implements AgendaAgentFactory {
         if (model == null) {
             throw new LlmUnavailableException(NO_MODEL);
         }
-        return AiServices.builder(AgendaBuilder.class)
+        AgendaBuilder agent = AiServices.builder(AgendaBuilder.class)
                 .chatModel(model)
                 .tools(tools)
                 .maxToolCallingRoundTrips(MAX_TOOL_CALLING_ROUND_TRIPS)
                 .build();
+        return (attendeeId, interests) -> LoopLimit.enforce(MAX_TOOL_CALLING_ROUND_TRIPS,
+                () -> agent.buildAgenda(attendeeId, interests));
     }
 }

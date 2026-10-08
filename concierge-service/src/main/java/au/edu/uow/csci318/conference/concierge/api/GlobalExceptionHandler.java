@@ -1,5 +1,6 @@
 package au.edu.uow.csci318.conference.concierge.api;
 
+import au.edu.uow.csci318.conference.concierge.application.AgentLoopLimitException;
 import au.edu.uow.csci318.conference.concierge.application.LlmUnavailableException;
 import dev.langchain4j.exception.LangChain4jException;
 import dev.langchain4j.exception.RateLimitException;
@@ -69,6 +70,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT)
                 .body(new ApiError("LLM_TIMEOUT",
                         "The assistant took too long to answer. Please try again."));
+    }
+
+    /**
+     * 502, like {@code LLM_UNAVAILABLE}: the dependency that misbehaved is the model, which kept
+     * asking for tools past the ceiling. A code of its own because the remedy differs - a simpler
+     * request may succeed where retrying the same one probably will not.
+     */
+    @ExceptionHandler(AgentLoopLimitException.class)
+    public ResponseEntity<ApiError> handleLoopLimit(AgentLoopLimitException ex) {
+        log.warn("an agent hit its round-trip ceiling: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(new ApiError("LLM_LOOP_LIMIT",
+                        "The assistant could not finish within its step limit. Please try again with a simpler request."));
     }
 
     /**
