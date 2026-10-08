@@ -7,14 +7,17 @@ import au.edu.uow.csci318.conference.payment.domain.model.Money;
 import au.edu.uow.csci318.conference.payment.domain.model.PaymentOrder;
 import au.edu.uow.csci318.conference.payment.domain.model.PaymentStatus;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.OptimisticLockException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Round-trips the aggregate through a real schema.
@@ -87,5 +90,29 @@ class JpaPaymentOrderRepositoryTest {
         assertThat(orders.findByRegistrationId("reg-3")).get()
                 .extracting(PaymentOrder::getId).isEqualTo("pay-3");
         assertThat(orders.findByRegistrationId("reg-nobody")).isEmpty();
+    }
+
+    /**
+     * The organiser's override and an attendee's request can reach the same order together. Both
+     * read it PAID; the version column is what lets only the first of them refund it.
+     */
+    @Test
+    void refusesToRefundFromAStaleCopyOfTheOrder() {
+        orders.save(paidOrder("pay-4", "reg-4"));
+        detach();
+        PaymentOrder first = orders.findById("pay-4").orElseThrow();
+        entityManager.detach(first);
+        PaymentOrder stale = orders.findById("pay-4").orElseThrow();
+        entityManager.detach(stale);
+
+        first.markRefunded();
+        orders.save(first);
+        entityManager.flush();
+
+        stale.markRefunded();
+        assertThatThrownBy(() -> {
+            orders.save(stale);
+            entityManager.flush();
+        }).isInstanceOfAny(OptimisticLockingFailureException.class, OptimisticLockException.class);
     }
 }

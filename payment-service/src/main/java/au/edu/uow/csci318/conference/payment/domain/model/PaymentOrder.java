@@ -3,6 +3,8 @@ package au.edu.uow.csci318.conference.payment.domain.model;
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
 import au.edu.uow.csci318.conference.common.event.PaymentFailed;
 import au.edu.uow.csci318.conference.common.event.PaymentSucceeded;
+import au.edu.uow.csci318.conference.payment.domain.AlreadyRefundedException;
+import au.edu.uow.csci318.conference.payment.domain.OrderNotPaidException;
 import au.edu.uow.csci318.conference.payment.domain.gateway.ChargeResult;
 import au.edu.uow.csci318.conference.payment.domain.gateway.PaymentGateway;
 import jakarta.persistence.AttributeOverride;
@@ -20,6 +22,7 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderColumn;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -49,6 +52,11 @@ import java.util.UUID;
  * charging for seats that are already back on sale. The attempts list is still a list — as the
  * specification models it — so a retry flow can be added without a schema change if the group ever
  * decides the saga should allow one.
+ *
+ * <p><strong>Refunded at most once.</strong> {@link #markRefunded()} moves {@code PAID → REFUNDED}
+ * exactly once, and the version column makes that hold when the organiser's override and an
+ * attendee's request read the order together: only the first commit wins. A {@code Long} rather than
+ * a {@code long}, so a new order is recognisably new and is inserted rather than merged.
  *
  * <p><strong>Events are recorded, not published.</strong> The application service drains them with
  * {@link #pullDomainEvents()} <em>before</em> saving — the order arrives with its id already
@@ -101,6 +109,10 @@ public class PaymentOrder {
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
+
+    @Version
+    @Column(name = "version")
+    private Long version;
 
     @Transient
     private final List<DomainEvent> domainEvents = new ArrayList<>();
@@ -202,6 +214,33 @@ public class PaymentOrder {
                 id,
                 registrationId,
                 reason));
+    }
+
+    /**
+     * Checks that money can still go back against this order.
+     *
+     * @throws AlreadyRefundedException if it already has
+     * @throws OrderNotPaidException    if the order never took any
+     */
+    public void requireRefundable() {
+        if (status == PaymentStatus.REFUNDED) {
+            throw new AlreadyRefundedException(id);
+        }
+        if (status != PaymentStatus.PAID) {
+            throw new OrderNotPaidException(id, status);
+        }
+    }
+
+    /**
+     * Records that money went back. Records no event of its own: the {@code Refund} aggregate
+     * announces the refund, carrying this order's id.
+     *
+     * @throws AlreadyRefundedException if it already has
+     * @throws OrderNotPaidException    if the order never took any
+     */
+    public void markRefunded() {
+        requireRefundable();
+        status = PaymentStatus.REFUNDED;
     }
 
     private void requirePending() {

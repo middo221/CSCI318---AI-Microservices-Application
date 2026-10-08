@@ -3,6 +3,8 @@ package au.edu.uow.csci318.conference.payment.domain.model;
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
 import au.edu.uow.csci318.conference.common.event.PaymentFailed;
 import au.edu.uow.csci318.conference.common.event.PaymentSucceeded;
+import au.edu.uow.csci318.conference.payment.domain.AlreadyRefundedException;
+import au.edu.uow.csci318.conference.payment.domain.OrderNotPaidException;
 import au.edu.uow.csci318.conference.payment.domain.gateway.ChargeResult;
 import au.edu.uow.csci318.conference.payment.domain.gateway.PaymentGateway;
 import org.junit.jupiter.api.Test;
@@ -217,5 +219,43 @@ class PaymentOrderTest {
 
         assertThatThrownBy(() -> order.getAttempts().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    private PaymentOrder paid() {
+        PaymentOrder order = order();
+        order.pay(TOKEN, gatewayAnswering(ChargeResult.succeeded("sim-1")), NOW);
+        order.pullDomainEvents();
+        return order;
+    }
+
+    @Test
+    void marksAPaidOrderRefunded() {
+        PaymentOrder order = paid();
+
+        order.markRefunded();
+
+        assertThat(order.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(order.pullDomainEvents())
+                .as("the Refund aggregate announces the refund, not the order")
+                .isEmpty();
+    }
+
+    /** One refund per order: the second is refused before anything changes. */
+    @Test
+    void refusesASecondRefund() {
+        PaymentOrder order = paid();
+        order.markRefunded();
+
+        assertThatThrownBy(order::markRefunded).isInstanceOf(AlreadyRefundedException.class);
+    }
+
+    @Test
+    void refusesToRefundAnOrderThatNeverTookMoney() {
+        PaymentOrder pending = order();
+        PaymentOrder declined = order();
+        declined.pay(TOKEN, gatewayAnswering(ChargeResult.declined("sim-2", "CARD_DECLINED")), NOW);
+
+        assertThatThrownBy(pending::markRefunded).isInstanceOf(OrderNotPaidException.class);
+        assertThatThrownBy(declined::requireRefundable).isInstanceOf(OrderNotPaidException.class);
     }
 }
