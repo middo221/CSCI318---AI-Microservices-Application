@@ -1,6 +1,14 @@
 package au.edu.uow.csci318.conference.analytics.support;
 
+import au.edu.uow.csci318.conference.analytics.domain.event.SessionCapacityAlert;
 import au.edu.uow.csci318.conference.analytics.domain.model.AlertThresholds;
+import au.edu.uow.csci318.conference.analytics.infrastructure.streams.EventSerdes;
+import au.edu.uow.csci318.conference.analytics.infrastructure.streams.SessionFillRateTopology;
+import au.edu.uow.csci318.conference.common.event.SeatsReleased;
+import au.edu.uow.csci318.conference.common.event.SeatsReserved;
+import au.edu.uow.csci318.conference.common.event.SessionCapacityChanged;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -55,6 +63,16 @@ public final class TopologyHarness {
     /** A builder that honours the store suppliers above, as the binder's factory bean does. */
     public static StreamsBuilder builder(Properties props) {
         return new StreamsBuilder(new TopologyConfig(new StreamsConfig(props)));
+    }
+
+    /** Wires RT1 exactly as application.yml binds sessionFillRate-in-0, -in-1, -in-2 and -out-0. */
+    public static void wireSessionFillRate(StreamsBuilder builder, AlertThresholds thresholds) {
+        new SessionFillRateTopology(thresholds)
+                .build(builder.stream("seats-reserved", Consumed.with(Serdes.String(), EventSerdes.json(SeatsReserved.class))),
+                        builder.stream("seats-released", Consumed.with(Serdes.String(), EventSerdes.json(SeatsReleased.class))),
+                        builder.table("session-capacity-changed",
+                                Consumed.with(Serdes.String(), EventSerdes.json(SessionCapacityChanged.class))))
+                .to("session-capacity-alert", Produced.with(Serdes.String(), EventSerdes.json(SessionCapacityAlert.class)));
     }
 
     public static TestInputTopic<String, byte[]> rawInput(TopologyTestDriver driver, String topic) {
