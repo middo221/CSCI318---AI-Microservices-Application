@@ -95,8 +95,7 @@ since made untrue is still present. `An error has occured` is how a Smetana layo
 appears, and PlantUML still writes the file and exits 0.
 
 `python docs/diagrams/check-diagrams.py --self-test` feeds each of these checks a clean folder and a
-broken one in a temporary directory, and fails if any check cannot fail.
- `domain-model.puml` sets `$overview`,
+broken one in a temporary directory, and fails if any check cannot fail. `domain-model.puml` sets `$overview`,
 which makes the analytics fragment leave out its internal links and `domain-event-links.iuml`
 draw no event edges: the overview shows classes and associations only, and each per-context
 figure carries its own publish and react-to links. White links between three classes put the

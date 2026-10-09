@@ -244,9 +244,9 @@ itself" and "outcomes: 3 of 3 conversations ended as the headings predicted". It
 guardrail; it exited 0. Response times printed were 5 s, 7 s, 20 s and 7 s; the 64–65 second waits
 between conversations are the script's free-tier cooldown.
 
-The refund conversation A raised is visible downstream: `topics/refund-requested.txt` line 4
-(`requestedBy` `AGENT`, reason "Hospitalised and cannot attend."), `topics/refund-issued.txt` line 4
-(149.00 AUD, 100%, `decidedBy` `AGENT`) and `topics/ticket-voided.txt` line 4, all for registration
+The refund conversation A raised is visible downstream ("line N" is the number `grep -n` prints for a file under `topics/`, counting the consumer's `Option --property is deprecated…` header as line 1): `topics/refund-requested.txt` line 5
+(`requestedBy` `AGENT`, reason "Hospitalised and cannot attend."), `topics/refund-issued.txt` line 5
+(149.00 AUD, 100%, `decidedBy` `AGENT`) and `topics/ticket-voided.txt` line 5, all for registration
 `35336736-38f0-4e0d-a60e-f744d3c3b8b6`.
 
 ### The responses

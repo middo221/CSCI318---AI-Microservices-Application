@@ -799,7 +799,7 @@ two or three seconds.
 
 `[x]` delivered on `main`, with tests, and exercised end to end; `[~]` partially delivered; `[ ]` not
 started. No row above is `[~]` or `[ ]`: the live run of 2026-10-09 observed every story that crosses
-a service boundary, as recorded in `docs/verification/`. The late-payment reversal in FR-07 was
+a service boundary (FR-12, FR-13 and FR-17 in the run's labelled supplementary session), as recorded in `docs/verification/`. The late-payment reversal in FR-07 was
 not driven by that run and is covered by offline tests only.
 [`specs/2-user-stories.md`](specs/2-user-stories.md) is the authority and names the evidence for each.
 

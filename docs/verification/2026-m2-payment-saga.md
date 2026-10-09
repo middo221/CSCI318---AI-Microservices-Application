@@ -8,7 +8,7 @@
 Every value below is quoted from the capture `logs/live-run-20261009-151644/` (gitignored; the file
 is named beside each claim). The **run of record** and the **supplementary session** are kept apart
 throughout: the supplementary session is labelled wherever it is used and is never counted as a row
-of the run of record.
+of the run of record. "Line N" in this note means the number `grep -n` prints for a file under `topics/`, counting the consumer's `Option --property is deprecated…` header as line 1.
 
 ## What was verified
 

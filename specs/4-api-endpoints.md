@@ -46,7 +46,7 @@ Milestones: **M0** skeleton · **M1** catalogue and first event · **M2** the sa
 `CONCURRENT_UPDATE`).
 
 `SESSION_FULL` refuses the **whole** registration in M2. Design section 6.3 routes a full session
-to the waitlist, which is FR-10 and arrives in M3.
+to the waitlist, which is FR-10.
 
 ---
 
