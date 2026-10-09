@@ -87,8 +87,9 @@ end note
 
 note bottom of rt2
   The re-key from sessionId to gateId is deliberate and
-  named, and it is RT2's only repartition
-  (GateThroughputTopologyTest asserts that).
+  named, and it is the only repartition inside RT2
+  (GateThroughputTopologyTest asserts that); the funnel has
+  its own, funnel-by-stage.
 end note
 
 legend right

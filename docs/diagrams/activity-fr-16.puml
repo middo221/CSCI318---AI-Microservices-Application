@@ -32,7 +32,7 @@ else (no)
 endif
 :groupBy(gateId): an explicit re-key
 through <b>checkins-by-gate</b>
-— the only repartition topic;
+— the only repartition topic in RT2;
 :windowedBy 1-minute tumbling windows,
 no grace, on record time (ticketing's
 send time, just after checkedInAt);

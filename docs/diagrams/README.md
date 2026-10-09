@@ -30,15 +30,20 @@ listed [below](#where-the-code-and-the-specifications-differ).
 | [`activity-fr-08.puml`](activity-fr-08.puml) | FR-08 Confirm the registration and issue one ticket per session; reverse a late payment | §2.1 |
 | [`activity-fr-09.puml`](activity-fr-09.puml) | FR-09 Release seats on payment failure, and on hold expiry | §2.1 |
 | [`activity-fr-10.puml`](activity-fr-10.puml) | FR-10 Join a full session's waitlist, and promotion from `seats-released` | §2.1 |
-| [`activity-fr-11.puml`](activity-fr-11.puml) | FR-11 Request a refund: policy decision in billing, applied by registration and ticketing; the quote and the organiser override | §2.1 |
+| [`activity-fr-11.puml`](activity-fr-11.puml) | FR-11 Request a refund, part 1: the attendee's request to registration | §2.1 |
+| [`activity-fr-11-decision.puml`](activity-fr-11-decision.puml) | FR-11 part 2: billing's policy decision (issue or decline) | §2.1 |
+| [`activity-fr-11-settlement.puml`](activity-fr-11-settlement.puml) | FR-11 part 3: registration and ticketing apply the decision (seats released, tickets voided) | §2.1 |
+| [`activity-fr-11-override.puml`](activity-fr-11-override.puml) | FR-11 part 4: the refund quote and the organiser's override | §2.1 |
 | [`activity-fr-12.puml`](activity-fr-12.puml) | FR-12 Transfer a ticket | §2.1 |
 | [`activity-fr-13.puml`](activity-fr-13.puml) | FR-13 Check in at a gate | §2.1 |
 | [`activity-fr-14.puml`](activity-fr-14.puml) | FR-14 Live per-session fill rate (RT1) and its query | §2.1 |
 | [`activity-fr-15.puml`](activity-fr-15.puml) | FR-15 The once-only 90% capacity alert and the at-risk query | §2.1 |
 | [`activity-fr-16.puml`](activity-fr-16.puml) | FR-16 Gate throughput in one-minute windows, the congestion alert and its queries (RT2) | §2.1 |
 | [`activity-fr-17.puml`](activity-fr-17.puml) | FR-17 Agenda Builder agent: tool loop and code-side verification | §2.1 |
-| [`activity-fr-18.puml`](activity-fr-18.puml) | FR-18 Support agent: six tools, ownership and refund guardrails, outcome derived from the tools' record | §2.1 |
-| [`domain-model.puml`](domain-model.puml) | Every bounded context and the Published Language at class-name level, with event publication and reaction links | §2.4 Domain model |
+| [`activity-fr-18.puml`](activity-fr-18.puml) | FR-18 Support agent: the request, the tool-calling loop and the outcome derived from the tools' record | §2.1 |
+| [`activity-fr-18-tools.puml`](activity-fr-18-tools.puml) | FR-18: the six tools, with the ownership guard | §2.1 |
+| [`activity-fr-18-refund.puml`](activity-fr-18-refund.puml) | FR-18: the `requestRefund` tool and the 200.00 AUD guard | §2.1 |
+| [`domain-model.puml`](domain-model.puml) | Every bounded context and the Published Language at class-name level. Event publication and reaction links are not drawn here: the per-context `domain-*.puml` figures carry them | §2.4 Domain model |
 | [`domain-programme.puml`](domain-programme.puml) | Programme context (event-catalog-service), full attributes and operations | §2.4 |
 | [`domain-registration.puml`](domain-registration.puml) | Registration context (registration-service), including the `Waitlist` aggregate | §2.4 |
 | [`domain-billing.puml`](domain-billing.puml) | Billing context (payment-service), including `Refund` and `RefundPolicyService` | §2.4 |
@@ -53,7 +58,7 @@ listed [below](#where-the-code-and-the-specifications-differ).
 | [`layers-ticketing.puml`](layers-ticketing.puml) | ticketing-service layers | §3.2 |
 | [`layers-concierge.puml`](layers-concierge.puml) | concierge-service layers | §3.2 |
 | [`layers-analytics.puml`](layers-analytics.puml) | analytics-service layers: topologies, query stores, controller | §3.2 |
-| [`streams-topologies.puml`](streams-topologies.puml) | The three Kafka Streams topologies operator by operator: topics, state stores, the one repartition | §3.5 Events |
+| [`streams-topologies.puml`](streams-topologies.puml) | The three Kafka Streams topologies operator by operator: topics, state stores and the two repartitions (RT2 by gate, the funnel by stage) | §3.5 Events |
 | [`database.puml`](database.puml) | ER diagram of `catalogdb`, `regdb`, `paydb`, `ticketdb` from the JPA mappings | §3.4 Database |
 | [`data-ownership.md`](data-ownership.md) | Service → schema → table → JPA class; analytics state stores | §3.4 |
 | [`saga-sequence.puml`](saga-sequence.puml) | Registration saga: happy path, payment-failure compensation, hold expiry, refund, waitlist promotion | §3.5 Events |
@@ -87,9 +92,11 @@ It fails when an SVG contains `Syntax Error`, `[From `, `Cannot find Graphviz` o
 `An error has occured`, when a source has no SVG or an SVG no source, when a requirement has no
 activity diagram, when this index misses a file, or when a first-pass statement the code has
 since made untrue is still present. `An error has occured` is how a Smetana layout crash
-appears, and PlantUML still writes the file and exits 0. `domain-model.puml` sets `$overview`
-so that the analytics fragment leaves out its internal links there: with them, Smetana fails on
-the overview.
+appears, and PlantUML still writes the file and exits 0. `domain-model.puml` sets `$overview`,
+which makes the analytics fragment leave out its internal links and `domain-event-links.iuml`
+draw no event edges: the overview shows classes and associations only, and each per-context
+figure carries its own publish and react-to links. White links between three classes put the
+contexts in two columns, because Smetana ignores hidden and transparent ones.
 
 ## Extending these diagrams
 
