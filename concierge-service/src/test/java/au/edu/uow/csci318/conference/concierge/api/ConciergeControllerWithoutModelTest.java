@@ -8,6 +8,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -51,5 +52,24 @@ class ConciergeControllerWithoutModelTest {
                         .content("{\"attendeeId\":\"\",\"interests\":\"\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void reportsThatNoLanguageModelIsConfiguredForSupport() throws Exception {
+        mockMvc().perform(post("/api/v1/concierge/support")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attendeeId\":\"att-1042\",\"message\":\"Can I get a refund?\"}"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("LLM_UNAVAILABLE"))
+                .andExpect(jsonPath("$.message")
+                        .value(org.hamcrest.Matchers.containsString("GEMINI_API_KEY")));
+    }
+
+    /** The organisers' queue needs no model, so it works offline. */
+    @Test
+    void servesTheEscalationQueueWithoutAModel() throws Exception {
+        mockMvc().perform(get("/api/v1/concierge/escalations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
     }
 }

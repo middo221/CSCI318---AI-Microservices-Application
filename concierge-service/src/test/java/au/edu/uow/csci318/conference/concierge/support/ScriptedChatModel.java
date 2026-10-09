@@ -28,6 +28,9 @@ public class ScriptedChatModel implements ChatModel {
     private final Deque<Object> script = new ArrayDeque<>();
     private final List<ChatRequest> requests = new ArrayList<>();
 
+    /** When set, the response every turn gets once the script has run out. */
+    private ChatResponse forever;
+
     /** Queue a turn in which the model asks for one tool to be run. */
     public ScriptedChatModel thenCallsTool(String toolName, String argumentsJson) {
         script.add(ChatResponse.builder()
@@ -37,6 +40,21 @@ public class ScriptedChatModel implements ChatModel {
                         .arguments(argumentsJson)
                         .build()))
                 .build());
+        return this;
+    }
+
+    /**
+     * From here on, every turn asks for the same tool again: a model that never decides it is
+     * done. Lets a test drive the loop into LangChain4j's round-trip ceiling.
+     */
+    public ScriptedChatModel thenKeepsCallingTool(String toolName, String argumentsJson) {
+        forever = ChatResponse.builder()
+                .aiMessage(AiMessage.from(ToolExecutionRequest.builder()
+                        .id("call-forever")
+                        .name(toolName)
+                        .arguments(argumentsJson)
+                        .build()))
+                .build();
         return this;
     }
 
@@ -66,6 +84,7 @@ public class ScriptedChatModel implements ChatModel {
     public ScriptedChatModel reset() {
         script.clear();
         requests.clear();
+        forever = null;
         return this;
     }
 
@@ -83,6 +102,9 @@ public class ScriptedChatModel implements ChatModel {
     public ChatResponse chat(ChatRequest request) {
         requests.add(request);
         Object next = script.poll();
+        if (next == null && forever != null) {
+            return forever;
+        }
         if (next == null) {
             throw new IllegalStateException(
                     "the agent asked for turn " + requests.size() + " but the script ended; "

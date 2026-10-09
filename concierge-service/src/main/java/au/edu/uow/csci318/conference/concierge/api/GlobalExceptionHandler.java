@@ -1,5 +1,6 @@
 package au.edu.uow.csci318.conference.concierge.api;
 
+import au.edu.uow.csci318.conference.concierge.application.AgentLoopLimitException;
 import au.edu.uow.csci318.conference.concierge.application.LlmUnavailableException;
 import dev.langchain4j.exception.LangChain4jException;
 import dev.langchain4j.exception.RateLimitException;
@@ -8,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -44,7 +46,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(LlmUnavailableException.class)
     public ResponseEntity<ApiError> handleLlmUnavailable(LlmUnavailableException ex) {
-        log.warn("agenda request refused: {}", ex.getMessage());
+        log.warn("concierge request refused: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(new ApiError("LLM_UNAVAILABLE", ex.getMessage()));
     }
@@ -72,6 +74,19 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 502, like {@code LLM_UNAVAILABLE}: the dependency that misbehaved is the model, which kept
+     * asking for tools past the ceiling. A code of its own because the remedy differs - a simpler
+     * request may succeed where retrying the same one probably will not.
+     */
+    @ExceptionHandler(AgentLoopLimitException.class)
+    public ResponseEntity<ApiError> handleLoopLimit(AgentLoopLimitException ex) {
+        log.warn("an agent hit its round-trip ceiling: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(new ApiError("LLM_LOOP_LIMIT",
+                        "The assistant could not finish within its step limit. Please try again with a simpler request."));
+    }
+
+    /**
      * Anything else the model layer throws. Deliberately last and deliberately broad: an
      * unanticipated model failure must still leave the API contract intact.
      */
@@ -96,5 +111,12 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining("; "));
         return ResponseEntity.badRequest()
                 .body(new ApiError("VALIDATION_FAILED", detail));
+    }
+
+    /** Unparseable JSON gets the common body too, rather than Spring's default error page. */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        return ResponseEntity.badRequest()
+                .body(new ApiError("INVALID_REQUEST", "The request body is missing or is not valid JSON."));
     }
 }
