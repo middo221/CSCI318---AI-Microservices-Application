@@ -67,7 +67,10 @@ public class FakeRegistrations implements RegistrationPort {
         return this;
     }
 
-    /** Refund requests are refused with {@code code}, as registration's aggregate would refuse them. */
+    /**
+     * Refund requests are refused with {@code code}, as registration's aggregate would refuse them;
+     * {@code null} accepts them again.
+     */
     public FakeRegistrations rejectingRefundsWith(String code) {
         refundRejectionCode = code;
         return this;

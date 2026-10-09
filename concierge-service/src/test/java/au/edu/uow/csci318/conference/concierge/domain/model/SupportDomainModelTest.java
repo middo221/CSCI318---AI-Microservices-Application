@@ -73,10 +73,11 @@ class SupportDomainModelTest {
         assertThat(description).doesNotContain("null");
     }
 
+    /** The id is the one the ownership check verified, never one an upstream answer carried. */
     @Test
-    void aRequestedRefundTakesItsFiguresFromTheQuoteAndItsTimeFromTheReceipt() {
-        RequestedRefund refund = RequestedRefund.of(fullRefund("reg-1", "149.00"),
-                new RefundReceipt("reg-1", "REFUND_REQUESTED", REQUESTED_AT));
+    void aRequestedRefundTakesItsIdFromTheVerifiedRegistrationAndItsFiguresFromTheQuote() {
+        RequestedRefund refund = RequestedRefund.of("reg-1", fullRefund("reg-quoted", "149.00"),
+                new RefundReceipt("reg-receipt", "REFUND_REQUESTED", REQUESTED_AT));
 
         assertThat(refund.registrationId()).isEqualTo("reg-1");
         assertThat(refund.refundAmount()).isEqualByComparingTo("149.00");

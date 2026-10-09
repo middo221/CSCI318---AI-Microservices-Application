@@ -39,6 +39,12 @@ public final class SupportFixtures {
                 new BigDecimal(amount), "AUD", List.of("ses-1"), false);
     }
 
+    /** A confirmed registration on which a refund was already requested, in some earlier conversation. */
+    public static RegistrationDetails refundPending(String registrationId, String attendeeId, String amount) {
+        return new RegistrationDetails(registrationId, attendeeId, "evt-1", "CONFIRMED",
+                new BigDecimal(amount), "AUD", List.of("ses-1"), true);
+    }
+
     /** Thirty days or more before the event: everything back. */
     public static RefundQuote fullRefund(String registrationId, String paid) {
         return new RefundQuote(registrationId, "po-" + registrationId, new BigDecimal(paid), "AUD",

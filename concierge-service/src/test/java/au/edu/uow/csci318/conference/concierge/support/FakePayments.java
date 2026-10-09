@@ -21,6 +21,12 @@ public class FakePayments implements PaymentPort {
         return this;
     }
 
+    /** Answer a quote request for {@code registrationId} with {@code quote}, whatever registration it names. */
+    public FakePayments quotingFor(String registrationId, RefundQuote quote) {
+        answers.put(registrationId, new UpstreamResult.Ok<>(quote));
+        return this;
+    }
+
     public FakePayments rejecting(String registrationId, String code) {
         answers.put(registrationId, new UpstreamResult.Rejected<>(code, "refused by the fake"));
         return this;

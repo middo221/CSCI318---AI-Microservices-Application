@@ -35,15 +35,18 @@ import java.util.regex.Pattern;
  *       message saying "I am an organiser", or quoting someone else's registration id, changes
  *       nothing, because nothing the model writes reaches this check.</li>
  *   <li><strong>Money is fetched, never accepted.</strong> {@link #requestRefund} takes no amount.
- *       It fetches the policy quote itself and asks {@link RefundGuard} whether that quote, plus
- *       what this conversation has already requested, is within the automatic limit.</li>
+ *       It fetches the policy quote itself, refuses one that names any registration but the one it
+ *       verified, and asks {@link RefundGuard} whether that quote, plus what this conversation has
+ *       already requested, is within the automatic limit.</li>
  *   <li><strong>Only what happened is recorded.</strong> {@link #refundsRequested()} and
  *       {@link #escalations()} hold what registration accepted and what the store recorded. The
  *       response's outcome is derived from them, not from the model's prose.</li>
  * </ol>
  *
  * <p>An unknown registration and somebody else's get the same answer, word for word, so neither
- * the model nor an attendee reading its reply can use this agent to learn which ids exist.
+ * the model nor an attendee reading its reply can use this agent to learn which ids exist. Text
+ * that is not shaped like a registration id is never repeated back, in an answer, a refusal or an
+ * escalation, so it cannot pass for something the system wrote.
  *
  * <p>Not a bean and not shared: one instance per conversation, minted by
  * {@link SupportToolsFactory}, for the same reason as {@link AgendaTools}. Every public method is
@@ -65,8 +68,14 @@ public class SupportTools {
 
     private static final String NOT_HELD =
             "No registration with id %s is held by the attendee you are helping, so you cannot see or act on it.";
+    /** Deliberately does not repeat what it was given: see the class comment. */
+    private static final String NOT_AN_ID =
+            "That is not a registration id. Call listMyRegistrations to find the attendee's registrations.";
     private static final String UNAVAILABLE =
             "The %s could not be reached, so this cannot be checked right now. Offer to escalate to an organiser.";
+    private static final String QUOTE_FOR_ANOTHER_REGISTRATION =
+            "The payment service answered with a quote for a different registration, so nothing can be decided "
+                    + "on it. Offer to escalate to an organiser.";
 
     private final String attendeeId;
     private final String attendeeMessage;
@@ -107,7 +116,10 @@ public class SupportTools {
         return List.copyOf(escalations);
     }
 
-    /** Every time a guardrail here said no to something the model tried, in words for the attendee. */
+    /**
+     * Every time a guardrail here said no to something the model tried, or could not check it and
+     * so did nothing, in words for the attendee.
+     */
     public synchronized List<String> refusals() {
         return List.copyOf(refusals);
     }
@@ -118,11 +130,6 @@ public class SupportTools {
      */
     public synchronized boolean refundOutcomeUnknown() {
         return refundOutcomeUnknown;
-    }
-
-    /** The registration whose refund outcome is unknown, or null when none is. */
-    public synchronized String unknownRefundRegistrationId() {
-        return unknownRefundRegistrationId;
     }
 
     /**
@@ -175,8 +182,11 @@ public class SupportTools {
                         ? "The attendee holds no registrations."
                         : "The attendee holds %d registration(s).".formatted(mine.size()));
             }
+            // A refusal is not an empty list: "holds no registrations" would be a false answer.
             case UpstreamResult.Rejected<List<RegistrationDetails>> rejected ->
-                    new MyRegistrationsAnswer(true, List.of(), "The attendee holds no registrations.");
+                    new MyRegistrationsAnswer(false, List.of(), "The attendee's registrations could not be listed: "
+                            + "the registration service refused the request. Ask for a registration id, or offer "
+                            + "to escalate to an organiser.");
             case UpstreamResult.Unavailable<List<RegistrationDetails>> unavailable ->
                     new MyRegistrationsAnswer(false, List.of(), UNAVAILABLE.formatted("registration service"));
         };
@@ -217,17 +227,21 @@ public class SupportTools {
     public synchronized QuoteAnswer evaluateRefundPolicy(@P("The registration id") String registrationId) {
         return switch (ownRegistration(registrationId)) {
             case Refused refused -> new QuoteAnswer(false, null, false, refused.explanation());
-            case Owned owned -> switch (payments.quoteRefund(owned.registration().registrationId())) {
-                case UpstreamResult.Ok<RefundQuote> ok -> {
-                    RefundDecision decision = refundGuard.evaluate(ok.value(), alreadyRequested());
-                    yield new QuoteAnswer(true, QuoteView.of(ok.value()), decision.approved(), ok.value().describe() + " "
-                            + (decision.approved() ? "requestRefund can approve this." : decision.reason()));
+            case Owned owned -> {
+                // The same checks requestRefund makes before it quotes, so the advice never contradicts the action.
+                Optional<String> blocked = refundBlocked(owned.registration());
+                if (blocked.isPresent()) {
+                    yield new QuoteAnswer(false, null, false, blocked.get());
                 }
-                case UpstreamResult.Rejected<RefundQuote> rejected ->
-                        new QuoteAnswer(false, null, false, explainPaymentRefusal(rejected));
-                case UpstreamResult.Unavailable<RefundQuote> unavailable ->
-                        new QuoteAnswer(false, null, false, UNAVAILABLE.formatted("payment service"));
-            };
+                yield switch (quoteFor(owned.registration().registrationId())) {
+                    case Quoted(RefundQuote quote) -> {
+                        RefundDecision decision = refundGuard.evaluate(quote, alreadyRequested());
+                        yield new QuoteAnswer(true, QuoteView.of(quote), decision.approved(), quote.describe() + " "
+                                + (decision.approved() ? "requestRefund can approve this." : decision.reason()));
+                    }
+                    case NotQuoted notQuoted -> new QuoteAnswer(false, null, false, notQuoted.explanation());
+                };
+            }
         };
     }
 
@@ -243,27 +257,29 @@ public class SupportTools {
         if (ownership instanceof Refused(String explanation)) {
             return RefundAnswer.notRequested(explanation);
         }
-        String id = ((Owned) ownership).registration().registrationId();
+        RegistrationDetails registration = ((Owned) ownership).registration();
+        String id = registration.registrationId();
 
-        if (refundsRequested.stream().anyMatch(refund -> refund.registrationId().equals(id))) {
-            return RefundAnswer.notRequested(
-                    "A refund for registration %s has already been requested in this conversation.".formatted(id));
+        Optional<String> blocked = refundBlocked(registration);
+        if (blocked.isPresent()) {
+            if (refundOutcomeUnknown) {
+                refusals.add("Declined to request a refund on registration %s: an earlier refund's outcome is unknown."
+                        .formatted(id));
+            }
+            return RefundAnswer.notRequested(blocked.get());
         }
 
-        if (refundOutcomeUnknown) {
-            refusals.add("Declined to request a refund on registration %s: an earlier refund's outcome is unknown."
-                    .formatted(id));
-            return RefundAnswer.notRequested("An earlier refund's outcome in this conversation is unknown, so no "
-                    + "further refund can be requested. Call escalateToOrganiser.");
+        RefundQuote quote;
+        switch (quoteFor(id)) {
+            case Quoted quoted -> quote = quoted.quote();
+            case NotQuoted notQuoted -> {
+                if (notQuoted.forAnotherRegistration()) {
+                    refusals.add(("Declined to request a refund on registration %s: the payment service's quote "
+                            + "was for a different registration.").formatted(id));
+                }
+                return RefundAnswer.notRequested(notQuoted.explanation());
+            }
         }
-
-        UpstreamResult<RefundQuote> quoted = payments.quoteRefund(id);
-        if (!(quoted instanceof UpstreamResult.Ok<RefundQuote> ok)) {
-            return RefundAnswer.notRequested(quoted instanceof UpstreamResult.Rejected<RefundQuote> rejected
-                    ? explainPaymentRefusal(rejected)
-                    : UNAVAILABLE.formatted("payment service"));
-        }
-        RefundQuote quote = ok.value();
 
         RefundDecision decision = refundGuard.evaluate(quote, alreadyRequested());
         if (!decision.approved()) {
@@ -275,7 +291,7 @@ public class SupportTools {
 
         return switch (registrations.requestRefund(id, Escalation.bounded(reason, Escalation.MAX_REASON, DEFAULT_REASON))) {
             case UpstreamResult.Ok<RefundReceipt> accepted -> {
-                refundsRequested.add(RequestedRefund.of(quote, accepted.value()));
+                refundsRequested.add(RequestedRefund.of(id, quote, accepted.value()));
                 log.info("support conversation for {}: refund of {} {} requested on {}",
                         attendeeId, quote.refundAmount(), quote.currency(), id);
                 yield new RefundAnswer(true, id, quote.refundAmount(), quote.currency(),
@@ -288,9 +304,11 @@ public class SupportTools {
                 refundOutcomeUnknown = true;
                 unknownRefundRegistrationId = id;
                 log.warn("support conversation for {}: refund on {} got no answer; outcome unknown", attendeeId, id);
+                // Not "escalate": the service always escalates an unknown refund itself (escalateUnknownRefund),
+                // and a model told to as well would open a second case for the same money.
                 yield RefundAnswer.notRequested("The registration service did not answer, so it is UNKNOWN "
-                        + "whether the refund was requested. Do not retry. Call escalateToOrganiser so a human "
-                        + "can check.");
+                        + "whether the refund was requested. Do not retry. An organiser is notified automatically "
+                        + "to check it; tell the attendee that, and do not describe the refund as made.");
             }
         };
     }
@@ -305,9 +323,19 @@ public class SupportTools {
             @P("A short summary of the case for the organiser") String summary) {
 
         if (!escalations.isEmpty()) {
-            String existing = escalations.getFirst().escalationId();
-            return new EscalationAnswer(true, existing,
-                    "Already escalated in this conversation as %s.".formatted(existing));
+            // One case per conversation. A second is not recorded, and the model is told so plainly,
+            // with what the existing case covers, so it cannot tell the attendee that it was.
+            Escalation existing = escalations.getFirst();
+            refusals.add("Did not raise a second escalation: this conversation's case is already with an organiser as %s."
+                    .formatted(existing.escalationId()));
+            return new EscalationAnswer(false, null, ("Not recorded. This conversation already escalated to an "
+                    + "organiser as %s, %s, for: \"%s\". Only one case is raised per conversation. Give the "
+                    + "attendee that reference, and tell them that anything it does not cover needs a new request.")
+                    .formatted(existing.escalationId(),
+                            existing.registrationId() == null
+                                    ? "concerning no particular registration"
+                                    : "about registration " + existing.registrationId(),
+                            existing.reason()));
         }
 
         String attached = null;
@@ -315,8 +343,10 @@ public class SupportTools {
         if (registrationId != null && !registrationId.isBlank()) {
             switch (ownRegistration(registrationId)) {
                 case Owned owned -> attached = owned.registration().registrationId();
-                case Refused refused -> prefix = ("[The attendee referred to registration %s, which could not "
-                        + "be verified as theirs, so it is not attached.] ").formatted(registrationId.strip());
+                case Refused refused -> prefix = isWellFormed(registrationId)
+                        ? ("[The attendee referred to registration %s, which could not be verified as theirs, so "
+                                + "it is not attached.] ").formatted(registrationId.strip())
+                        : "[The attendee referred to a registration id that is not well formed, so none is attached.] ";
             }
         }
 
@@ -344,14 +374,14 @@ public class SupportTools {
      * The check every registration-scoped tool goes through first.
      *
      * <p>Fails closed: a registration that cannot be fetched cannot be shown to be the attendee's,
-     * so nothing is done with it.
+     * so nothing is done with it. Each way of saying no is recorded as a refusal.
      */
     private Ownership ownRegistration(String registrationId) {
-        String id = registrationId == null ? "" : registrationId.strip();
-        if (!WELL_FORMED_ID.matcher(id).matches()) {
-            return new Refused(("\"%s\" is not a registration id. Call listMyRegistrations to find the "
-                    + "attendee's registrations.").formatted(registrationId));
+        if (!isWellFormed(registrationId)) {
+            refusals.add("Declined to act on a registration id that is not well formed.");
+            return new Refused(NOT_AN_ID);
         }
+        String id = registrationId.strip();
         return switch (registrations.findRegistration(id)) {
             case UpstreamResult.Ok<RegistrationDetails> ok when ok.value().belongsTo(attendeeId) ->
                     new Owned(ok.value());
@@ -361,9 +391,17 @@ public class SupportTools {
                 yield notHeld(id);
             }
             case UpstreamResult.Rejected<RegistrationDetails> rejected -> notHeld(id);
-            case UpstreamResult.Unavailable<RegistrationDetails> unavailable ->
-                    new Refused(UNAVAILABLE.formatted("registration service"));
+            case UpstreamResult.Unavailable<RegistrationDetails> unavailable -> {
+                refusals.add(("Could not check registration %s: the registration service could not be reached, "
+                        + "so nothing was done with it.").formatted(id));
+                yield new Refused(UNAVAILABLE.formatted("registration service"));
+            }
         };
+    }
+
+    /** Shaped like a registration id once stripped, and so safe to repeat and to put in a URL. */
+    private static boolean isWellFormed(String registrationId) {
+        return registrationId != null && WELL_FORMED_ID.matcher(registrationId.strip()).matches();
     }
 
     /** Identical for "does not exist" and "is somebody else's". */
@@ -371,6 +409,61 @@ public class SupportTools {
         refusals.add("Declined to act on registration %s: no registration with that id is held by you."
                 .formatted(registrationId));
         return new Refused(NOT_HELD.formatted(registrationId));
+    }
+
+    /**
+     * Why no refund may be requested on {@code registration} now, before any quote is fetched;
+     * empty when one may be. {@link #evaluateRefundPolicy} and {@link #requestRefund} both ask, so
+     * the advice never contradicts the action.
+     */
+    private Optional<String> refundBlocked(RegistrationDetails registration) {
+        String id = registration.registrationId();
+        if (refundOutcomeUnknown) {
+            return Optional.of(id.equals(unknownRefundRegistrationId)
+                    ? ("The refund request for registration %s got no answer, so it is unknown whether it was "
+                            + "accepted. Do not retry; an organiser is notified automatically to check it.").formatted(id)
+                    : ("An earlier refund's outcome in this conversation is unknown, so no further refund can be "
+                            + "requested in it. An organiser is notified about that one automatically; call "
+                            + "escalateToOrganiser if the attendee wants registration %s refunded too.").formatted(id));
+        }
+        if (refundsRequested.stream().anyMatch(refund -> refund.registrationId().equals(id))) {
+            return Optional.of(("A refund for registration %s has already been requested in this conversation. "
+                    + "Nothing more is needed for it.").formatted(id));
+        }
+        if (registration.refundRequested()) {
+            return Optional.of(("A refund has already been requested for registration %s, so another cannot be "
+                    + "requested and nothing more is needed for it. Tell the attendee it is already in hand.")
+                    .formatted(id));
+        }
+        return Optional.empty();
+    }
+
+    private sealed interface QuoteLookup {
+    }
+
+    private record Quoted(RefundQuote quote) implements QuoteLookup {
+    }
+
+    private record NotQuoted(String explanation, boolean forAnotherRegistration) implements QuoteLookup {
+    }
+
+    /**
+     * Payment's quote for {@code registrationId}, the verified id. A quote naming any other
+     * registration is no quote: money is only ever decided on the registration that was checked.
+     */
+    private QuoteLookup quoteFor(String registrationId) {
+        return switch (payments.quoteRefund(registrationId)) {
+            case UpstreamResult.Ok<RefundQuote> ok when ok.value().registrationId().equals(registrationId) ->
+                    new Quoted(ok.value());
+            case UpstreamResult.Ok<RefundQuote> ok -> {
+                log.warn("support conversation for {}: payment quoted registration {} when asked for {}; refused",
+                        attendeeId, ok.value().registrationId(), registrationId);
+                yield new NotQuoted(QUOTE_FOR_ANOTHER_REGISTRATION, true);
+            }
+            case UpstreamResult.Rejected<RefundQuote> rejected -> new NotQuoted(explainPaymentRefusal(rejected), false);
+            case UpstreamResult.Unavailable<RefundQuote> unavailable ->
+                    new NotQuoted(UNAVAILABLE.formatted("payment service"), false);
+        };
     }
 
     private BigDecimal alreadyRequested() {
