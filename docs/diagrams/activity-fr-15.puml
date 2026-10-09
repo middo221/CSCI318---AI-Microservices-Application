@@ -1,0 +1,86 @@
+@startuml activity-fr-15
+' Report §2.1 — FR-15 Receive a 90% capacity alert (RT1, second half).
+' Source: SessionFillRateTopology.build, CapacityAlertOnce, SessionCapacityAlert.raise,
+' AlertThresholds, AnalyticsQueryService.sessionsAtRisk, AnalyticsController.sessionsAtRisk,
+' GlobalExceptionHandler.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-15 — Receive a 90% capacity alert
+
+|analytics-service|
+start
+:every change to <b>session-fill-rates</b>
+(FR-14) → toStream();
+:processValues(CapacityAlertOnce)
+threshold = conference.analytics
+.capacity-alert-threshold (0.9);
+if (row deleted, or
+fillRate below the threshold?) then (yes)
+  :no alert;
+  stop
+else (no)
+endif
+if (sessionId already in the
+<b>capacity-alerts-sent</b> store?) then (yes)
+  :no alert — each session
+  alerts once, for good;
+  stop
+else (no)
+endif
+:put sessionId in capacity-alerts-sent
+(changelogged, so it survives a restart);
+:SessionCapacityAlert.raise(rate, threshold, record time)
+eventId = "session-capacity-alert:{sessionId}"
+(derived, so a reprocessed duplicate is recognisable);
+
+|Kafka|
+$EVT:session-capacity-alert
+key: sessionId>
+note right
+  No service consumes it. Organisers read
+  it in Kafka UI or with
+  kafka-console-consumer.sh.
+end note
+stop
+
+|Organiser|
+start
+:GET /api/v1/analytics/sessions/at-risk
+?threshold= (optional);
+
+|analytics-service|
+if (threshold not a number?) then (yes)
+  $ERR:400 INVALID_REQUEST
+  "threshold has an invalid value";
+  stop
+else (no)
+endif
+:AnalyticsQueryService.sessionsAtRisk(threshold)
+absent → the configured 0.9;
+if (threshold negative or not finite?) then (yes)
+  $ERR:400 INVALID_REQUEST;
+  stop
+else (no)
+endif
+if (session-fill-rates queryable?) then (no)
+  $ERR:503 STORE_REBUILDING;
+  stop
+else (yes)
+endif
+:keep fillRate ≥ threshold,
+fullest first, then by sessionId;
+$OK:200 OK Array<FillRateResponse>;
+
+|Organiser|
+:moves a session to a larger
+room before it overflows (FR-04);
+stop
+
+note right
+  A session that drops below 90% and climbs
+  back does not alert again. A capacity cut
+  that pushes a session over the threshold
+  alerts like a reservation would.
+end note
+@enduml

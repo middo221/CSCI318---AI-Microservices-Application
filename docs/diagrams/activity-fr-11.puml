@@ -1,0 +1,251 @@
+@startuml activity-fr-11
+' Report §2.1 — FR-11 Request a refund: the attendee's request, billing's decision, and how
+' registration and ticketing apply it; plus the quote and the organiser's override.
+' Source: RegistrationController.requestRefund, RefundRequest, Registration.requestRefund/refund,
+' RegistrationApplicationService.requestRefund/applyRefundIssued/applyRefundDeclined,
+' RegistrationEventConsumers.refundRequested (payment), RefundApplicationService.decide/quote/
+' issueByOrganiser, RefundPolicyService, PaymentOrder.requireRefundable/markRefunded, Refund,
+' PaymentEventConsumers (registration and ticketing), TicketApplicationService.voidTicketsFor,
+' RefundController, both GlobalExceptionHandlers.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-11 — Request a refund
+
+|Attendee|
+start
+:POST /api/v1/registrations/{id}/refund-requests
+{reason, requestedBy?: ATTENDEE | AGENT};
+
+|registration-service|
+if (reason blank or over 500 characters,
+requestedBy not exactly ATTENDEE or AGENT,
+or body unreadable?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:RegistrationApplicationService.requestRefund;
+if (registration found?) then (no)
+  $ERR:404 REGISTRATION_NOT_FOUND;
+  stop
+else (yes)
+endif
+if (status CONFIRMED?) then (no)
+  $ERR:409 REGISTRATION_NOT_CONFIRMED;
+  stop
+else (yes)
+endif
+if (totalAmount zero (a free registration)?) then (yes)
+  $ERR:409 NOTHING_TO_REFUND;
+  stop
+else (no)
+endif
+if (a refund already requested
+and not yet answered?) then (yes)
+  $ERR:409 REFUND_ALREADY_REQUESTED;
+  stop
+else (no)
+endif
+:Registration.requestRefund:
+refundRequestedAt = now,
+record RefundRequested(kind ATTENDEE_REQUEST,
+requestedBy ATTENDEE or AGENT);
+:save → regdb.registrations (refund_requested_at);
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:refund-requested
+key: registrationId>
+
+|registration-service|
+$OK:202 Accepted RefundRequestResponse
+{registrationId, status REFUND_REQUESTED,
+requestedAt};
+stop
+
+|payment-service|
+start
+:refund-requested<
+:RegistrationEventConsumers.refundRequested;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:RefundApplicationService.decide(DecideRefundCommand);
+if (PaymentOrder for this registration?) then (no)
+  :refusal with no decision:
+  RefundDeclined(reason PAYMENT_ORDER_NOT_FOUND);
+elseif (order already REFUNDED?) then (yes)
+  :RefundDeclined(reason ALREADY_REFUNDED);
+elseif (order not PAID?) then (yes)
+  :RefundDeclined(reason NOT_PAID);
+else (PAID)
+  if (kind LATE_PAYMENT_REVERSAL?) then (yes)
+    :100%, decision LATE_PAYMENT_REVERSAL,
+    decidedBy POLICY — the policy is not consulted;
+  else (no: an attendee's or the agent's request)
+    :RefundPolicyService.evaluate(paid,
+    firstSessionStartsAt, eventCancelled = false)
+    days = whole days from now to the first session;
+    switch (rule)
+    case (first session unknown)
+      :EVENT_DATE_UNKNOWN 0%;
+    case (30 days or more)
+      :FULL_30_DAYS_OR_MORE 100%;
+    case (7 to 29 days)
+      :HALF_7_TO_29_DAYS 50%;
+    case (fewer than 7 days)
+      :NONE_UNDER_7_DAYS 0%;
+    endswitch
+    :decidedBy AGENT if requestedBy AGENT,
+    otherwise POLICY;
+  endif
+  if (refund percent above 0?) then (yes)
+    :PaymentOrder.markRefunded() PAID → REFUNDED
+    (@Version: one refund per order),
+    Refund.issue → status ISSUED,
+    record RefundIssued(amount, refundPercent, decidedBy);
+  else (no: 0% is a decline, never a 0% refund)
+    :Refund.decline → status DECLINED, amount 0,
+    record RefundDeclined(reason = rule);
+  endif
+  :save → paydb.payment_orders, refunds;
+endif
+:after commit, StreamBridge sends;
+
+|Kafka|
+if (issued?) then (yes)
+  $EVT:refund-issued
+  key: registrationId>
+else (no)
+  $EVT:refund-declined
+  key: registrationId>
+endif
+stop
+
+|registration-service|
+start
+:refund-issued or refund-declined<
+:PaymentEventConsumers.refundIssued
+or .refundDeclined;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+if (refund-issued?) then (yes)
+  :applyRefundIssued (ConflictRetry);
+  if (registration CONFIRMED?) then (no)
+    :no change: a reversed late payment
+    (EXPIRED or CANCELLED), or already REFUNDED;
+    stop
+  else (yes)
+  endif
+  :Registration.refund(): every CONFIRMED SeatHold
+  → RELEASED, record SeatsReleased per hold,
+  status → REFUNDED, request cleared;
+  :save, and SessionView.release(quantity)
+  per session → regdb.session_views;
+  :after commit, StreamBridge sends;
+  |Kafka|
+  $EVT:seats-released ×N
+  key: sessionId>
+  note right: promotes that session's waitlist (FR-10)
+  stop
+else (no: refund-declined)
+  |registration-service|
+  :applyRefundDeclined;
+  if (a request is open?) then (yes)
+    :clear it — the registration stays
+    CONFIRMED and may ask again;
+  else (no)
+    :nothing to settle;
+  endif
+  stop
+endif
+
+|ticketing-service|
+start
+:refund-issued<
+:PaymentEventConsumers.refundIssued;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:TicketApplicationService.voidTicketsFor
+(registrationId, "REFUNDED");
+:each ticket not already VOID or USED
+→ VOID, record TicketVoided;
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:ticket-voided ×N
+key: ticketCode>
+stop
+
+|Organiser|
+start
+:GET /api/v1/refund-policy/quote?registrationId=
+(the support agent's read, FR-18), or
+POST /api/v1/payment-orders/{id}/refunds
+{refundPercent 0–100, reason} (the override);
+
+|payment-service|
+if (registrationId missing, or refundPercent
+outside 0–100, or reason blank / over 500?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+if (payment order found?) then (no)
+  $ERR:404 PAYMENT_ORDER_NOT_FOUND;
+  stop
+else (yes)
+endif
+if (order REFUNDED?) then (yes)
+  $ERR:409 ALREADY_REFUNDED;
+  stop
+elseif (order not PAID?) then (yes)
+  $ERR:409 NOT_PAID;
+  stop
+else (PAID)
+endif
+if (quote?) then (yes)
+  $OK:200 OK RefundQuoteResponse
+  {paidAmount, daysUntilEvent (null if unknown),
+  refundPercent, refundAmount, rule, eligible};
+  stop
+else (override)
+  :refundPercent 0 → Refund DECLINED
+  (ORGANISER_DECLINED), otherwise
+  markRefunded + Refund ISSUED
+  (ORGANISER_OVERRIDE), decidedBy ORGANISER;
+  if (a concurrent decision won (@Version)?) then (yes)
+    $ERR:409 ALREADY_REFUNDED;
+    stop
+  else (no)
+  endif
+  $OK:201 Created RefundResponse
+  — and refund-issued or refund-declined
+  as above;
+  stop
+endif
+
+note right
+  <b>Any issued refund ends the registration:</b>
+  at 50% or 100% the registration is REFUNDED,
+  its seats go back on sale and its tickets are
+  voided. Keeping half the money and the seat
+  is not on offer.
+  <b>Late-payment reversal:</b> a payment-succeeded
+  for an EXPIRED or CANCELLED registration makes
+  registration emit refund-requested with kind
+  LATE_PAYMENT_REVERSAL and requestedBy SYSTEM
+  (see FR-08); billing returns it in full.
+  event-cancelled has no producer, so the
+  EVENT_CANCELLED rule is never reached.
+end note
+@enduml

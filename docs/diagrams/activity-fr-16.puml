@@ -1,0 +1,110 @@
+@startuml activity-fr-16
+' Report §2.1 — FR-16 Monitor gate throughput and queue congestion (RT2).
+' Source: GateThroughputTopology.build/isMeasurable, GateStats, CongestionAlertOncePerWindow,
+' GateCongestionAlert.raise, GateThroughputStore.latest/latestForEveryGate,
+' AnalyticsQueryService.gateThroughput/congestedGates, AnalyticsController, GlobalExceptionHandler.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-16 — Monitor gate throughput and queue congestion
+
+|Gate staff|
+start
+:POST /api/v1/gates/{gateId}/check-ins
+{ticketCode, queuedAt} (FR-13);
+
+|ticketing-service|
+:Ticket.checkIn records queuedAt
+and checkedInAt = now;
+
+|Kafka|
+$EVT:attendee-checked-in
+key: sessionId>
+
+|analytics-service|
+:attendee-checked-in<
+if (gateId blank, or queuedAt or
+checkedInAt missing?) then (yes)
+  :drop the record — waitMillis()
+  would throw and stop the stream thread;
+  stop
+else (no)
+endif
+:groupBy(gateId): an explicit re-key
+through <b>checkins-by-gate</b>
+— the only repartition topic;
+:windowedBy 1-minute tumbling windows,
+no grace, on record time (ticketing's
+send time, just after checkedInAt);
+:aggregate GateStats: checkIns + 1,
+totalWait += checkedInAt − queuedAt, maxWait
+→ <b>gate-throughput</b> window store (1 h retention);
+:toStream → processValues(CongestionAlertOncePerWindow)
+threshold = conference.analytics
+.gate-congestion-threshold (PT2M);
+if (average wait in this window
+above the threshold?) then (no)
+  :no alert;
+  stop
+else (yes)
+endif
+if (this gate already alerted for this
+window or a later one (gate-alerts-sent)?) then (yes)
+  :no alert — at most one
+  per gate per window;
+  stop
+else (no)
+endif
+:remember the window start,
+GateCongestionAlert.raise(throughput, threshold)
+→ map key to gateId;
+
+|Kafka|
+$EVT:gate-congestion-alert
+key: gateId>
+stop
+
+|Organiser|
+start
+:GET /api/v1/analytics/gates/{gateId}/throughput
+or GET /api/v1/analytics/gates/congested;
+
+|analytics-service|
+if (gate-throughput queryable?) then (no)
+  $ERR:503 STORE_REBUILDING;
+  stop
+else (yes)
+endif
+if (one gate?) then (yes)
+  :GateThroughputStore.latest(gateId)
+  — its most recent window, not its busiest;
+  if (any window for this gate?) then (no)
+    $ERR:404 GATE_NOT_TRACKED;
+    stop
+  else (yes)
+  endif
+  $OK:200 OK GateThroughputResponse
+  {gateId, windowStart, windowEnd,
+  checkInsPerMinute, averageWaitMillis,
+  maxWaitMillis, congested};
+else (congested)
+  :latest window of every gate,
+  keep those congested, longest
+  average wait first;
+  $OK:200 OK Array<GateThroughputResponse>;
+endif
+
+|Organiser|
+:opens another gate before
+the queue delays the schedule;
+stop
+
+note right
+  checkInsPerMinute is the window's count,
+  because a window is one minute long.
+  windowStart and windowEnd say how fresh
+  the numbers are: window expiry follows
+  stream time, so a quiet gate's latest
+  window may be long past.
+end note
+@enduml

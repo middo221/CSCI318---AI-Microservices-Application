@@ -1,0 +1,167 @@
+@startuml activity-fr-18
+' Report §2.1 — FR-18 Raise a support request handled by an agent (Agent 2).
+' Source: SupportController, SupportRequest, SupportApplicationService.handle/conclude,
+' SupportToolsFactory, SupportTools (six @Tool methods and the ownership guard), RefundGuard,
+' LangChain4jSupportAgentFactory, ConfiguredChatModel, LoopLimit, SupportAgent, SupportReply,
+' SupportOutcome, RestRegistrationClient, RestPaymentClient, RestTicketingClient,
+' InMemoryEscalationStore, GlobalExceptionHandler.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-18 — Raise a support request handled by an agent
+
+|Attendee|
+start
+:POST /api/v1/concierge/support
+{attendeeId, message (free text)};
+
+|concierge-service|
+if (attendeeId or message blank,
+or message over 2000 characters?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:HandleSupportRequestCommand;
+:SupportToolsFactory.create(attendeeId, message)
+a fresh SupportTools bound to the attendee
+<b>from the request</b> — no tool takes an attendee id;
+:LangChain4jSupportAgentFactory.agentFor(tools);
+if (GEMINI_API_KEY set and a
+ChatModel available (ConfiguredChatModel)?) then (no)
+  $ERR:502 LLM_UNAVAILABLE;
+  stop
+else (yes)
+endif
+:SupportAgent.handle(message)
+system prompt + the attendee's own words;
+
+repeat
+  |Gemini|
+  :model turn: request tool calls,
+  or give the final answer;
+  |concierge-service|
+  if (tool calls requested?) then (yes)
+    repeat
+      switch (tool requested)
+      case (listMyRegistrations)
+        :registration-service:
+        GET /api/v1/attendees/{attendeeId}/registrations
+        (the request's attendee, never the model's);
+      case (lookupRegistration\nlookupTickets\nevaluateRefundPolicy)
+        :ownership guard — registration-service:
+        GET /api/v1/registrations/{id};
+        if (held by this attendee?) then (no, or not found)
+          :the same "not held by you" answer
+          for a foreign id and a missing one;
+        elseif (registration unreachable?) then (yes)
+          :"service unavailable — offer escalation"
+          (fails closed);
+        else (yes)
+          :the registration's details, or ticketing-service:
+          GET /api/v1/registrations/{id}/tickets, or payment-service:
+          GET /api/v1/refund-policy/quote?registrationId=
+          and whether requestRefund could approve it;
+        endif
+      case (requestRefund)
+        :ownership guard as above;
+        if (already requested in this conversation,
+        or an earlier refund's outcome unknown?) then (yes)
+          :refused;
+        else (no)
+          :fetch a fresh quote — payment-service:
+          GET /api/v1/refund-policy/quote;
+          :RefundGuard.evaluate(quote, already requested);
+          if (ineligible, zero, more than paid, another
+          currency, or the conversation's total above
+          refund-auto-approve-threshold (200.00 AUD)?) then (yes)
+            :refused: "call escalateToOrganiser";
+          else (no)
+            :registration-service:
+            POST /api/v1/registrations/{id}/refund-requests
+            {reason, requestedBy AGENT} (FR-11);
+            if (answer?) then (202)
+              :record RequestedRefund;
+            elseif (4xx) then (yes)
+              :explain the refusal (e.g. 409 not confirmed);
+            else (no answer)
+              :outcome UNKNOWN — do not retry;
+            endif
+          endif
+        endif
+      case (escalateToOrganiser)
+        if (already escalated in this conversation?) then (yes)
+          :return the existing reference;
+        else (no)
+          :attach the registration only if verified
+          as the attendee's — InMemoryEscalationStore.open
+          with the model's summary <b>and</b> the
+          attendee's own words;
+        endif
+      endswitch
+    repeat while (more tool calls this turn?) is (yes) not (no)
+    :return the tool results to the model;
+  else (no)
+  endif
+repeat while (tools were called, and fewer than 8 round trips?) is (yes) not (final answer)
+
+if (the model failed (429, timeout, loop
+limit, other) before any tool acted?) then (yes)
+  $ERR:429 LLM_RATE_LIMITED · 504 LLM_TIMEOUT ·
+  502 LLM_LOOP_LIMIT · 502 LLM_UNAVAILABLE;
+  stop
+else (no: answered, or failed after acting)
+endif
+
+|Gemini|
+:structured output: SupportReply
+{reply, outcome (a claim)};
+
+|concierge-service|
+:SupportApplicationService.conclude;
+if (a refund's outcome unknown?) then (yes)
+  :escalate it automatically, with a note;
+else (no)
+endif
+:outcome derived from what the tools did:
+ESCALATED if an escalation was recorded,
+else REFUND_REQUESTED if a refund was accepted,
+else RESOLVED;
+if (model failed after acting, claimed outcome missing,
+or not borne out by the record?) then (yes)
+  :withhold the model's reply, write a
+  factual one from the record, add a note;
+else (no)
+  :keep the model's reply;
+endif
+$OK:200 OK SupportResponse
+{attendeeId, outcome, reply,
+refunds[], escalations[], notes[]};
+
+|Attendee|
+:reads what was actually done;
+stop
+
+|Organiser|
+start
+:GET /api/v1/concierge/escalations;
+|concierge-service|
+$OK:200 OK Array<EscalationResponse>, newest
+first (held in memory — lost on restart);
+|Organiser|
+:decides the case, e.g. by the refund
+override POST /api/v1/payment-orders/{id}/refunds
+(FR-11);
+stop
+
+note right
+  <b>Every guarantee is code, not prompt.</b>
+  Identity comes from the HTTP request; the
+  refund limit is checked inside requestRefund
+  on a quote the tool fetched itself; the
+  reported outcome is derived from the tools'
+  record. Authentication is out of scope
+  (design §16): a caller can still send any
+  attendeeId, but the model cannot change it.
+end note
+@enduml
