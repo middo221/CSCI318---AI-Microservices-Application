@@ -1,0 +1,102 @@
+@startuml streams-topologies
+' Report §3.5 — the three Kafka Streams topologies in analytics-service, operator by operator.
+' Source: SessionFillRateTopology, GateThroughputTopology, RegistrationFunnelTopology,
+' CapacityAlertOnce, CongestionAlertOncePerWindow, StoreNames, analytics application.yml.
+!pragma layout smetana
+!include include/style.iuml
+
+title analytics-service — Kafka Streams topologies (RT1, RT2, funnel)
+
+skinparam queue {
+  BackgroundColor #F3ECF8
+  BorderColor #6A4C93
+}
+skinparam database {
+  BackgroundColor #D4F1F4
+  BorderColor #2C7A86
+}
+skinparam rectangle {
+  BackgroundColor #FFFFFF
+  BorderColor #555555
+}
+
+rectangle "RT1 — session fill rate and 90% alert (FR-14, FR-15)\napplication-id analytics-session-fill-rate" as rt1 {
+  queue "seats-reserved\nkey: sessionId" as rt1_res
+  queue "seats-released\nkey: sessionId" as rt1_rel
+  queue "session-capacity-changed\nkey: sessionId" as rt1_cap
+  rectangle "mapValues(+quantity)\nmerge\nmapValues(−quantity)" as rt1_delta
+  rectangle "groupByKey\nreduce(sum)" as rt1_reduce
+  database "reserved-seats" as st_reserved
+  rectangle "KTable\n(latest capacity)" as rt1_table
+  rectangle "capacity.leftJoin(reservedSeats)\nFillRate.of(...)" as rt1_join
+  database "session-fill-rates" as st_fill
+  rectangle "toStream\nprocessValues(CapacityAlertOnce)\nfillRate ≥ 0.9, first time only" as rt1_alert
+  database "capacity-alerts-sent" as st_alerted
+  queue "session-capacity-alert\nkey: sessionId" as rt1_out
+}
+
+rectangle "RT2 — gate throughput and congestion (FR-16)\napplication-id analytics-gate-throughput" as rt2 {
+  queue "attendee-checked-in\nkey: sessionId" as rt2_in
+  rectangle "filter(measurable)\ngroupBy(gateId)" as rt2_group
+  queue "…-checkins-by-gate-repartition\nkey: gateId" as rt2_rep
+  rectangle "windowedBy(1 min tumbling, no grace)\naggregate(GateStats)" as rt2_window
+  database "gate-throughput\n(window store, 1 h)" as st_gate
+  rectangle "toStream\nprocessValues(CongestionAlertOncePerWindow)\naverage wait > PT2M, once per window\nmap(key = gateId)" as rt2_alert
+  database "gate-alerts-sent" as st_gate_alerted
+  queue "gate-congestion-alert\nkey: gateId" as rt2_out
+}
+
+rectangle "Registration funnel (supporting projection)\napplication-id analytics-registration-funnel" as fun {
+  queue "registration-requested\npayment-succeeded\npayment-failed\nregistration-expired\n(one binding, four topics)" as fun_in
+  rectangle "processValues(StageOfTopic)\nstage = the topic it arrived on\n(no payload is read)" as fun_stage
+  rectangle "groupBy(stage)\ncount()" as fun_count
+  queue "…-funnel-by-stage-repartition" as fun_rep
+  database "registration-funnel" as st_funnel
+}
+
+rt1_res --> rt1_delta
+rt1_rel --> rt1_delta
+rt1_delta --> rt1_reduce
+rt1_reduce --> st_reserved
+rt1_cap --> rt1_table
+rt1_table --> rt1_join
+st_reserved --> rt1_join
+rt1_join --> st_fill
+st_fill --> rt1_alert
+rt1_alert ..> st_alerted : remembers
+rt1_alert --> rt1_out
+
+rt2_in --> rt2_group
+rt2_group --> rt2_rep
+rt2_rep --> rt2_window
+rt2_window --> st_gate
+st_gate --> rt2_alert
+rt2_alert ..> st_gate_alerted : remembers
+rt2_alert --> rt2_out
+
+fun_in --> fun_stage
+fun_stage --> fun_count
+fun_count --> fun_rep
+fun_rep --> st_funnel
+
+note bottom of rt1
+  Every input is keyed by sessionId, so RT1 needs
+  <b>no repartition topic</b> (SessionFillRateTopologyTest
+  asserts it).
+end note
+
+note bottom of rt2
+  The re-key from sessionId to gateId is deliberate and
+  named, and it is RT2's only repartition
+  (GateThroughputTopologyTest asserts that).
+end note
+
+legend right
+  <b>queue</b> = Kafka topic · <b>cylinder</b> = state store
+  (in memory, changelogged, queried by interactive query)
+  Store names are StoreNames constants. Repartition topics
+  are prefixed with the function's application-id.
+  Thresholds: conference.analytics.capacity-alert-threshold
+  (0.9) and conference.analytics.gate-congestion-threshold (PT2M).
+endlegend
+@enduml
