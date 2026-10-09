@@ -75,10 +75,10 @@ if [ "$SELF_TEST" = 1 ]; then
   echo "   FAILED: $failures matcher check(s)"; exit 1
 fi
 
-[ "${#SERVICES[@]}" -gt 0 ] || mapfile -t SERVICES < <(services | awk '{print $1}')
+if [ "${#SERVICES[@]}" -eq 0 ]; then while read -r n _; do SERVICES+=("$n"); done < <(services); fi
 stopped=0
 while read -r pid line; do
-  ours "$line" "$ROOT" "$ORPHANS" "${SERVICES[@]}" || continue
+  ours "$line" "$ROOT" "$ORPHANS" ${SERVICES[@]+"${SERVICES[@]}"} || continue
   if [ "$DRY_RUN" = 1 ]; then echo "   would stop PID $pid  $line"; continue; fi
   kill "$pid" 2>/dev/null && { echo "   stopped PID $pid"; stopped=$((stopped + 1)); }
 done < <(ps -eo pid=,args= | grep '[j]ava')

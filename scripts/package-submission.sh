@@ -30,6 +30,31 @@ for arg in "$@"; do
   esac
 done
 
+# env_value <file> <NAME>: NAME's value in a .env file; the same rules as scripts/run-all.sh (UTF-8 BOM,
+# CRLF, `export NAME=`, spaces round =, quotes, inline comments; the last assignment wins).
+env_value() {
+  [ -f "$1" ] || return 0
+  local line k v found=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
+    line=${line#$'\xEF\xBB\xBF'}
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in *=*) ;; *) continue ;; esac
+    line=${line#export }
+    k=${line%%=*}; v=${line#*=}
+    k=$(printf '%s' "$k" | tr -d '[:space:]')
+    [ "$k" = "$2" ] || continue
+    v=$(printf '%s' "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    case "$v" in
+      \"*) v=${v#\"}; v=${v%%\"*} ;;
+      \'*) v=${v#\'}; v=${v%%\'*} ;;
+      *) v=$(printf '%s' "$v" | sed -e 's/[[:space:]]\{1,\}#.*$//' -e 's/[[:space:]]*$//') ;;
+    esac
+    found=$v
+  done < "$1"
+  printf '%s' "$found"
+}
+
 # verify <zip> <top-level folder> [secret]: print every problem as "FAILED: ...", exit 1 if any
 verify() {
   python - "$@" <<'PY'
@@ -42,7 +67,7 @@ required = ["README.md", "pom.xml", "mvnw", "mvnw.cmd", ".mvn/", "docker-compose
             "git-history.txt", "specs/2-user-stories.md", "specs/4-api-endpoints.md", "specs/openapi-contract.yaml",
             "docs/verification/", "docs/diagrams/", "scripts/run-all.sh", "postman/"] + [m + "/pom.xml" for m in modules]
 draft_marker = re.compile(rb"\[DRAFT\s*(\xe2\x80\x94|-)")
-api_key = re.compile(rb"AIza[0-9A-Za-z_\-]{35}")
+api_key = re.compile(rb"AIza[0-9A-Za-z_\-]{35}|AQ\.[0-9A-Za-z_\-]{40,}")
 email = re.compile(rb"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9.-]+")
 problems = []
 with zipfile.ZipFile(path) as archive:
@@ -123,6 +148,7 @@ write("target", {"payment-service/target/payment-service.jar": b"x"})
 write("claude", {"CLAUDE.md": b"x\n"})
 write("crlf", {"scripts/demo.sh": b"#!/usr/bin/env bash\r\necho\r\n"})
 write("google-key", {"docs/run.txt": b"key=AIza" + b"SyA1234567890abcdefghijklmnopqrstuv\n"})
+write("google-key-aq", {"docs/run.txt": b"key=AQ." + b"Ab1234567890abcdefghijklmnopqrstuvwxyz_-ABCDE\n"})
 write("env-key", {"docs/run.txt": b"the key is secret-value-123\n"})
 write("draft", {"docs/x.md": marker})
 write("draft-in-plans", {"docs/superpowers/plans/p.md": marker})
@@ -148,6 +174,10 @@ PY
   expect 1 "CLAUDE.md fails"                            claude
   expect 1 "a CRLF shell script fails"                  crlf
   expect 1 "a Google API key in any file fails"         google-key
+  expect 1 "a Google API key in the AQ. form fails"      google-key-aq
+  printf '\xEF\xBB\xBFexport GEMINI_API_KEY = "notepad-secret-1" # mine\r\n' > "$WORK/notepad.env"
+  if [ "$(env_value "$WORK/notepad.env" GEMINI_API_KEY)" = "notepad-secret-1" ]; then echo "   ok      the .env secret is parsed through a BOM, CRLF, export, spaces, quotes and a comment"
+  else echo "   FAILED: the .env secret was not parsed from a Notepad file"; failures=$((failures + 1)); fi
   expect 1 "the .env key's value in any file fails"     env-key secret-value-123
   expect 1 "an unfinished-draft marker outside docs/superpowers/ fails" draft
   expect 1 "an email address in git-history.txt fails"  email
@@ -187,7 +217,7 @@ rm -f dist/git-history.txt
 
 SECRET=""
 if [ -f .env ]; then
-  SECRET=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\+\)\?GEMINI_API_KEY[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '\r"'"'")
+  SECRET=$(env_value .env GEMINI_API_KEY)
   [ "$SECRET" = "your-key-here" ] && SECRET=""
 else
   echo "note: no .env found — the key-value scan is skipped (the AIza pattern scan still runs)"
