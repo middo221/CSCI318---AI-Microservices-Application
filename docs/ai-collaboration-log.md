@@ -402,3 +402,83 @@ than delegation.
 | **Decision** | **Modified** — the promotion and the processed-event claim run `REQUIRES_NEW` |
 | **Rationale** | The Spring Cloud Stream test binder keys producer and consumer channels on the same destination name (`TestChannelBinderProvisioner`, checked in 4.3.3), so a message registration publishes after commit is delivered synchronously to its own consumer, from inside the publisher's transaction completion: in spring-tx 6.2.19 `@TransactionalEventListener(AFTER_COMMIT)` listeners fire from `afterCompletion`. A `REQUIRED` transaction there joins the committed one, which cannot register its own after-completion work; the log reads "processing Spring after-completion callbacks immediately, with outcome status 'unknown'", the promotion reports success, and its writes vanish (the place stayed `WAITING`). **Proved, not assumed:** with `REQUIRES_NEW` switched off on `promoteFor`, the end-to-end promotion test failed at `waitlist-promoted` (`Expecting actual not to be null`) while the three tests that send `seats-released` themselves still passed; restoring it made all four pass. The processed-event claim was checked the same way: a probe counting the `seats-released` claims committed read 0 with `markProcessed` on a plain `REQUIRED` transaction and 1 under `REQUIRES_NEW`, so the claim is load-bearing too. The same loopback is what lets that test prove the whole no-REST loop in-JVM. **A second consequence found on the way:** once registration consumed its own `seats-released`, the test binder's single shared channel meant the output capture never attached, so four existing assertions failed and two others — `receive(500, "seats-released")).isNull()` in `RefundEventConsumersTest` — had silently stopped testing anything and would have passed whatever registration did. They were repaired with a test-only `SeatsReleasedTap` interceptor; any later assertion on that destination must use it. |
 | **Artefact** | `WaitlistApplicationService.promoteFor`; `ProcessedEventStore.markProcessed`; `WaitlistPromotionTest`; `SeatsReleasedTap` |
+
+---
+
+## 2026-10-09 — One malformed check-in would have stopped gate analytics for every gate
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Implementation, review (M3 analytics) |
+| **What was asked** | Build the three Kafka Streams read models (fill rate, gate throughput, registration funnel) behind FR-14, FR-15 and FR-16, test-first with `TopologyTestDriver` |
+| **What was proposed** | Topologies that validate their input inside the processors and skip what they cannot use, each skip pinned by a "guard" test |
+| **Decision** | **Modified** — after the whole-branch review |
+| **Rationale** | The final review found a check-in whose `queuedAt` made the wait computation overflow. The record passed every guard and threw in the aggregator, and Kafka Streams' default answer to a processing exception is to shut the client down, so one bad record would have ended gate throughput (RT2) for every gate, with both gate endpoints answering 503 until a restart. The fix set `processing.exception.handler` to `LogAndContinueProcessingExceptionHandler` beside the existing deserialisation handler. That created a second problem: once exceptions were swallowed, the guard tests could no longer fail, because a record a guard skipped and a record that crashed and was dropped now looked the same from outside. A `droppedRecords` helper on the test harness reads the dropped-records metric: each guard test now asserts that nothing was dropped (the guard did its job), and the overflow test asserts that exactly one record was. Also decided against the proposal: `processing.guarantee` stays `at_least_once` rather than `exactly_once_v2`, because exactly-once needs broker transaction settings the single-broker Docker Kafka may not have, and the one live run could not be risked on it. A crash between processing and commit can therefore double-count, which is recorded as a known limitation. |
+| **Artefact** | `analytics-service/src/main/resources/application.yml`; `TopologyHarness`; the topology guard tests |
+
+---
+
+## 2026-10-09 — The packager's own checks found a repository a marker could not run
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Release, packaging (M5) |
+| **What was asked** | Package the repository for submission as a zip |
+| **What was proposed** | `git archive HEAD` with a generated history file: the zip as committed |
+| **Decision** | **Modified** — the zip is checked entry by entry before it counts as submittable |
+| **Rationale** | The checks found `mvnw`, `demo-m1.sh`, `demo-m2.sh`, `demo-m4.sh` and `demo-ticketing.sh` committed `100644`. `git archive` keeps that mode, so on macOS or Linux a marker's `./mvnw` would answer `Permission denied`. That is invisible on Windows, where the whole team works. Review then found the "required file" check matching by prefix, so `mvnw.cmd` alone would have satisfied the requirement for `mvnw`; it now needs exact names. The history file was changed to carry author names only, not e-mail addresses. The unfinished-draft check skips `docs/superpowers/`, because the plans legitimately describe the draft-marker convention. The checks now refuse a zip with a non-executable script, a CRLF shell script, a `.env` or `.env.*`, `private/`, `target/`, an API key in either Google format, or an unfinished-draft marker, and `--self-test` proves each check can fail. |
+| **Artefact** | `scripts/package-submission.sh` |
+
+---
+
+## 2026-10-09 — The live run found two demonstration scripts reporting what they never saw
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Verification (M5) |
+| **What was asked** | Run the whole system once, end to end, and record what it shows |
+| **What was proposed** | Read each requirement's outcome from the demonstration scripts' verdict lines |
+| **Decision** | **Rejected** for two scripts — their verdicts were checked against the broker and the services instead |
+| **Rationale** | `demo-m2.sh` reported that payment had not refused an expired hold. The topic said otherwise: `payment-failed` carried `HOLD_EXPIRED` for that registration and the order had no charge attempt. The script, rewritten earlier the same day so it would stop claiming success unconditionally, was looking for the reason in the order's REST body, which has no such field; its self-test fixture had assumed a shape the API never had. `demo-ticketing.sh`, older, printed every step as passed while querying a registration that did not exist: its text-matching JSON helper took the last `"id"` in the response, which is a seat hold's. The system had in fact confirmed the real registration and issued both tickets within milliseconds. Neither failure was re-run to green. Both scripts were fixed to check what they claim (the ticketing script now polls, checks every step, exits 1 on failure and has a self-test), and the fixed ticketing script was run once as a separately labelled supplementary step. Lesson: a demonstration script is test code, and a check that cannot fail, or that inspects the wrong place, is as misleading as no check. |
+| **Artefact** | `scripts/demo-m2.sh`; `scripts/demo-ticketing.sh`; `logs/live-run-20261009-151644/` (not committed) |
+
+---
+
+## 2026-10-09 — The live model returned an empty answer, and the retry was kept to one agent
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Verification, implementation (M5, FR-17) |
+| **What was asked** | Explain why the agenda request answered `502 LLM_UNAVAILABLE` in the live run while the support agent worked minutes later with the same key |
+| **What was proposed** | Retry an unreadable model answer once, in both agents |
+| **Decision** | **Modified** — the retry applies to the agenda agent only |
+| **Rationale** | Gemini 2.5 Flash answered HTTP 200 with an empty candidate (`finishReason: STOP`, no parts) after 2,700 thinking tokens; LangChain4j could not parse `null` into an agenda. The error contract held (502), but the attendee got no agenda. The fix asks again once, test-first: the scripted model now has a turn that answers nothing, reproducing the live failure exactly before the change. Retrying re-runs the whole plan-act-observe loop, which is safe only because every agenda tool reads. The support agent's tools request refunds and raise escalations, so a retry there could act twice, and it was left out. Observed afterwards: the empty answer recurred and the retry fired; on the free tier the retried loop then met the rate limit, and the project's daily quota (20 requests per model) ran out the same afternoon. A cap on thinking would be the next step, but the Spring Boot starter in use exposes no thinking budget. |
+| **Artefact** | `EmptyAnswer`; `LangChain4jAgendaAgentFactory`; `ConciergeControllerTest` |
+
+---
+
+## 2026-10-09 — Requirements ticked only where the live run saw them
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Verification (M5) |
+| **What was asked** | Run the whole system once, end to end, and record what it shows |
+| **What was proposed** | Write the verification notes and move the eight `[~]` requirements to `[x]` from the run |
+| **Decision** | **Modified** — every tick traced to a captured file by an independent review, and evidence from the supplementary session labelled as such wherever it is used |
+| **Rationale** | FR-07, FR-08, FR-10, FR-11, FR-14, FR-15, FR-16 and FR-18 moved to `[x]`, each against an observation in `logs/live-run-20261009-151644/`: for example, the expired hold refused on `payment-failed` with reason `HOLD_EXPIRED`, and the three analytics read models checked against the live broker with every check held. The run of record could not show everything. Because of the ticketing script's defect, transfer and gate check-in (FR-12, FR-13, already `[x]`) were observed only when the fixed script ran in a separately labelled supplementary session; FR-08's two tickets were read from 8084 there too, and the run of record holds both ticket codes on `ticket-issued`. FR-17 (already `[x]` from September) failed in the run of record on an empty model answer and produced an agenda only in the supplementary Newman pass. It was kept ticked, with the failure recorded in its verification note rather than hidden. The late-payment reversal was not observed live and is recorded as tested offline only. A reviewer then grepped the capture for about fifty load-bearing values across the four notes and found none that was missing or different. |
+| **Artefact** | `docs/verification/2026-m2-payment-saga.md`, `2026-m3-refunds-waitlist.md`, `2026-m3-analytics.md`, `2026-m4-support-agent.md`, `2026-m4-agenda-builder.md`; `specs/2-user-stories.md`; `logs/live-run-20261009-151644/` (not committed) |

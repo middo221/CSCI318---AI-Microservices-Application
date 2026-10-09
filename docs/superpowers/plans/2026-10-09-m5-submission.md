@@ -4,8 +4,11 @@
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 >
-> **Status: not started.** Branch `feat/m5-submission`. Tasks 1–5 can start now. Tasks 6–13 wait
-> until **both** `feat/m3-refunds-waitlist` and `feat/m4-support-agent` are merged to `main`.
+> **Status: Tasks 1–13 complete on `feat/m5-submission`; live run `logs/live-run-20261009-151644`
+> (plus one labelled supplementary session after its three defects were fixed — see
+> `docs/verification/`). Merged to `main` on 2026-10-09 under Hayden's standing instruction to merge
+> milestone branches.** Where execution departed from this text, the controller's rulings are
+> recorded in the verification notes and `docs/ai-collaboration-log.md`.
 
 **Goal:** Make the repository submittable — one command to start and stop the whole system, a
 stream-processing demonstration, one recorded end-to-end live run, a Postman collection and a
@@ -224,7 +227,7 @@ branches land — it reads the endpoints from the code.
   `http://localhost:<port>` URL and `-X <METHOD>` for anything but GET, and each FR-01…FR-18 appears
   in a markdown heading.
 
-- [ ] **Step 1: Write the service table and ignore what the scripts generate**
+- [x] **Step 1: Write the service table and ignore what the scripts generate**
 
 `scripts/services.conf`:
 
@@ -248,12 +251,12 @@ Append to `.gitignore`:
 __pycache__/
 ```
 
-- [ ] **Step 2: Run the self-test before the checker exists**
+- [x] **Step 2: Run the self-test before the checker exists**
 
 Run: `python scripts/check_endpoints.py --self-test; echo "exit $?"`
 Expected: `can't open file … check_endpoints.py`, `exit 2`.
 
-- [ ] **Step 3: Write the checker**
+- [x] **Step 3: Write the checker**
 
 `scripts/check_endpoints.py`:
 
@@ -719,12 +722,12 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
 ```
 
-- [ ] **Step 4: The self-test passes**
+- [x] **Step 4: The self-test passes**
 
 Run: `export PYTHONUTF8=1; python scripts/check_endpoints.py --self-test; echo "exit $?"`
 Expected: fourteen `ok` lines, `every check can fail, and every parser reads its fixture`, `exit 0`.
 
-- [ ] **Step 5: Prove the self-test can fail**
+- [x] **Step 5: Prove the self-test can fail**
 
 Temporarily change the first line of `normalise` from
 `path = re.split(r"[?#]", path, maxsplit=1)[0].strip()` to `path = path.strip()` and re-run Step 4.
@@ -732,7 +735,7 @@ Expected: `FAILED: normalise drops the query and names no parameter` (and the re
 fixture lines), a final `FAILED: … self-test check(s)`, `exit 1`. Revert the change and re-run Step 4
 to see `exit 0` again.
 
-- [ ] **Step 6: The inventory on this branch**
+- [x] **Step 6: The inventory on this branch**
 
 Run: `python scripts/check_endpoints.py inventory`
 Expected — on `feat/m5-submission` before Task 6 — the last lines read exactly:
@@ -749,7 +752,7 @@ DRIFT  in specs/4, not in code: POST 8086 /api/v1/concierge/support
 Those five are the endpoints the two sibling branches deliver. After Task 6 the count becomes
 `32 endpoints: 32 in code, …`.
 
-- [ ] **Step 7: The three artefact checks fail today, for the right reason**
+- [x] **Step 7: The three artefact checks fail today, for the right reason**
 
 ```bash
 python scripts/check_endpoints.py openapi specs/openapi-contract.yaml | tail -2; echo "exit ${PIPESTATUS[0]}"
@@ -761,7 +764,7 @@ Expected: `FAILED: 28 problem(s)` (OpenAPI covers two endpoints), `FAILED: 29 pr
 `FAILED: cannot read postman/converge.postman_collection.json: …`, each `exit 1`. Tasks 7, 8 and 10
 turn each into `OK  32 endpoints covered`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add .gitignore scripts/services.conf
@@ -802,12 +805,12 @@ locks a running jar and `clean` then fails half-way; it starts Kafka first, beca
 `analytics-service` provisions its topics at start-up and fails after about thirty seconds per topic
 without a broker; and it gives the Gemini key to the concierge alone.
 
-- [ ] **Step 1: Watch it not exist**
+- [x] **Step 1: Watch it not exist**
 
 Run: `bash scripts/run-all.sh --self-test; echo "exit $?"`
 Expected: `No such file or directory`, `exit 127`.
 
-- [ ] **Step 2: Write `scripts/run-all.sh`**
+- [x] **Step 2: Write `scripts/run-all.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -1067,7 +1070,7 @@ fi
 ok "all requested services are up. Stop them with: bash scripts/stop-all.sh"
 ```
 
-- [ ] **Step 3: Its self-test passes, and can fail**
+- [x] **Step 3: Its self-test passes, and can fail**
 
 Run: `bash -n scripts/run-all.sh && bash scripts/run-all.sh --self-test; echo "exit $?"`
 Expected: fifteen green check lines, then `every helper can say no`, `exit 0`.
@@ -1075,13 +1078,13 @@ Expected: fifteen green check lines, then `every helper can say no`, `exit 0`.
 Then change `5??) return 1` in `is_ready` to `5?9) return 1`, re-run, and see
 `FAILED: 503 is not ready (analytics still rebuilding) (exit 0, wanted 1)` and `exit 1`. Revert.
 
-- [ ] **Step 4: `--check` with nothing running**
+- [x] **Step 4: `--check` with nothing running**
 
 Run: `bash scripts/run-all.sh --check; echo "exit $?"`
 Expected (nothing of Converge running): a six-row table, every row `DOWN` with HTTP `000`, `exit 1`.
 With `--only payment-service` the table has one row.
 
-- [ ] **Step 5: Write `scripts/stop-all.ps1` and `scripts/stop-all.sh`**
+- [x] **Step 5: Write `scripts/stop-all.ps1` and `scripts/stop-all.sh`**
 
 `scripts/stop-all.ps1` (the Windows implementation — only PowerShell can read every process's
 command line without a third-party tool):
@@ -1287,7 +1290,7 @@ done < <(ps -eo pid=,args= | grep '[j]ava')
 exit 0
 ```
 
-- [ ] **Step 6: The matcher refuses everything that is not ours**
+- [x] **Step 6: The matcher refuses everything that is not ours**
 
 Run: `bash scripts/stop-all.sh --self-test; echo "exit $?"`
 Expected on Windows: eleven `ok` lines, then `the matcher refuses everything that is not ours`,
@@ -1303,7 +1306,7 @@ process whose command line contains `\.worktrees\` other than this worktree's ow
 Run: `bash scripts/stop-all.sh --dry-run no-such-service; echo "exit $?"`
 Expected: `unknown service(s): no-such-service`, `exit 2`.
 
-- [ ] **Step 7: Write `scripts/run-all.ps1`, and run its self-test**
+- [x] **Step 7: Write `scripts/run-all.ps1`, and run its self-test**
 
 ```powershell
 <#
@@ -1500,7 +1503,7 @@ Expected: eleven `ok` lines, then `every helper can say no`, `exit 0`.
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-all.ps1 -Check -Only payment-service,analytics-service; "exit $LASTEXITCODE"`
 Expected: a two-row table, both `DOWN` / `000`, `exit 1`.
 
-- [ ] **Step 8 (only if Docker Desktop is already running and nothing else holds ports 8081–8086): a live smoke test**
+- [x] **Step 8 (only if Docker Desktop is already running and nothing else holds ports 8081–8086): a live smoke test**
 
 Skip this step otherwise — Task 11 is the live test. Do not start Docker Desktop for it.
 
@@ -1517,7 +1520,7 @@ for all six, `Stop them first: …`, `exit 1` — it refuses rather than half-st
 Then `bash scripts/stop-all.sh` → six `stopped PID …` lines; `bash scripts/run-all.sh --check` →
 six `DOWN`, `exit 1`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add --chmod=+x scripts/run-all.sh scripts/stop-all.sh
@@ -1565,12 +1568,12 @@ one minute, no grace; the alert is at most one per gate per window.
   Exit 0 only when every check held; every step still runs after a failed check, so its evidence is
   captured.
 
-- [ ] **Step 1: Watch it not exist**
+- [x] **Step 1: Watch it not exist**
 
 Run: `bash scripts/demo-m3-analytics.sh --self-test; echo "exit $?"`
 Expected: `No such file or directory`, `exit 127`.
 
-- [ ] **Step 2: Write the script**
+- [x] **Step 2: Write the script**
 
 ```bash
 #!/usr/bin/env bash
@@ -2026,7 +2029,7 @@ fail "$checks_failed check(s) failed - read the output above and logs/analytics-
 exit 1
 ```
 
-- [ ] **Step 3: Every check can fail**
+- [x] **Step 3: Every check can fail**
 
 Run: `bash -n scripts/demo-m3-analytics.sh && bash scripts/demo-m3-analytics.sh --self-test; echo "exit $?"`
 Expected: twenty-one green check lines, then `every check can fail`, `exit 0`.
@@ -2034,12 +2037,12 @@ Expected: twenty-one green check lines, then `every check can fail`, `exit 0`.
 Then break one check on purpose — in `alerts`, change `if len(mine) != 1:` to `if len(mine) > 1:` —
 re-run, and see `FAILED: alerts once fails no alert at all (exit 0, wanted 1)` and `exit 1`. Revert.
 
-- [ ] **Step 4: It refuses to run against nothing**
+- [x] **Step 4: It refuses to run against nothing**
 
 Run (no services running): `bash scripts/demo-m3-analytics.sh; echo "exit $?"`
 Expected: `catalog is not answering. Start it (bash scripts/run-all.sh) and run this again.`, `exit 1`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add --chmod=+x scripts/demo-m3-analytics.sh
@@ -2078,12 +2081,12 @@ again from its jar. With registration started at `CONFERENCE_REGISTRATION_HOLD_W
 shows a hold expiring while payment is down and payment then refusing to charge it (`HOLD_EXPIRED`) —
 the FR-07 refinement — on the live broker.
 
-- [ ] **Step 1: Watch it not exist**
+- [x] **Step 1: Watch it not exist**
 
 Run: `bash scripts/demo-all.sh --self-test; echo "exit $?"`
 Expected: `No such file or directory`, `exit 127`.
 
-- [ ] **Step 2: Write the script**
+- [x] **Step 2: Write the script**
 
 ```bash
 #!/usr/bin/env bash
@@ -2343,7 +2346,7 @@ note "Stop the services with: bash scripts/stop-all.sh"
 exit $result
 ```
 
-- [ ] **Step 3: Every summarising check can fail**
+- [x] **Step 3: Every summarising check can fail**
 
 Run: `bash -n scripts/demo-all.sh && bash scripts/demo-all.sh --self-test; echo "exit $?"`
 Expected: nine green check lines, then `every summarising check can fail`, `exit 0`.
@@ -2351,13 +2354,13 @@ Expected: nine green check lines, then `every summarising check can fail`, `exit
 Then in `summary_table` change `bad += status != "0"` to `bad += 0`, re-run, and see
 `FAILED: summary_table fails an absent script (exit crash, wanted 1)` and `exit 1`. Revert.
 
-- [ ] **Step 4: It refuses to run without the services**
+- [x] **Step 4: It refuses to run without the services**
 
 Run: `bash scripts/demo-all.sh; echo "exit $?"`
 Expected: `Docker is not running` (Docker stopped) or the `run-all --check` table with `DOWN` rows and
 `not every service is up`, `exit 1`. No `logs/live-run-*` folder is created.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add --chmod=+x scripts/demo-all.sh
@@ -2388,12 +2391,12 @@ packager refuse a zip with that defect.
   with `git-history.txt` inside. Exit 0 only when every check passes; each problem printed as
   `FAILED: …`; on success the last line is `<zip>  <n> files  <size> MB`.
 
-- [ ] **Step 1: Watch it not exist**
+- [x] **Step 1: Watch it not exist**
 
 Run: `bash scripts/package-submission.sh --self-test; echo "exit $?"`
 Expected: `No such file or directory`, `exit 127`.
 
-- [ ] **Step 2: Write the script**
+- [x] **Step 2: Write the script**
 
 ```bash
 #!/usr/bin/env bash
@@ -2578,7 +2581,7 @@ print("%s  %d files  %.1f MB" % (sys.argv[1], files, size / 1048576))
 PY
 ```
 
-- [ ] **Step 3: Every archive check can fail**
+- [x] **Step 3: Every archive check can fail**
 
 Run: `bash -n scripts/package-submission.sh && bash scripts/package-submission.sh --self-test; echo "exit $?"`
 Expected: eleven `ok` lines, then `every archive check can fail`, `exit 0`.
@@ -2586,7 +2589,7 @@ Expected: eleven `ok` lines, then `every archive check can fail`, `exit 0`.
 Then delete the three lines that check `runnable`, re-run, and see
 `FAILED: an mvnw that is not executable fails (exit crash, wanted 1)` and `exit 1`. Revert.
 
-- [ ] **Step 4: Fix the modes, commit**
+- [x] **Step 4: Fix the modes, commit**
 
 ```bash
 git update-index --chmod=+x mvnw scripts/demo-m1.sh scripts/demo-m2.sh scripts/demo-m4.sh scripts/demo-ticketing.sh
@@ -2599,7 +2602,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
 ```
 Expected from the `grep`: `every script is executable`.
 
-- [ ] **Step 5: Run it on the real repository and read why it refuses**
+- [x] **Step 5: Run it on the real repository and read why it refuses**
 
 Run: `bash scripts/package-submission.sh; echo "exit $?"`
 Expected, before Task 7 — exactly these failures and no others:
@@ -2627,14 +2630,14 @@ Every later task depends on their endpoints, scripts and FR checkboxes.
 - Produces: `feat/m5-submission` containing all 32 endpoints, `scripts/demo-m3.sh`,
   `scripts/demo-m4-support.sh` (and `demo-m4.sh`'s preflight fix), FR-10, FR-11 and FR-18 at `[~]`.
 
-- [ ] **Step 1: Confirm both are on `main`**
+- [x] **Step 1: Confirm both are on `main`**
 
 ```bash
 git fetch --all --quiet 2>/dev/null; git branch --merged main | grep -E "feat/m3-refunds-waitlist|feat/m4-support-agent"
 ```
 Expected: both names. If either is missing, stop here.
 
-- [ ] **Step 2: Merge**
+- [x] **Step 2: Merge**
 
 ```bash
 git merge --no-edit main
@@ -2643,7 +2646,7 @@ Expected: a clean merge (Tasks 1–5 touch no file the siblings touch). On a con
 branch never edited, take `main`'s side: `git checkout --theirs <file> && git add <file>`. On a
 conflict in `.gitignore`, keep both sides' lines.
 
-- [ ] **Step 3: Every script executable, every self-test green**
+- [x] **Step 3: Every script executable, every self-test green**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -2670,7 +2673,7 @@ git commit -m "chore: keep every script executable after the merge" \
 Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
 ```
 
-- [ ] **Step 4: The full suite, offline**
+- [x] **Step 4: The full suite, offline**
 
 With Docker stopped (`docker info` fails) and no key in the environment:
 
@@ -2682,7 +2685,7 @@ Expected: `BUILD SUCCESS` for every module. Record the total test count from the
 If Docker Desktop was running and could not be stopped, record that instead of claiming the
 "Docker stopped" clause — as `docs/verification/2026-m4-agenda-builder.md` did.
 
-- [ ] **Step 5: The FR checkboxes arrived as expected**
+- [x] **Step 5: The FR checkboxes arrived as expected**
 
 Run: `grep -nE "^\| \*\*.*FR-(07|08|10|11|14|15|16|18) " specs/2-user-stories.md`
 Expected: each of FR-07, FR-08, FR-10, FR-11, FR-14, FR-15, FR-16 and FR-18 at `` `[~]` ``. If any is
@@ -2745,7 +2748,7 @@ confirming a registration, ticket issuance, refund settlement, waitlist promotio
 read models — wait `kafkaWaitMs` in a pre-request script (`setTimeout`, which Postman's sandbox
 waits for before sending).
 
-- [ ] **Step 1: Watch the coverage check fail**
+- [x] **Step 1: Watch the coverage check fail**
 
 Run:
 ```bash
@@ -2759,7 +2762,7 @@ drift: in code, not in `specs/4`). The `postman` check fails with `exit 1`, beca
 file exists yet. If `inventory` lists fewer than 32 keys, Task 6 has not brought both sibling
 branches in — stop and do that first.
 
-- [ ] **Step 2: Write the generator**
+- [x] **Step 2: Write the generator**
 
 `postman/build_collection.py`:
 
@@ -3348,7 +3351,7 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
 ```
 
-- [ ] **Step 3: Generate both files and confirm they are JSON**
+- [x] **Step 3: Generate both files and confirm they are JSON**
 
 Run:
 ```bash
@@ -3361,7 +3364,7 @@ wrote converge.postman_collection.json and converge.postman_environment.json: 52
 both parse
 ```
 
-- [ ] **Step 4: Run the coverage check again**
+- [x] **Step 4: Run the coverage check again**
 
 Run: `python scripts/check_endpoints.py postman postman/converge.postman_collection.json postman/converge.postman_environment.json; echo "exit $?"`
 Expected: `OK  32 endpoints covered`, `exit 0`, and no `MISSING` or `UNKNOWN` lines. A `MISSING`
@@ -3369,7 +3372,7 @@ line names an endpoint that a sibling branch added after this plan was written: 
 to the matching folder function in the generator, regenerate, and re-run. An `UNKNOWN` line is a
 typo in a path, or a literal path segment where a `{{variable}}` belongs.
 
-- [ ] **Step 5: Prove `--check` can fail, then that it passes**
+- [x] **Step 5: Prove `--check` can fail, then that it passes**
 
 Run:
 ```bash
@@ -3383,7 +3386,7 @@ Expected, in order: `up to date: 52 requests in 9 folders` / `exit 0`; then
 `FAILED: postman/converge.postman_collection.json is out of date - run: python postman/build_collection.py`
 / `exit 1`; then regenerated, `up to date …` / `exit 0` (the regeneration restored the exact bytes).
 
-- [ ] **Step 6: Check the files are LF and deterministic**
+- [x] **Step 6: Check the files are LF and deterministic**
 
 Run:
 ```bash
@@ -3401,7 +3404,7 @@ PY
 Expected: `deterministic` and `LF only`. (`.gitattributes` normalises text to LF; the generator
 writes `\n` itself so a Windows run produces the same bytes as the committed file.)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add postman/build_collection.py postman/converge.postman_collection.json postman/converge.postman_environment.json
@@ -3467,7 +3470,7 @@ Conventions the document follows, so a reviewer can check any part of it in isol
   concierge and analytics map `HttpMessageNotReadableException`), so the description does not
   promise more than the code delivers.
 
-- [ ] **Step 1: Watch the checker fail on the current two-endpoint file**
+- [x] **Step 1: Watch the checker fail on the current two-endpoint file**
 
 Run:
 ```bash
@@ -3479,7 +3482,7 @@ Expected: thirty `MISSING  ...` lines — every endpoint except `POST 8081 /api/
 `x-java-record`, so they produce no `SCHEMA` line: the schema check applies only to schemas that
 name a record.)
 
-- [ ] **Step 2: Replace `specs/openapi-contract.yaml` with exactly this content**
+- [x] **Step 2: Replace `specs/openapi-contract.yaml` with exactly this content**
 
 ```yaml
 openapi: 3.0.3
@@ -5913,7 +5916,7 @@ components:
           example: '2026-10-09T04:03:40.016Z'
 ```
 
-- [ ] **Step 3: Check it parses, and count paths, operations and schemas**
+- [x] **Step 3: Check it parses, and count paths, operations and schemas**
 
 Run:
 ```bash
@@ -5921,7 +5924,7 @@ python -c "import yaml;d=yaml.safe_load(open('specs/openapi-contract.yaml',encod
 ```
 Expected: `30 32 41` — 30 path items, 32 operations, 41 schemas.
 
-- [ ] **Step 4: Run the checker until it passes**
+- [x] **Step 4: Run the checker until it passes**
 
 Run: `python scripts/check_endpoints.py openapi specs/openapi-contract.yaml; echo "exit $?"`
 Expected: `OK  32 endpoints covered`, no `MISSING`, `UNKNOWN` or `SCHEMA` line, `exit 0`.
@@ -5960,7 +5963,7 @@ rm -f /tmp/converge-openapi-params.py
 ```
 Expected: `path parameters consistent`, `exit 0`.
 
-- [ ] **Step 5: Prove the schema check can fail**
+- [x] **Step 5: Prove the schema check can fail**
 
 Run:
 ```bash
@@ -5977,7 +5980,7 @@ then `FAILED: 1 problem(s)`, and `exit 1`; `git status` then shows only
 ` M specs/openapi-contract.yaml` — the scratch copy is gone. If the checker printed `OK` on the
 broken copy, Task 1's schema check cannot fail: stop and fix Task 1 before committing.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add specs/openapi-contract.yaml
@@ -6005,7 +6008,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
 
 These are repository artefacts: they state what the code does. Write every file below exactly as given with the Write or Edit tool — not through a shell heredoc, which can rewrite the `\n` line breaks inside PlantUML labels.
 
-- [ ] **Step 1: Confirm the code on `main` is what these diagrams draw.** Every class, column, binding, mapping and code in Steps 4–10 was read from the sibling branches before they merged. Run this from the repository root:
+- [x] **Step 1: Confirm the code on `main` is what these diagrams draw.** Every class, column, binding, mapping and code in Steps 4–10 was read from the sibling branches before they merged. Run this from the repository root:
 
 ```bash
 R=registration-service/src/main/java/au/edu/uow/csci318/conference/registration
@@ -6117,7 +6120,7 @@ gate-congestion-threshold: PT2M
 
 **If any line differs, the code wins.** A `MISSING` line or a changed column, binding, mapping, code or tool name means a sibling branch changed after this plan was written: change the matching text in Steps 4–10 to what the code now says, and record it in the commit body. Section 8 guards the disagreement table in Step 10: `LLM_LOOP_LIMIT` and `LLM_RATE_LIMITED` each counted once in `specs/4` mean the old "concierge errors" row is resolved (it is left out below); a `2` on the third line means `specs/4` has gained the waitlist `GET` row, so drop the first half of row 16; a `0` on the fourth means FR-01's evidence was corrected, so drop row 14.
 
-- [ ] **Step 2: Write the check first.** It fails on a broken render (including a Smetana crash, which PlantUML writes into the SVG and still exits 0), a source without an SVG, a requirement without an activity diagram, an index that misses a file, and any first-pass statement the merged code has made untrue.
+- [x] **Step 2: Write the check first.** It fails on a broken render (including a Smetana crash, which PlantUML writes into the SVG and still exits 0), a source without an SVG, a requirement without an activity diagram, an index that misses a file, and any first-pass statement the merged code has made untrue.
 
 Create `docs/diagrams/check-diagrams.py` with exactly this content:
 
@@ -6172,7 +6175,7 @@ print(f"{len(sources)} diagram sources checked, {len(problems)} problem(s)")
 sys.exit(1 if problems else 0)
 ```
 
-- [ ] **Step 3: Render the current set and watch the check fail.**
+- [x] **Step 3: Render the current set and watch the check fail.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -6183,7 +6186,7 @@ python docs/diagrams/check-diagrams.py; echo "exit $?"
 
 Expected: exit `1`, with `FAILED:` lines that include `no activity diagram for FR-10` (and FR-11, FR-14, FR-15, FR-16, FR-18), `architecture.puml still says 'planned M3'`, `layers-analytics.puml still says '(empty on main)'` and `domain-event-links.iuml still says 'no caller on main'`; on the pre-merge tree it reported `28 diagram sources checked, 43 problem(s)`. (`UNKNOWN ENTITY` on stderr comes from `remove @unlinked` in the per-context domain diagrams and is harmless; it is filtered above.)
 
-- [ ] **Step 4: The six new activity diagrams.** Decision nodes follow the real checks in the order the code makes them, and every error branch names the status and `ApiError` code the service's `GlobalExceptionHandler` returns (`include/activity.iuml` conventions).
+- [x] **Step 4: The six new activity diagrams.** Decision nodes follow the real checks in the order the code makes them, and every error branch names the status and `ApiError` code the service's `GlobalExceptionHandler` returns (`include/activity.iuml` conventions).
 
 Create `docs/diagrams/activity-fr-10.puml` with exactly this content:
 
@@ -7047,7 +7050,7 @@ end note
 @enduml
 ```
 
-- [ ] **Step 5: Analytics — layers and topologies.** `layers-analytics.puml` replaces the skeleton placeholders; `streams-topologies.puml` draws the three topologies operator by operator.
+- [x] **Step 5: Analytics — layers and topologies.** `layers-analytics.puml` replaces the skeleton placeholders; `streams-topologies.puml` draws the three topologies operator by operator.
 
 Replace `docs/diagrams/layers-analytics.puml` with exactly this content:
 
@@ -7286,7 +7289,7 @@ endlegend
 @enduml
 ```
 
-- [ ] **Step 6: Domain model.** Three fragments are replaced whole, the analytics context gets a fragment and a detail diagram of its own, and the rest are edited. The overview includes the new fragment with `$overview` set, because Smetana crashes laying out the left-to-right overview with the analytics fragment's internal links (verified; the fragment guards them).
+- [x] **Step 6: Domain model.** Three fragments are replaced whole, the analytics context gets a fragment and a detail diagram of its own, and the rest are edited. The overview includes the new fragment with `$overview` set, because Smetana crashes laying out the left-to-right overview with the analytics fragment's internal links (verified; the fragment guards them).
 
 Replace `docs/diagrams/include/domain-registration.iuml` with exactly this content:
 
@@ -8439,7 +8442,7 @@ end note
   This context publishes and consumes no events.
 ```
 
-- [ ] **Step 7: Architecture, database and the saga.** The analytics inputs are one labelled edge rather than eight arrows (eight crossed the whole broker); its alerts get their own producer group.
+- [x] **Step 7: Architecture, database and the saga.** The analytics inputs are one labelled edge rather than eight arrows (eight crossed the whole broker); its alerts get their own producer group.
 
 Replace `docs/diagrams/architecture.puml` with exactly this content:
 
@@ -8920,7 +8923,7 @@ endlegend
 @enduml
 ```
 
-- [ ] **Step 8: Layered architecture of the three services that changed.**
+- [x] **Step 8: Layered architecture of the three services that changed.**
 
 Replace `docs/diagrams/layers-registration.puml` with exactly this content:
 
@@ -9500,7 +9503,7 @@ PaymentEventConsumers --> ProcessedEventStore : markProcessed(eventId)
   a USED ticket is left as it is.
 ```
 
-- [ ] **Step 9: Bring the existing activity diagrams up to date.** FR-06 and FR-09 lose their second-pass comments, FR-07 and FR-06 carry `firstSessionStartsAt`, FR-08 now settles a late payment by reversing it, and FR-17's loop ceiling is `502 LLM_LOOP_LIMIT`, no longer a bare `500`.
+- [x] **Step 9: Bring the existing activity diagrams up to date.** FR-06 and FR-09 lose their second-pass comments, FR-07 and FR-06 carry `firstSessionStartsAt`, FR-08 now settles a late payment by reversing it, and FR-17's loop ceiling is `502 LLM_LOOP_LIMIT`, no longer a bare `500`.
 
 **`docs/diagrams/activity-fr-06.puml`** — 4 edit(s), each with the Edit tool (the old text occurs exactly once):
 
@@ -9731,7 +9734,7 @@ key: registrationId>
   AgentLoopLimitException → 502 LLM_LOOP_LIMIT.
 ```
 
-- [ ] **Step 10: Data ownership, the index and the disagreement list, and the footer date.** Rows 1–15 of the disagreement table are the first pass's, renumbered after dropping the resolved concierge-errors row and updated where the merged code changed them (rows 8, 9, 11, 12); rows 16–24 are new.
+- [x] **Step 10: Data ownership, the index and the disagreement list, and the footer date.** Rows 1–15 of the disagreement table are the first pass's, renumbered after dropping the resolved concierge-errors row and updated where the merged code changed them (rows 8, 9, 11, 12); rows 16–24 are new.
 
 Replace `docs/diagrams/data-ownership.md` with exactly this content:
 
@@ -9941,7 +9944,7 @@ grep -n "footer" docs/diagrams/include/style.iuml
 
 Expected: one `footer Converge · CSCI318 · generated by Claude Code from the repository source, <today> · see docs/diagrams/README.md` line.
 
-- [ ] **Step 11: Render everything and run the check.**
+- [x] **Step 11: Render everything and run the check.**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -9953,7 +9956,7 @@ python docs/diagrams/check-diagrams.py; echo "exit $?"
 
 Expected: no output from PlantUML, then `36 diagram sources checked, 0 problem(s)` and `exit 0`. If PlantUML prints `Error line N in file: X.puml`, open that line: a label line that ends in `<` or `>` is read as an accept/send signal, and a `;` inside an activity label ends the label.
 
-- [ ] **Step 12: Prove the check catches a layout crash, then restore.**
+- [x] **Step 12: Prove the check catches a layout crash, then restore.**
 
 ```bash
 cp docs/diagrams/domain-model.puml docs/diagrams/domain-model.puml.bak
@@ -9967,9 +9970,9 @@ python docs/diagrams/check-diagrams.py; echo "exit $?"
 
 Expected: first `FAILED: domain-model.svg contains 'An error has occured'` and `exit 1`; after the restore, `0 problem(s)` and `exit 0`. `git status --short docs/diagrams` must not list `domain-model.puml.bak`.
 
-- [ ] **Step 13: Look at the four busiest diagrams.** Open `docs/diagrams/svg/architecture.svg`, `activity-fr-11.svg`, `activity-fr-18.svg` and `domain-model.svg` in a browser. Every box is readable and no label sits on top of another; analytics-service has one labelled input edge. A layout that is merely wide is acceptable — the report scales SVGs.
+- [x] **Step 13: Look at the four busiest diagrams.** Open `docs/diagrams/svg/architecture.svg`, `activity-fr-11.svg`, `activity-fr-18.svg` and `domain-model.svg` in a browser. Every box is readable and no label sits on top of another; analytics-service has one labelled input edge. A layout that is merely wide is acceptable — the report scales SVGs.
 
-- [ ] **Step 14: Commit.**
+- [x] **Step 14: Commit.**
 
 ```bash
 git add docs/diagrams
@@ -10018,7 +10021,7 @@ paste warning, the explanation that the replica on 8082 is fed only by Kafka, th
 explanation and the troubleshooting entries. What is fixed: the stale `docs/meetings/` row (that
 folder no longer exists), the "(fill in)" team table, the milestone table, and the missing scripts.
 
-- [ ] **Step 1: Run the checker against the current README and watch it fail**
+- [x] **Step 1: Run the checker against the current README and watch it fail**
 
 Run: `python scripts/check_endpoints.py readme README.md; echo "exit $?"`
 Expected: nineteen `MISSING  <endpoint>` lines for the endpoints the current README never calls
@@ -10027,7 +10030,7 @@ Expected: nineteen `MISSING  <endpoint>` lines for the endpoints the current REA
 (`GET 8081 /api/v1/events/no-such-event` and `POST 8084 /api/v1/gates/north-1/check-ins`),
 `FAILED: 31 problem(s)`, and `exit 1`.
 
-- [ ] **Step 2: Replace `README.md` with exactly this content**
+- [x] **Step 2: Replace `README.md` with exactly this content**
 
 ````markdown
 # Converge — Conference & Event Registration Platform
@@ -10821,7 +10824,7 @@ Claude Code was used throughout development. Where its proposals were accepted, 
 rejected, and why, is recorded in [`docs/ai-collaboration-log.md`](docs/ai-collaboration-log.md).
 ````
 
-- [ ] **Step 3: Run the checker again**
+- [x] **Step 3: Run the checker again**
 
 Run: `python scripts/check_endpoints.py readme README.md; echo "exit $?"`
 Expected: `OK  32 endpoints covered` and `exit 0`; no `MISSING`, no `UNKNOWN`. If an endpoint is
@@ -10829,12 +10832,12 @@ reported `MISSING`, add a `curl` for it to the matching FR section — do not we
 Prose that mentions curl without a `http://localhost` URL (prerequisites, the PowerShell note)
 yields no endpoint and is ignored by the checker.
 
-- [ ] **Step 4: British spelling sweep**
+- [x] **Step 4: British spelling sweep**
 
 Run: `grep -n -i -E "organizer|behavior|\bcolor\b|\blicense\b|initialize|analyze" README.md`
 Expected: no output.
 
-- [ ] **Step 5: Every file and script the README names exists**
+- [x] **Step 5: Every file and script the README names exists**
 
 ```bash
 for f in scripts/run-all.sh scripts/run-all.ps1 scripts/stop-all.sh scripts/stop-all.ps1 \
@@ -10852,7 +10855,7 @@ done; echo done
 Expected: only `done`. A `MISSING` line means a task this one depends on is not finished — stop
 and finish it rather than deleting the line from the README.
 
-- [ ] **Step 6: Check the configuration table against the code**
+- [x] **Step 6: Check the configuration table against the code**
 
 ```bash
 grep -n -E "hold-window|sweep-interval|time-zone" registration-service/src/main/resources/application.yml
@@ -10865,7 +10868,7 @@ Expected: `hold-window: PT2M`, `sweep-interval: PT10S`, `time-zone: Australia/Sy
 defaults the README's *Settings* table states. If any differs on `main`, correct the README row,
 not the YAML.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add README.md
@@ -10889,7 +10892,7 @@ task: it produces `logs/live-run-<ts>/` (gitignored), and Task 12 writes only fr
 - Produces: `RUN=logs/live-run-<YYYYmmdd-HHMMSS>` — the folder Task 12 reads, with the layout listed
   in Task 4.
 
-- [ ] **Step 1: Preconditions — clean tree, nobody else's JVMs, a key**
+- [x] **Step 1: Preconditions — clean tree, nobody else's JVMs, a key**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -10921,7 +10924,7 @@ done
 ```
 Expected: six `ok`.
 
-- [ ] **Step 2: Docker Desktop up**
+- [x] **Step 2: Docker Desktop up**
 
 ```bash
 docker info > /dev/null 2>&1 && echo "docker is up" || ( "/c/Program Files/Docker/Docker/Docker Desktop.exe" > /dev/null 2>&1 & )
@@ -10930,7 +10933,7 @@ Then wait until `docker info` succeeds, polling every few seconds for up to thre
 Code, the Monitor tool with `until docker info > /dev/null 2>&1; do sleep 3; done`).
 Expected: `docker info` exits 0.
 
-- [ ] **Step 3: A clean broker**
+- [x] **Step 3: A clean broker**
 
 ```bash
 bash scripts/stop-all.sh
@@ -10940,7 +10943,7 @@ Expected: `nothing to stop`; the two containers recreated. `-v` discards every t
 offset in this run starts from zero and the counts are unambiguous. (This is also why analytics is
 always started after this step, never left running across it.)
 
-- [ ] **Step 4: Start everything, with a 20-second hold window**
+- [x] **Step 4: Start everything, with a 20-second hold window**
 
 ```bash
 CONFERENCE_REGISTRATION_HOLD_WINDOW=PT20S bash scripts/run-all.sh
@@ -10958,7 +10961,7 @@ $env:CONFERENCE_REGISTRATION_HOLD_WINDOW = 'PT20S'
 powershell -ExecutionPolicy Bypass -File scripts\run-all.ps1 -NoBuild
 ```
 
-- [ ] **Step 5: The run**
+- [x] **Step 5: The run**
 
 Run with `run_in_background: true` (it takes fifteen to twenty minutes, mostly Gemini cooldowns):
 
@@ -10974,7 +10977,7 @@ RUN=$(ls -d logs/live-run-* | tail -1); echo "$RUN"; cat "$RUN/summary.md"
 ```
 Expected: seven rows, or eight with `--with-expiry` (the extra row is `02a expiry-evidence`). Record each verdict as it is — this is the run.
 
-- [ ] **Step 6: If a script failed**
+- [x] **Step 6: If a script failed**
 
 - **`demo-m4` or `demo-m4-support` failed on Gemini quota** (`429 LLM_RATE_LIMITED` in its `.txt`):
   wait at least two minutes, then run that one script once more as a **supplementary** run, kept
@@ -10988,7 +10991,7 @@ Expected: seven rows, or eight with `--with-expiry` (the extra row is `02a expir
   the cause, and **stop and tell Hayden** before changing any code — a code fix is outside this plan
   and needs its own task and a fresh run of the whole of this task.
 
-- [ ] **Step 7: Stop the services**
+- [x] **Step 7: Stop the services**
 
 ```bash
 bash scripts/stop-all.sh
@@ -11024,14 +11027,14 @@ what the code should do.
 - Produces: four notes in the shape of `docs/verification/2026-m2-registration-saga.md`; FR marks
   that Task 13 and the README cite.
 
-- [ ] **Step 1: Read the capture**
+- [x] **Step 1: Read the capture**
 
 ```bash
 RUN=$(ls -d logs/live-run-* | tail -1)
 cat "$RUN/summary.md" "$RUN/environment.txt"; ls "$RUN" "$RUN/analytics" "$RUN/topics"
 ```
 
-- [ ] **Step 2: Decide each FR from the evidence**
+- [x] **Step 2: Decide each FR from the evidence**
 
 An FR moves to `[x]` only when **every** observation in its row is in the capture. Anything short of
 that stays `[~]`, with the missing observation named.
@@ -11052,7 +11055,7 @@ that stays `[~]`, with the missing observation named.
 are already `[x]`; if this run contradicts one of them, say so in the matching note and tell Hayden —
 do not quietly leave it ticked.
 
-- [ ] **Step 3: Write `docs/verification/2026-m2-payment-saga.md`**
+- [x] **Step 3: Write `docs/verification/2026-m2-payment-saga.md`**
 
 Shape and headings fixed; every value from the capture:
 
@@ -11112,7 +11115,7 @@ was hand-injected; no service called another over HTTP.
 <Each defect this run exposed, with cause and fix — or "None.">
 ```
 
-- [ ] **Step 4: Write `docs/verification/2026-m3-refunds-waitlist.md`**
+- [x] **Step 4: Write `docs/verification/2026-m3-refunds-waitlist.md`**
 
 ```markdown
 # M3 verification — the waitlist and refunds on a live broker
@@ -11168,7 +11171,7 @@ registration; this run cannot force that. If `grep -c LATE_PAYMENT_REVERSAL "$RU
 prints `0`, the row says **not observed in this run**, and FR-07's refinement in `specs/2` keeps its
 "tested offline" wording.
 
-- [ ] **Step 5: Write `docs/verification/2026-m3-analytics.md`**
+- [x] **Step 5: Write `docs/verification/2026-m3-analytics.md`**
 
 ```markdown
 # M3 verification — the stream-processing read models on a live broker
@@ -11226,7 +11229,7 @@ paid registrations, one at a time; the ten ticket holders checked in at a fresh 
 <Each defect, or "None.">
 ```
 
-- [ ] **Step 6: The *Live run against Gemini* section of `docs/verification/2026-m4-support-agent.md`**
+- [x] **Step 6: The *Live run against Gemini* section of `docs/verification/2026-m4-support-agent.md`**
 
 Replace the section's body (`Pending (M5 live run): scripts/demo-m4-support.sh.`) with:
 
@@ -11264,7 +11267,7 @@ say which conversation>. Build `<commit>`.
 beyond what is listed above.">
 ```
 
-- [ ] **Step 7: Flip the checkboxes in `specs/2-user-stories.md`**
+- [x] **Step 7: Flip the checkboxes in `specs/2-user-stories.md`**
 
 Follow the rules at the top of that file. For each FR that Step 2 says moves to `[x]`: change its
 overview row to `` `[x]` `` and replace the first bullet of its section with
@@ -11301,7 +11304,7 @@ PY
 Expected: `ok: 18 stories, …; overview and sections agree`. (Before this step it reads
 `… 10 delivered, 8 partial, 0 not started …` once both sibling branches have closed out.)
 
-- [ ] **Step 8: Markers and error codes in `specs/4-api-endpoints.md`**
+- [x] **Step 8: Markers and error codes in `specs/4-api-endpoints.md`**
 
 Every endpoint now exists, so remove every remaining milestone marker from the tables
 (` *(M2)*`, ` *(M3)*`, ` *(M4)*`, ` (M4)`):
@@ -11323,7 +11326,7 @@ Add each code that is returned but not listed, under its HTTP status — expecte
 the concierge. Add nothing else; no new rows (the missing `GET /sessions/{sessionId}/waitlist` row is
 Hayden's — Notes for Hayden, item 3).
 
-- [ ] **Step 9: Refresh the README status table, then check everything**
+- [x] **Step 9: Refresh the README status table, then check everything**
 
 Make *Project status* in `README.md` agree row for row with the overview table in `specs/2`, rewrite
 the legend sentence under it if no `[~]` remains "live run pending", and set the milestone rows M2–M5
@@ -11338,7 +11341,7 @@ git diff --stat
 ```
 Expected: `OK  32 endpoints covered`; `no key`; `British`; only the files listed for this task.
 
-- [ ] **Step 10 (optional — only if the capture holds a clean `registration-requested` line): extend the wire anchor**
+- [x] **Step 10 (optional — only if the capture holds a clean `registration-requested` line): extend the wire anchor**
 
 The analytics serdes are anchored to one live message (`ProducerWireTest`, from M1). A live
 `registration-requested` adds the shape the funnel and the payment hop depend on: money as a JSON
@@ -11372,7 +11375,7 @@ first line of `$RUN/topics/registration-requested.txt` (after ` :: `) into a new
 `./mvnw -q -pl analytics-service -am test -Dtest=ProducerWireTest -Dsurefire.failIfNoSpecifiedTests=false`
 → passes. Skip this step entirely if the capture has no such line.
 
-- [ ] **Step 11: Commit, one note per commit**
+- [x] **Step 11: Commit, one note per commit**
 
 ```bash
 git add docs/verification/2026-m2-payment-saga.md
@@ -11409,7 +11412,7 @@ same two trailer lines.
 - Modify: `docs/ai-collaboration-log.md` (append)
 - Modify: `docs/superpowers/plans/2026-10-09-m5-submission.md` (status line, checkboxes)
 
-- [ ] **Step 1: The AI collaboration log**
+- [x] **Step 1: The AI collaboration log**
 
 Append one entry per AI proposal that was accepted with consequence, modified or rejected during this
 plan's execution, in the file's existing table format (`Member: Hayden Hill`,
@@ -11449,7 +11452,7 @@ plan's execution, in the file's existing table format (`Member: Hayden Hill`,
 
 Add an entry for every defect the live run caught (Task 11 Step 6), in the same format.
 
-- [ ] **Step 2: Everything green, offline**
+- [x] **Step 2: Everything green, offline**
 
 ```bash
 docker compose down
@@ -11466,7 +11469,7 @@ done
 Expected: `BUILD SUCCESS` (record whether Docker Desktop itself was still running); three
 `OK  32 endpoints covered`; `up to date`; six `ok`.
 
-- [ ] **Step 3: Mark this plan, commit**
+- [x] **Step 3: Mark this plan, commit**
 
 At the top of this plan replace `**Status: not started.**` with
 `**Status: Tasks 1–13 complete on feat/m5-submission; live run <ts>. Awaiting Hayden's merge to main.**`
@@ -11479,7 +11482,7 @@ git commit -m "docs: close out M5" \
 Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
 ```
 
-- [ ] **Step 4: The candidate zip**
+- [x] **Step 4: The candidate zip**
 
 ```bash
 bash scripts/package-submission.sh; echo "exit $?"
@@ -11491,7 +11494,7 @@ If the **only** failure is the unfinished-draft marker in
 for Hayden, item 1) — do not edit that file or weaken the check without his decision. The zip that is
 actually submitted is built again on `main` after the merge, so its name carries `main`'s commit.
 
-- [ ] **Step 5: Hand over**
+- [x] **Step 5: Hand over**
 
 Tell Hayden, briefly: the branch is ready to merge (his call — never merge to `main` without asking);
 the live-run folder and its verdicts; which FRs moved; the zip's size; and the open items in *Notes
@@ -11502,30 +11505,30 @@ submit.
 
 ## Definition of Done
 
-- [ ] `scripts/services.conf` and `scripts/check_endpoints.py` exist; the checker's `--self-test`
+- [x] `scripts/services.conf` and `scripts/check_endpoints.py` exist; the checker's `--self-test`
       passes and was seen to fail with a check deliberately broken.
-- [ ] `run-all` and `stop-all` exist for Bash and PowerShell; every self-test passes and was seen to
+- [x] `run-all` and `stop-all` exist for Bash and PowerShell; every self-test passes and was seen to
       fail when broken; `stop-all` never matches a sibling worktree's JVM.
-- [ ] `demo-m3-analytics.sh`, `demo-all.sh` and `package-submission.sh` exist with self-tests that
+- [x] `demo-m3-analytics.sh`, `demo-all.sh` and `package-submission.sh` exist with self-tests that
       pass and were seen to fail.
-- [ ] `mvnw` and every `scripts/*.sh` are committed `100755`.
-- [ ] Both sibling branches merged in (Task 6); `./mvnw clean test` green offline with no key; the
+- [x] `mvnw` and every `scripts/*.sh` are committed `100755`.
+- [x] Both sibling branches merged in (Task 6); `./mvnw clean test` green offline with no key; the
       total recorded.
-- [ ] `python scripts/check_endpoints.py postman …`, `openapi …` and `readme …` each print
+- [x] `python scripts/check_endpoints.py postman …`, `openapi …` and `readme …` each print
       `OK  32 endpoints covered`; `python postman/build_collection.py --check` passes.
-- [ ] `docs/diagrams/` second pass rendered with no `Syntax Error`, `[From ` or `Cannot find Graphviz`
+- [x] `docs/diagrams/` second pass rendered with no `Syntax Error`, `[From ` or `Cannot find Graphviz`
       in any SVG.
-- [ ] One live run captured under `logs/live-run-<ts>/` from a clean broker, all six services started
+- [x] One live run captured under `logs/live-run-<ts>/` from a clean broker, all six services started
       by `run-all`, and stopped afterwards with `stop-all`.
-- [ ] Four verification notes written from that capture only, with no API key in any committed file.
-- [ ] **FR checkboxes ticked** in `specs/2-user-stories.md` — each of FR-07, FR-08, FR-10, FR-11,
+- [x] Four verification notes written from that capture only, with no API key in any committed file.
+- [x] **FR checkboxes ticked** in `specs/2-user-stories.md` — each of FR-07, FR-08, FR-10, FR-11,
       FR-14, FR-15, FR-16 and FR-18 moved to `[x]` only where its row in Task 12 Step 2 was observed,
       otherwise left `[~]` naming what was not observed; overview and sections agree; summary line and
       date updated.
-- [ ] `specs/4`: no milestone markers left; returned-but-unlisted error codes added; nothing else
+- [x] `specs/4`: no milestone markers left; returned-but-unlisted error codes added; nothing else
       changed in `specs/` except `openapi-contract.yaml`.
-- [ ] README status table matches `specs/2`.
-- [ ] AI collaboration log entries appended; a candidate zip built (or its one refusal reported to
+- [x] README status table matches `specs/2`.
+- [x] AI collaboration log entries appended; a candidate zip built (or its one refusal reported to
       Hayden).
 
 ## Notes for Hayden
