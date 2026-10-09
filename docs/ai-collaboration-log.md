@@ -354,3 +354,33 @@ than delegation.
 | **Decision** | **Modified** — a guard was added after the flaw was found while rewriting the demonstration script |
 | **Rationale** | Charging on receipt removes the "abandoned at the payment step" case that hold expiry was designed for; expiry now only happens when payment-service is down. That exposed a worse failure. Kafka keeps the messages payment missed, so when payment-service restarts it consumes them — and would have charged every attendee whose hold had already expired and whose seats registration had already put back on sale. Registration would then refuse the late confirmation, leaving money taken with no ticket and no refund path until FR-11. The fix puts `holdExpiresAt` on the event. Past that deadline payment records the order `FAILED` with reason `HOLD_EXPIRED` and never calls the gateway. It also protects a fresh consumer group reading an old topic from the start. A window of a few seconds remains between the deadline and the sweeper's next run, and it is documented rather than claimed closed. Two smaller decisions went the other way: a free registration skips payment entirely instead of payment accepting a zero order, because `3-domain-models.md` §4.1 says an order is for more than zero; and an order gets a single attempt, because registration cancels on the first `payment-failed` and a retry would charge for seats already released. |
 | **Artefact** | `PaymentOrder.pay`; `RegistrationRequested.holdExpiresAt`; `specs/2-user-stories.md` FR-06 and FR-07 refinements; `scripts/demo-m2.sh` steps 6–7 |
+
+---
+
+## 2026-10-09 — The race fix chosen from three options, and a fourth defect the test exposed
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Testing, implementation (M3) |
+| **What was asked** | Close the session-replica race found live on 2026-09-14, failing concurrency test first |
+| **What was proposed** | Three options from the evidence bank: carry capacity on `session-added`; make capacity nullable; retry the projection on a key violation |
+| **Decision** | **Modified** — the first rejected, the other two combined, and a fourth change added |
+| **Rationale** | Carrying capacity on `session-added` would reintroduce two topics writing one field, the race `SessionAdded`'s Javadoc already argues against. A nullable capacity was needed even without concurrency, because the two events travel on different topics and the description can arrive first. The retry heals a lost insert in milliseconds. Designing the forced-interleaving test exposed an outcome worse than the one seen live: with a primitive `long` version, the loser's fresh row is merged rather than inserted, and a merge that runs after the winner commits finds the row at the same version and overwrites the winner's half with no exception — nothing to retry, a session half-replicated for good. (`RegistrationControllerTest`'s setup comment had already met the same merge behaviour from the other side.) A `Long` version makes Spring Data insert a fresh row, so a lost race always raises. **Evidence, before the fix** (three tests against the unchanged code): the live symptom reproduced as a primary-key violation on `SESSION_VIEWS`; the user-visible symptom as `SessionFullException: … only 0 remain` for a session whose capacity had not arrived; and the new defect as `[the capacity half] expected: 120 but was: 0` with no exception logged anywhere — the old code silently overwrote the capacity half. **Evidence, after the fix**: with the nullable capacity and the retry in place but `long` temporarily put back, the same test still failed (`[the capacity half] Expecting actual not to be null`), again with no exception and so no retry. The retry alone does not close the race; `Long` is load-bearing, and was restored. |
+| **Artefact** | `SessionReplicaRaceTest`; `SessionView`; `SessionViewProjection`; `ConflictRetry` |
+
+## 2026-10-09 — A test-binder detail that makes self-consumption a transaction trap
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Architecture, testing (M3) |
+| **What was asked** | Promote from the waitlist when registration consumes its own `seats-released` |
+| **What was proposed** | A consumer calling an ordinary `@Transactional` application method, as every other consumer does |
+| **Decision** | **Modified** — the promotion and the processed-event claim run `REQUIRES_NEW` |
+| **Rationale** | The Spring Cloud Stream test binder keys producer and consumer channels on the same destination name (`TestChannelBinderProvisioner`, checked in 4.3.3), so a message registration publishes after commit is delivered synchronously to its own consumer, from inside the publisher's transaction completion: in spring-tx 6.2.19 `@TransactionalEventListener(AFTER_COMMIT)` listeners fire from `afterCompletion`. A `REQUIRED` transaction there joins the committed one, which cannot register its own after-completion work; the log reads "processing Spring after-completion callbacks immediately, with outcome status 'unknown'", the promotion reports success, and its writes vanish (the place stayed `WAITING`). **Proved, not assumed:** with `REQUIRES_NEW` switched off on `promoteFor`, the end-to-end promotion test failed at `waitlist-promoted` (`Expecting actual not to be null`) while the three tests that send `seats-released` themselves still passed; restoring it made all four pass. The same loopback is what lets that test prove the whole no-REST loop in-JVM. **A second consequence found on the way:** once registration consumed its own `seats-released`, the test binder's single shared channel meant the output capture never attached, so four existing assertions failed and two others — `receive(500, "seats-released")).isNull()` in `RefundEventConsumersTest` — had silently stopped testing anything and would have passed whatever registration did. They were repaired with a test-only `SeatsReleasedTap` interceptor; any later assertion on that destination must use it. |
+| **Artefact** | `WaitlistApplicationService.promoteFor`; `ProcessedEventStore.markProcessed`; `WaitlistPromotionTest`; `SeatsReleasedTap` |

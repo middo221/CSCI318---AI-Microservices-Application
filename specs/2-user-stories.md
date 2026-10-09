@@ -14,7 +14,7 @@ planned**, and it is maintained by hand.
 | `[~]` | Partially delivered — one side of the story exists, the other does not |
 | `[ ]` | Not started |
 
-**Last checked against the code:** 2026-09-15 — 10 delivered, 2 partial, 6 not started.
+**Last checked against the code:** 2026-10-09 — 10 delivered, 4 partial, 4 not started.
 
 ### Updating these checkboxes is part of delivering a story
 
@@ -48,9 +48,9 @@ crosses a service boundary is delivered when it has been observed crossing it.
 | **Event Catalog** | FR-04 | Adjust a published session's capacity | Organiser | | `[x]` |
 | **Event Catalog** | FR-05 | Browse and search the published catalogue | Attendee, Organiser | | `[x]` |
 | **Registration** | FR-06 | Register for one or more sessions | Attendee | | `[x]` |
-| **Registration** | FR-10 | Join a waitlist for a full session | Attendee | | `[ ]` |
+| **Registration** | FR-10 | Join a waitlist for a full session | Attendee | | `[~]` |
 | **Payment** | FR-07 | Pay for a registration and receive a ticket | Attendee | | `[~]` |
-| **Payment** | FR-11 | Request a refund | Attendee | | `[ ]` |
+| **Payment** | FR-11 | Request a refund | Attendee | | `[~]` |
 | **Ticketing** | FR-12 | Transfer a ticket to another person | Attendee | | `[x]` |
 | **Ticketing** | FR-13 | Check in at a gate | Gate staff, Attendee | | `[x]` |
 | **System** | FR-08 | Confirm registration and issue tickets on payment | *(system)* | | `[~]` |
@@ -112,9 +112,9 @@ crosses a service boundary is delivered when it has been observed crossing it.
 
 ### FR-06: Register for one or more sessions
 - [x] **Delivered** — `POST /api/v1/registrations`, the `Registration` aggregate,
-  `SeatAllocationService` and `RegistrationPricingService`. **Caveat:** in M2 a registration
-  containing any full session is refused entirely with `409 SESSION_FULL`; step 3's fall-through
-  to the waitlist arrives with FR-10.
+  `SeatAllocationService` and `RegistrationPricingService`. **Caveat:** a registration containing any full
+  session is still refused entirely with `409 SESSION_FULL`; since FR-10 the attendee joins that
+  session's waitlist explicitly rather than falling through to it — see FR-10.
 - **As an** Attendee, **I want to** register for one or more sessions in a single request,
   **so that** my seats are held while I pay.
 - **Scenario:**
@@ -135,7 +135,19 @@ crosses a service boundary is delivered when it has been observed crossing it.
   ticketing still issues its tickets.
 
 ### FR-10: Join a waitlist for a full session
-- [ ] **Not started** — M3. No `Waitlist` aggregate exists yet; see `3-domain-models.md` §3.3.
+- [~] **Implemented and tested offline; live-broker run pending (M5 live run).**
+  `POST` / `GET /api/v1/sessions/{sessionId}/waitlist` on `WaitlistController`, the `Waitlist`
+  aggregate, and `WaitlistEventConsumers.seatsReleased` — registration consuming its own
+  `seats-released` and emitting `waitlist-promoted`, with no REST call anywhere. Proven in-JVM end to
+  end by `WaitlistPromotionTest` (`payment-failed` → `seats-released` → `waitlist-promoted`).
+  `scripts/demo-m3.sh` is the live run.
+- **Refinement — joining is explicit.** A registration naming a full session is still refused with
+  `409 SESSION_FULL`; the attendee then joins with `POST /sessions/{id}/waitlist`
+  (`409 SESSION_NOT_FULL` while seats remain, `409 ALREADY_WAITLISTED` for a duplicate). Falling
+  through inside one registration would create a registration whose composition nobody chose.
+- **Refinement — promotion is an offer.** On `seats-released` the first
+  `min(quantity, seats now free)` waiting entries are promoted; nothing is held for them, and they
+  register in the ordinary way. An entry holds an `attendeeId` only.
 - **As an** Attendee, **I want to** join a waitlist when a session is full, **so that** I am
   offered a seat if one is released.
 - **Scenario:** when `seats-released` is observed for that session, the head of the waitlist
@@ -162,9 +174,10 @@ crosses a service boundary is delivered when it has been observed crossing it.
 - **Refinement — never charge for seats that are no longer held.** `registration-requested` carries
   `holdExpiresAt`. Past it, payment records the order `FAILED` with reason `HOLD_EXPIRED` and never
   calls the gateway, so a payment-service that was down longer than the hold window cannot take
-  money for seats registration has already released. A charge that lands in the few seconds
-  between the deadline and the sweeper's next run is still possible; closing that needs refunds
-  (FR-11).
+  money for seats registration has already released. A charge that lands in the few seconds between the deadline and the sweeper's next run is now
+  **reversed**: registration answers a `payment-succeeded` for an `EXPIRED` or `CANCELLED`
+  registration with a `refund-requested` of kind `LATE_PAYMENT_REVERSAL`, and payment returns it in
+  full without consulting the policy (FR-11). Tested offline; live run pending (M5).
 - **As an** Attendee, **I want to** pay for my registration, **so that** I receive tickets.
 - **Scenario:**
   1. `payment-service` consumes `registration-requested` and creates a `PaymentOrder`.
@@ -173,8 +186,23 @@ crosses a service boundary is delivered when it has been observed crossing it.
      are issued (FR-08).
 
 ### FR-11: Request a refund
-- [ ] **Not started** — M3. `RefundPolicyService` does not exist yet, and FR-18's agent depends
-  on it.
+- [~] **Implemented and tested offline; live-broker run pending (M5 live run).**
+  `POST /api/v1/registrations/{id}/refund-requests` emits `refund-requested`; `payment-service`
+  decides it with the pure `RefundPolicyService` (injected `Clock`), records a `Refund`, and emits
+  `refund-issued` or `refund-declined`; registration refunds the registration — releasing its seats,
+  which promotes the waitlist — or settles the request; ticketing voids the tickets.
+  `GET /refund-policy/quote` and the organiser override `POST /payment-orders/{id}/refunds` serve
+  FR-18. Proven with the test binder in `RefundRequestedConsumerTest`, `RefundEventConsumersTest`
+  and ticketing's `PaymentEventConsumersTest`.
+- **Refinement — days to the first session.** Counted in whole days to the registration's earliest
+  session, carried as `registration-requested.firstSessionStartsAt` and read in
+  `conference.registration.time-zone` (Australia/Sydney). An order raised before that field existed
+  is quoted `EVENT_DATE_UNKNOWN` and declined; the organiser override refunds it.
+- **Refinement — any issued refund ends the registration.** At 50% or 100% the registration becomes
+  `REFUNDED`, its seats are released and its tickets voided. A 0% outcome is a decline, never a 0%
+  refund.
+- **Refinement — event cancellation.** The policy honours "event cancelled → 100%" and is tested on
+  it, but nothing produces `event-cancelled` yet.
 - **As an** Attendee, **I want to** request a refund, **so that** I recover money when I
   cannot attend.
 - **Acceptance:** evaluated by `RefundPolicyService` against days remaining until the event —
