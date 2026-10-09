@@ -6247,7 +6247,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
 
 - [x] `./mvnw clean test` green across every module with Docker stopped, no network and **no
       `GEMINI_API_KEY`**; live Gemini is never called by the default build
-- [x] FR-18 delivered behind `POST /api/v1/concierge/support`; `GET /api/v1/concierge/escalations` serves the queue
+- [x] FR-18 implemented behind `POST /api/v1/concierge/support`; `GET /api/v1/concierge/escalations` serves the queue
 - [x] Six tools, each tested on its arguments as well as its results
 - [x] **No tool takes an attendee id, and every registration-scoped tool refuses a registration the requester does not hold**
 - [x] **`requestRefund` fetches its own quote and refuses above 200.00 AUD per conversation, telling the agent to escalate**

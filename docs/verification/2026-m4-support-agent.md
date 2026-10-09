@@ -4,6 +4,7 @@
 **Verified by:** Hayden (driven by Claude Code, executing the M4 support-agent plan)
 **Build:** branch `feat/m4-support-agent`
 **Requirement:** FR-18
+**Origin:** Written by Claude Code from the captured output below, at Hayden Hill's direction, 2026-10-09.
 
 ## What was verified
 
@@ -170,7 +171,7 @@ refunded for another attendee, the cap holds, and the false reply never reaches 
 (`aPromptInjectedModelCanNeitherRefundSomeoneElseNorExceedTheLimit`,
 `aPromptInjectionGetsNoRefundAndNoFalsePromise`).
 
-[DRAFT — put in your own words] The common thread is that each guarantee lives where a prompt
+The common thread is that each guarantee lives where a prompt
 cannot reach it: identity in how the tools are constructed, the limit in `RefundGuard`, and the
 outcome in the application service's reading of the tools' record. The system prompt still
 instructs the model, but nothing above depends on its obeying.
@@ -185,7 +186,7 @@ instructs the model, but nothing above depends on its obeying.
 - A model can still word a false promise without claiming an outcome; only a mismatched claim is
   caught. The `outcome`, `refunds` and `escalations` fields are always true.
 - A refund `POST` that times out after registration accepted it is reported as not requested; the
-  agent offers escalation, and registration's `409 REFUND_ALREADY_REQUESTED` makes a retry safe.
+  agent offers escalation, and, per the agreed FR-11 contract, registration's `409 REFUND_ALREADY_REQUESTED` makes a retry safe (that endpoint is on another branch).
 - Escalations are held in memory and lost on restart.
 - The payment and registration adapters are tested against the contract agreed with the FR-11
   track, not against those services running.
