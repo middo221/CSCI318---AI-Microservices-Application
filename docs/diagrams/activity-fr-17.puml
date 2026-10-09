@@ -113,9 +113,9 @@ note right
   RateLimitException → 429 LLM_RATE_LIMITED
   TimeoutException → 504 LLM_TIMEOUT
   other LangChain4jException → 502 LLM_UNAVAILABLE
-  More than 12 tool round trips → LangChain4j throws
-  a plain RuntimeException, which no handler maps
-  (Spring's default 500).
+  More than 12 tool round trips → LoopLimit turns
+  LangChain4j's plain RuntimeException into
+  AgentLoopLimitException → 502 LLM_LOOP_LIMIT.
   Full sessions are kept off the agenda by the prompt
   only: verify() does not re-check availability.
 end note

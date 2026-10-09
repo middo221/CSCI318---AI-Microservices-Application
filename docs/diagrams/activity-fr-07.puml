@@ -26,7 +26,7 @@ endif
 :record eventId in processed_events;
 :build PayForRegistrationCommand:
 Money(totalAmount, currency), holdExpiresAt,
-CardToken(cardToken);
+CardToken(cardToken), firstSessionStartsAt;
 if (token blank or shaped like a card number,
 or amount missing or negative?) then (yes)
   :log a warning and drop the message
@@ -43,7 +43,9 @@ for this registrationId?) then (yes)
 else (no)
 endif
 :PaymentOrder.raise(new UUID, registrationId,
-amount, holdExpiresAt) → status PENDING;
+amount, holdExpiresAt, firstSessionStartsAt)
+→ status PENDING (the refund policy reads
+firstSessionStartsAt later, FR-11);
 :PaymentOrder.pay(token, gateway, now);
 if (now after holdExpiresAt?) then (yes)
   :status FAILED, reason HOLD_EXPIRED,

@@ -3,7 +3,8 @@
 ' Source: PaymentEventConsumers.paymentFailed, RegistrationApplicationService.cancelUnpaid
 ' and expireOverdue, Registration.cancel/expire/isExpiredAt, HoldExpirySweeper.sweep,
 ' SessionView.release.
-' Second pass (FR-10): seats-released will also promote the head of the session's waitlist.
+' seats-released is also consumed by registration itself, to promote the session's waitlist
+' (activity-fr-10.puml).
 !include include/style.iuml
 !include include/activity.iuml
 
@@ -39,6 +40,7 @@ return seats: SessionView.release(quantity)
 |Kafka|
 $EVT:seats-released ×N
 key: sessionId>
+note right: promotes the waitlist (FR-10)
 $EVT:registration-cancelled
 key: registrationId>
 stop
@@ -81,7 +83,7 @@ note right
   A free registration is never
   PENDING_PAYMENT, so never expires.
   Cancelled and expired are separate
-  events so the M3 funnel can count
+  events so the analytics funnel counts
   failure and abandonment apart.
 end note
 @enduml
