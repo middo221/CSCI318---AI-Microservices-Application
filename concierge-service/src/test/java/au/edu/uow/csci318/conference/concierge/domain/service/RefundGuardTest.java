@@ -53,6 +53,40 @@ class RefundGuardTest {
         assertThat(decision.reason()).contains("220.00").contains("escalateToOrganiser");
     }
 
+    /** "At or below" applies to the running total as well as to a single refund. */
+    @Test
+    void approvesARunningTotalThatLandsExactlyOnTheLimit() {
+        RefundDecision decision = guard.evaluate(fullRefund("reg-2", "51.00"), new BigDecimal("149.00"));
+
+        assertThat(decision.approved()).isTrue();
+    }
+
+    /** 200 and 200.00 are the same money: the comparison ignores scale. */
+    @Test
+    void treatsAmountsOfDifferentScaleAsEqual() {
+        assertThat(guard.evaluate(quote("reg-1", "200", "200", "AUD", true), BigDecimal.ZERO).approved())
+                .isTrue();
+        assertThat(new RefundGuard(new BigDecimal("200"), "AUD")
+                .evaluate(fullRefund("reg-1", "200.00"), BigDecimal.ZERO).approved())
+                .isTrue();
+    }
+
+    /**
+     * A foreign-currency quote is refused for its currency before its size is considered, so the
+     * reason names the currency rather than comparing dollars with the AUD limit.
+     */
+    @Test
+    void refusesAForeignQuoteAboveTheLimitForItsCurrency() {
+        RefundDecision decision = guard.evaluate(
+                quote("reg-1", "500.00", "500.00", "USD", true), BigDecimal.ZERO);
+
+        assertThat(decision.approved()).isFalse();
+        assertThat(decision.reason())
+                .contains("is in USD")
+                .contains("configured only for AUD")
+                .doesNotContain("approval limit");
+    }
+
     @Test
     void treatsAMissingPriorTotalAsNothing() {
         assertThat(guard.evaluate(fullRefund("reg-1", "149.00"), null).approved()).isTrue();
