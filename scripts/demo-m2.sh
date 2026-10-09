@@ -35,7 +35,7 @@ PAYMENT="http://localhost:8083/api/v1"
 HOLD_WINDOW_SECONDS="${HOLD_WINDOW_SECONDS:-20}"
 SKIP_EXPIRY="${SKIP_EXPIRY:-0}"
 
-bold=$'\033[1m'; dim=$'\033[2m'; green=$'\033[32m'; cyan=$'\033[36m'; yellow=$'\033[33m'; off=$'\033[0m'
+bold=$'\033[1m'; dim=$'\033[2m'; green=$'\033[32m'; cyan=$'\033[36m'; yellow=$'\033[33m'; red=$'\033[31m'; off=$'\033[0m'
 
 step()  { printf '\n%s──────────────────────────────────────────────────────────────%s\n%s%s%s\n\n' "$dim" "$off" "$bold" "$1" "$off"; }
 run()   { printf '%s$ %s%s\n' "$cyan" "$1" "$off"; }
@@ -43,8 +43,35 @@ note()  { printf '%s   %s%s\n' "$dim" "$1" "$off"; }
 ok()    { printf '%s   %s%s\n' "$green" "$1" "$off"; }
 warn()  { printf '%s   %s%s\n' "$yellow" "$1" "$off"; }
 
-PAUSE_MODE=0
+fail()  { printf '%s   %s%s\n' "$red" "$1" "$off"; }
+
+# expiry_verdict <status> <hold-window-seconds>: ok only when the registration really is EXPIRED.
+# Prints a line starting FAILED: and returns 1 otherwise, saying why when the hold window is the cause.
+expiry_verdict() {
+  if [ "$1" = "EXPIRED" ]; then ok "EXPIRED without anybody touching it"; return 0; fi
+  if [ "$1" = "PENDING_PAYMENT" ]; then
+    fail "FAILED: the registration is still PENDING_PAYMENT after the hold window. registration-service's hold window is probably longer than HOLD_WINDOW_SECONDS=$2; start it with CONFERENCE_REGISTRATION_HOLD_WINDOW=PT${2}S (the default is PT2M)"
+  else
+    fail "FAILED: expected the registration to be EXPIRED, found '${1:-nothing}'"
+  fi
+  return 1
+}
+
+PAUSE_MODE=0; EXIT_CODE=0
 case "${1:-}" in --pause|-p) PAUSE_MODE=1 ;; esac
+
+if [ "${1:-}" = "--self-test" ]; then
+  bad=0
+  expiry_verdict EXPIRED 20 >/dev/null || { echo "FAILED: EXPIRED was refused"; bad=1; }
+  out=$(expiry_verdict PENDING_PAYMENT 20); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:.*hold window'; } || { echo "FAILED: PENDING_PAYMENT was accepted"; bad=1; }
+  out=$(expiry_verdict CONFIRMED 20); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: CONFIRMED was accepted"; bad=1; }
+  out=$(expiry_verdict "" 20); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: an empty status was accepted"; bad=1; }
+  [ $bad = 0 ] && echo "demo-m2 self-test: the expiry assertion passes EXPIRED and fails the other three" && exit 0
+  exit 1
+fi
 
 pause() {
   [ "$PAUSE_MODE" = "1" ] || return 0
@@ -168,9 +195,17 @@ else
     note "reservedSeats is now $(reserved) of 10 — status $(statusOf "$REG_3_ID"), and nobody is charging it"
     printf '%s   waiting %ss for the hold window to elapse, then the sweeper runs...%s\n' \
       "$dim" "$((HOLD_WINDOW_SECONDS + 15))" "$off"
-    sleep $((HOLD_WINDOW_SECONDS + 15))
+    # Poll rather than sleep once, so a slow sweeper is not mistaken for a long hold window.
+    for _ in $(seq 1 $((HOLD_WINDOW_SECONDS + 15))); do
+      [ "$(statusOf "$REG_3_ID")" = "EXPIRED" ] && break
+      sleep 1
+    done
     curl -s "$REGISTRATION/registrations/$REG_3_ID" | pretty
-    ok "EXPIRED without anybody touching it, and reservedSeats is back to $(reserved)"
+    if expiry_verdict "$(statusOf "$REG_3_ID")" "$HOLD_WINDOW_SECONDS"; then
+      note "reservedSeats is back to $(reserved)"
+    else
+      EXIT_CODE=1
+    fi
     offsets
     pause "registration-expired, NOT registration-cancelled. Abandonment and failure are different events."
 
@@ -180,14 +215,18 @@ else
       note "it picked up the registration-requested it missed while it was down"
       run "GET $PAYMENT/registrations/$REG_3_ID/payment-order"
       paymentOrder "$REG_3_ID" | pretty
-      ok "FAILED, reason HOLD_EXPIRED, and NO attempt — the gateway was never called"
+      if paymentOrder "$REG_3_ID" | grep -q HOLD_EXPIRED; then
+        ok "FAILED, reason HOLD_EXPIRED, and NO attempt — the gateway was never called"
+      else
+        fail "FAILED: payment-service's order for $REG_3_ID does not carry HOLD_EXPIRED"; EXIT_CODE=1
+      fi
       note "registration is still $(statusOf "$REG_3_ID"). Nobody paid for seats they no longer hold."
     else
-      warn "payment-service did not come back with an order for $REG_3_ID; skipping"
+      fail "FAILED: payment-service did not come back with an order for $REG_3_ID"; EXIT_CODE=1
     fi
     pause "The hold deadline travels on registration-requested, so a late charge is refused, not taken."
   else
-    warn "payment-service is still answering on 8083; skipping the hold-expiry steps"
+    fail "FAILED: payment-service is still answering on 8083; the hold-expiry steps could not run"; EXIT_CODE=1
   fi
 fi
 
@@ -213,3 +252,4 @@ note "H2 console for the payments: http://localhost:8083/h2-console"
 note "  JDBC URL: jdbc:h2:mem:paydb    user: sa    password: (blank)"
 note "  then:     SELECT * FROM PAYMENT_ORDERS;  and  SELECT * FROM PAYMENT_ATTEMPTS;"
 echo
+exit $EXIT_CODE

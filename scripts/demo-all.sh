@@ -41,7 +41,18 @@
 #                                            stub scripts; needs no services, Docker or network
 #
 # GEMINI_COOLDOWN (default 65) is the pause before demo-m4-support, so the free tier's five
-# requests a minute have refilled after demo-m4.
+# requests a minute have refilled after demo-m4. When it is set, it is also handed to
+# demo-m4-support as its own COOLDOWN (the wait between its conversations); unset, that script keeps
+# its own default of 65.
+#
+# CHILD_TIMEOUT (default 900 s) bounds each script; CHILD_TIMEOUT_SUPPORT (default 1500 s) bounds
+# demo-m4-support, whose cooldowns alone take several minutes. A script that hits its limit is killed
+# and recorded as TIMED OUT (exit 124); the run goes on to the next.
+#
+# With --with-expiry the run also records a row "02a" in results.txt: it passes only when payment was
+# stopped AND started again by the helper, and demo-m2's transcript shows the registration really
+# was EXPIRED and payment really refused it with HOLD_EXPIRED. payment-service.log as it stood before
+# the restart is kept in services/payment-service.first-life.log.
 #
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -67,6 +78,9 @@ COOLDOWN="${GEMINI_COOLDOWN:-65}"
 DOCKER="${DOCKER_BIN:-docker}"
 SCRIPTS="${DEMO_SCRIPTS_DIR:-scripts}"
 RUN_ALL="${RUN_ALL_SCRIPT:-scripts/run-all.sh}"
+PAY_LOG="${PAYMENT_LOG_FILE:-logs/payment-service.log}"
+HELPER_WAIT="${EXPIRY_HELPER_WAIT:-300}"
+HELPER_PID=""; OUT=""
 
 # ── Summarising helpers, each reading a FILE ────────────────────────────────────────────────────
 
@@ -75,6 +89,35 @@ strip_ansi() { sed -e 's/\x1b\[[0-9;]*m//g' -e 's/\r$//' "$1" > "$2"; }
 
 # redact <file>: Google API keys (AIza + 35 characters) replaced in place
 redact() { sed -i -E 's/AIza[0-9A-Za-z_-]{35}/<redacted-api-key>/g' "$1"; }
+
+# The literal GEMINI_API_KEY, read from the shell or .env without printing it, so that a key that
+# does not look like AIza... is still redacted. Empty when there is none.
+load_key() {
+  KEYVAL="${GEMINI_API_KEY:-}"
+  if [ -z "$KEYVAL" ] && [ -f .env ]; then
+    KEYVAL=$(grep -E '^[[:space:]]*GEMINI_API_KEY=' .env | head -1 | cut -d= -f2- | tr -d '"\r' | sed "s/'//g")
+  fi
+  [ "${#KEYVAL}" -ge 8 ] || KEYVAL=""
+}
+# redact_literal <file>: replaces the literal key, in place, when there is one
+redact_literal() {
+  [ -n "${KEYVAL:-}" ] || return 0
+  KEYVAL="$KEYVAL" python - "$1" <<'PY'
+import os, sys
+key = os.environ["KEYVAL"]
+with open(sys.argv[1], encoding="utf-8", errors="replace", newline="") as fh:
+    text = fh.read()
+if key in text:
+    with open(sys.argv[1], "w", encoding="utf-8", newline="") as fh:
+        fh.write(text.replace(key, "<redacted-api-key>"))
+PY
+}
+# redact_all <dir>: every file kept in the run folder
+redact_all() {
+  local f
+  [ -d "$1" ] || return 0
+  while IFS= read -r f; do redact "$f"; redact_literal "$f"; done < <(find "$1" -type f)
+}
 
 # topic_totals <kafka-get-offsets output>: "topic total" per topic, internal topics left out
 topic_totals() {
@@ -106,9 +149,12 @@ with open(sys.argv[1], encoding="utf-8") as fh:
             continue
         number, script, status = f[0], f[1], f[2]
         seconds = f[3] if len(f) > 3 else "-"
-        verdict = "finished (exit 0)" if status == "0" else ("ABSENT - script not on this branch" if status == "ABSENT" else "FAILED (exit %s)" % status)
+        verdict = "finished (exit 0)" if status == "0" else ("ABSENT - script not on this branch" if status == "ABSENT" else ("TIMED OUT (exit %s)" % status if status in ("124", "137") else "FAILED (exit %s)" % status))
         bad += status != "0"
-        rows.append("| %s | `scripts/%s.sh` | %s | %s s | `%s-%s.txt` |" % (number, script, verdict, seconds, number, script))
+        if script == "expiry-evidence":
+            rows.append("| %s | `--with-expiry` evidence | %s | - | `expiry-helper.txt`, `02-demo-m2.txt` |" % (number, verdict))
+        else:
+            rows.append("| %s | `scripts/%s.sh` | %s | %s s | `%s-%s.txt` |" % (number, script, verdict, seconds, number, script))
 print("| # | Script | Result | Time | Transcript |")
 print("| :--- | :--- | :--- | :--- | :--- |")
 print("\n".join(rows))
@@ -145,12 +191,18 @@ run_demo() {
     warn "$SCRIPTS/$script.sh is not on this branch - recorded as ABSENT"
     echo "$n $script ABSENT" >> "$OUT/results.txt"; return 0
   fi
+  local limit="${CHILD_TIMEOUT:-900}"
+  [ "$script" = "demo-m4-support" ] && limit="${CHILD_TIMEOUT_SUPPORT:-1500}"
   started=$(date +%s)
-  env "$@" bash "$SCRIPTS/$script.sh" < /dev/null 2>&1 | tee "$OUT/$n-$script.log"
+  env "$@" timeout -k 10 "$limit" bash "$SCRIPTS/$script.sh" < /dev/null 2>&1 | tee "$OUT/$n-$script.log"
   status=${PIPESTATUS[0]}
   strip_ansi "$OUT/$n-$script.log" "$OUT/$n-$script.txt"
   echo "$n $script $status $(( $(date +%s) - started ))" >> "$OUT/results.txt"
-  if [ "$status" != "0" ]; then fail "$script exited $status - recorded; continuing with the next script"; fi
+  case "$status" in
+    0)       ;;
+    124|137) fail "$script TIMED OUT after ${limit}s and was killed - recorded; continuing with the next script" ;;
+    *)       fail "$script exited $status - recorded; continuing with the next script" ;;
+  esac
   return 0
 }
 
@@ -158,22 +210,51 @@ wait_line() { # wait_line <file> <text> <seconds>
   for _ in $(seq 1 "$3"); do grep -q "$2" "$1" 2>/dev/null && return 0; sleep 1; done; return 1
 }
 
-# Does for demo-m2 what it asks a person to do: stop payment-service, then start it again.
+# Does for demo-m2 what it asks a person to do: stop payment-service, then start it again. Every
+# step and its outcome is written to expiry-helper.txt, which expiry_evidence reads afterwards.
 expiry_helper() {
-  local log="$OUT/02-demo-m2.log"
-  wait_line "$log" "Stop payment-service now" 300 || return 0
-  bash scripts/stop-all.sh payment-service >> "$OUT/expiry-helper.txt" 2>&1
-  wait_line "$log" "Start payment-service again" 300 || return 0
-  bash scripts/run-all.sh --no-build --only payment-service >> "$OUT/expiry-helper.txt" 2>&1
+  local log="$OUT/02-demo-m2.log" h="$OUT/expiry-helper.txt" rc
+  wait_line "$log" "Stop payment-service now" "$HELPER_WAIT" || { echo "helper: demo-m2 never asked for payment-service to be stopped" >> "$h"; return 0; }
+  # The jar's first life: the restart may overwrite this log, so keep it as it stands now.
+  mkdir -p "$OUT/services"
+  if cp "$PAY_LOG" "$OUT/services/payment-service.first-life.log" 2>/dev/null; then
+    echo "helper: kept payment-service.log as it stood before the stop" >> "$h"
+  else
+    echo "helper: could not copy $PAY_LOG before the stop" >> "$h"
+  fi
+  bash "$SCRIPTS/stop-all.sh" payment-service >> "$h" 2>&1; rc=$?
+  if [ $rc = 0 ]; then echo "helper: STOPPED payment-service" >> "$h"; else echo "helper: stop payment-service FAILED (exit $rc)" >> "$h"; return 0; fi
+  wait_line "$log" "Start payment-service again" "$HELPER_WAIT" || { echo "helper: demo-m2 never asked for payment-service to be started again" >> "$h"; return 0; }
+  bash "$RUN_ALL" --no-build --only payment-service >> "$h" 2>&1; rc=$?
+  if [ $rc = 0 ]; then echo "helper: STARTED payment-service" >> "$h"; else echo "helper: start payment-service FAILED (exit $rc)" >> "$h"; fi
+  return 0
+}
+
+# expiry_evidence <expiry-helper.txt> <02-demo-m2.txt>: exit 0 only when payment was stopped and
+# started again AND the transcript shows the registration EXPIRED and payment refusing it.
+expiry_evidence() {
+  local bad=0
+  grep -q "helper: STOPPED payment-service" "$1" 2>/dev/null || { echo "FAILED: payment-service was not stopped by the helper"; bad=1; }
+  grep -q "helper: STARTED payment-service" "$1" 2>/dev/null || { echo "FAILED: payment-service was not started again by the helper"; bad=1; }
+  grep -q "helper exit: 0" "$1" 2>/dev/null || { echo "FAILED: the helper process did not finish cleanly"; bad=1; }
+  grep -q "EXPIRED without anybody touching it" "$2" 2>/dev/null || { echo "FAILED: demo-m2 never observed the registration EXPIRED"; bad=1; }
+  grep -q "HOLD_EXPIRED, and NO attempt" "$2" 2>/dev/null || { echo "FAILED: demo-m2 never observed payment refusing the expired hold"; bad=1; }
+  return $bad
 }
 
 # run_sequence: all seven, in order. Needs $OUT to exist with an empty results.txt.
 run_sequence() {
   run_demo 01 demo-m1
   if [ "$WITH_EXPIRY" = "1" ]; then
-    expiry_helper & local helper=$!
+    : > "$OUT/expiry-helper.txt"
+    expiry_helper & HELPER_PID=$!
     run_demo 02 demo-m2 SKIP_EXPIRY=0 HOLD_WINDOW_SECONDS=20
-    wait "$helper"
+    wait "$HELPER_PID"; echo "helper exit: $?" >> "$OUT/expiry-helper.txt"; HELPER_PID=""
+    if expiry_evidence "$OUT/expiry-helper.txt" "$OUT/02-demo-m2.txt" > "$OUT/expiry-evidence.txt"; then
+      echo "02a expiry-evidence 0" >> "$OUT/results.txt"; ok "expiry evidence: payment stopped, hold EXPIRED, payment refused, payment started again"
+    else
+      echo "02a expiry-evidence 1" >> "$OUT/results.txt"; cat "$OUT/expiry-evidence.txt"
+    fi
   else
     run_demo 02 demo-m2 SKIP_EXPIRY=1
   fi
@@ -185,7 +266,7 @@ run_sequence() {
     note "waiting ${COOLDOWN}s so the free Gemini tier's per-minute quota refills before demo-m4-support"
     sleep "$COOLDOWN"
   fi
-  run_demo 07 demo-m4-support
+  if [ -n "${GEMINI_COOLDOWN:-}" ]; then run_demo 07 demo-m4-support COOLDOWN="$GEMINI_COOLDOWN"; else run_demo 07 demo-m4-support; fi
 }
 
 if [ "$SELF_TEST" = "1" ]; then
@@ -252,6 +333,73 @@ if [ "$SELF_TEST" = "1" ]; then
   r=$(seq_run "$WORK/run2")
   same "sequence where every child exits 0 exits 0" "$r" "0"
 
+  # -- the literal key is redacted even when it does not look like AIza...
+  printf 'token=%s end
+' 'literal-key-value-9999' > "$WORK/lit.txt"
+  KEYVAL="literal-key-value-9999"; redact_literal "$WORK/lit.txt"; KEYVAL=""
+  same "redact_literal hides the literal key" "$(cat "$WORK/lit.txt")" "token=<redacted-api-key> end"
+  mkdir -p "$WORK/tree/sub"; printf 'k=literal-key-value-9999 AIza%s
+' 'SyA1234567890abcdefghijklmnopqrstuv' > "$WORK/tree/sub/a.log"
+  KEYVAL="literal-key-value-9999"; redact_all "$WORK/tree"; KEYVAL=""
+  same "redact_all reaches nested files and both kinds of key" "$(cat "$WORK/tree/sub/a.log")" "k=<redacted-api-key> <redacted-api-key>"
+  printf '02a expiry-evidence 1
+' > "$WORK/exp.txt"
+  expect 1 "summary_table fails a failed expiry-evidence row" summary_table "$WORK/exp.txt"
+
+  # -- a child that outlives CHILD_TIMEOUT is killed and recorded, and the next child still runs
+  mkdir -p "$WORK/tstubs"; cp "$WORK/stubs"/*.sh "$WORK/tstubs/"
+  printf '#!/usr/bin/env bash
+echo started
+exec sleep 60
+' > "$WORK/tstubs/demo-m1.sh"
+  OUT="$WORK/run3"; mkdir -p "$OUT/analytics"; : > "$OUT/results.txt"
+  t0=$(date +%s)
+  SCRIPTS="$WORK/tstubs" COOLDOWN=0 CHILD_TIMEOUT=2 run_sequence > "$OUT/console.txt" 2>&1
+  took=$(( $(date +%s) - t0 ))
+  same "a child past CHILD_TIMEOUT is recorded 124" "$(awk '$2=="demo-m1"{print $3}' "$OUT/results.txt")" "124"
+  same "the timed-out child was killed promptly (under 40 s, not 60)" "$([ "$took" -lt 40 ] && echo yes || echo "no ($took s)")" "yes"
+  same "the next child still ran after the timeout" "$(awk '$2=="demo-m2"{print $3}' "$OUT/results.txt")" "0"
+  expect 1 "summary_table reports the timeout as a failure" summary_table "$OUT/results.txt"
+  summary_table "$OUT/results.txt" | grep -q 'TIMED OUT' && ok "the table says TIMED OUT" || { fail "FAILED: the table does not say TIMED OUT"; failures=$((failures + 1)); }
+
+  # -- the --with-expiry helper against stub stop/run scripts and a stub demo-m2
+  mk_expiry() { # mk_expiry <dir> <m2-mode: good|noexpired> <stop-rc>
+    local d="$1"; mkdir -p "$d"; cp "$WORK/stubs"/*.sh "$d/"
+    printf '#!/usr/bin/env bash
+exit %s
+' "$3" > "$d/stop-all.sh"
+    printf '#!/usr/bin/env bash
+[ "$1" = --no-build ] && touch "%s/started-%s"
+exit 0
+' "$WORK" "$(basename "$d")" > "$d/run-all-stub.sh"
+    { printf '#!/usr/bin/env bash
+echo "Stop payment-service now"
+sleep 3
+echo "Start payment-service again"
+sleep 3
+'
+      if [ "$2" = good ]; then printf 'echo "   EXPIRED without anybody touching it"
+echo "   FAILED, reason HOLD_EXPIRED, and NO attempt"
+'
+      else printf 'echo "   FAILED: still PENDING_PAYMENT"
+exit 1
+'; fi; } > "$d/demo-m2.sh"
+  }
+  run_expiry() { # run_expiry <dir>: prints the row for 02a
+    OUT="$WORK/out-$(basename "$1")"; mkdir -p "$OUT/analytics" "$OUT/services"; : > "$OUT/results.txt"
+    WITH_EXPIRY=1 SCRIPTS="$1" RUN_ALL="$1/run-all-stub.sh" PAY_LOG="$WORK/pay.log" HELPER_WAIT=20 COOLDOWN=0 run_sequence > "$OUT/console.txt" 2>&1
+    awk '$1=="02a"{print $3}' "$OUT/results.txt"
+  }
+  echo "payment first life" > "$WORK/pay.log"
+  mk_expiry "$WORK/ex-good" good 0
+  same "expiry helper + good transcript: evidence row passes" "$(run_expiry "$WORK/ex-good")" "0"
+  same "expiry helper kept the first-life payment log" "$(cat "$WORK/out-ex-good/services/payment-service.first-life.log")" "payment first life"
+  same "expiry helper started payment through RUN_ALL" "$([ -f "$WORK/started-ex-good" ] && echo yes || echo no)" "yes"
+  mk_expiry "$WORK/ex-noexp" noexpired 0
+  same "no EXPIRED in the transcript: evidence row fails" "$(run_expiry "$WORK/ex-noexp")" "1"
+  mk_expiry "$WORK/ex-nostop" good 1
+  same "stop-all failing: evidence row fails" "$(run_expiry "$WORK/ex-nostop")" "1"
+
   if [ "$failures" = "0" ]; then ok "every summarising check can fail"; exit 0; fi
   fail "FAILED: $failures check(s) cannot be trusted"; exit 1
 fi
@@ -264,6 +412,17 @@ preflight || exit 1
 OUT="logs/live-run-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT/analytics" "$OUT/services"
 : > "$OUT/results.txt"
+load_key
+# However the run ends - finished, Ctrl+C, killed - stop the helper and redact what was kept.
+cleanup() {
+  trap - EXIT INT TERM
+  if [ -n "$HELPER_PID" ]; then kill "$HELPER_PID" 2>/dev/null; wait "$HELPER_PID" 2>/dev/null; fi
+  for f in logs/*.log; do [ -f "$f" ] && cp -n "$f" "$OUT/services/" 2>/dev/null; done
+  redact_all "$OUT"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 ok "everything is up; the run is recorded in $OUT"
 
 {
@@ -295,12 +454,18 @@ mkdir -p "$OUT/topics"
 for topic in $(kafka kafka-topics.sh --list 2>/dev/null | tr -d '\r' | grep -v -e '^__' -e '-changelog$' -e '-repartition$' | sort); do
   kafka kafka-console-consumer.sh --topic "$topic" --from-beginning --timeout-ms 5000 \
     --property print.key=true --property key.separator=" :: " 2>/dev/null | tr -d '\r' > "$OUT/topics/$topic.txt"
-  { echo "## $topic  ($(wc -l < "$OUT/topics/$topic.txt" | tr -d ' ') messages)"; head -1 "$OUT/topics/$topic.txt"; echo; } >> "$OUT/topic-samples.txt"
+  count=$(wc -l < "$OUT/topics/$topic.txt" | tr -d ' ')
+  if [ "$count" = "0" ]; then
+    warn "reading $topic returned nothing (empty topic, or the read failed) - not a verified count"
+    { echo "## $topic  (NO MESSAGES READ - empty topic or failed read; compare with topic-offsets.txt)"; echo; } >> "$OUT/topic-samples.txt"
+  else
+    { echo "## $topic  ($count messages)"; head -1 "$OUT/topics/$topic.txt"; echo; } >> "$OUT/topic-samples.txt"
+  fi
 done
 note "every message of every topic: $OUT/topics/; the first of each: $OUT/topic-samples.txt"
 
 for f in logs/*.log; do [ -f "$f" ] && cp "$f" "$OUT/services/"; done
-for f in "$OUT"/services/*.log "$OUT"/*.log "$OUT"/*.txt "$OUT"/topics/*.txt "$OUT"/analytics/*; do [ -f "$f" ] && redact "$f"; done
+redact_all "$OUT"
 note "service logs copied to $OUT/services (API keys redacted)"
 
 {
