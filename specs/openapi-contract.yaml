@@ -839,7 +839,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/RefundResponse'
         '400':
-          description: VALIDATION_FAILED — refundPercent outside 0 to 100, or a blank reason
+          description: VALIDATION_FAILED — refundPercent outside 0 to 100, a blank reason, or a body that is unreadable or malformed (payment-service maps that to 400 VALIDATION_FAILED)
           content:
             application/json:
               schema:
@@ -1651,6 +1651,7 @@ components:
         attendeeId:
           type: string
           minLength: 1
+          maxLength: 64
           example: att-1042
         attendeeName:
           type: string
@@ -1755,8 +1756,9 @@ components:
           example: I have been hospitalised and cannot attend
         requestedBy:
           type: string
-          enum: [ATTENDEE, AGENT]
-          description: Case-sensitive. Absent means ATTENDEE. SYSTEM is reserved for the late-payment reversal and is refused here.
+          nullable: true
+          enum: [ATTENDEE, AGENT, null]
+          description: Case-sensitive. Absent or null is accepted and treated as ATTENDEE. SYSTEM is reserved for the late-payment reversal and is refused here.
           example: ATTENDEE
     RefundRequestResponse:
       type: object
@@ -1809,6 +1811,7 @@ components:
         attendeeId:
           type: string
           minLength: 1
+          maxLength: 64
           example: att-2000
     WaitlistEntryResponse:
       type: object
