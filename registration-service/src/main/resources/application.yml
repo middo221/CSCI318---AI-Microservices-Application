@@ -19,7 +19,7 @@ spring:
       path: /h2-console
   cloud:
     function:
-      definition: eventPublished;sessionAdded;sessionCapacityChanged;paymentSucceeded;paymentFailed;refundIssued;refundDeclined
+      definition: eventPublished;sessionAdded;sessionCapacityChanged;paymentSucceeded;paymentFailed;refundIssued;refundDeclined;seatsReleased
     stream:
       bindings:
         eventPublished-in-0:
@@ -42,6 +42,10 @@ spring:
           group: registration-service
         refundDeclined-in-0:
           destination: refund-declined
+          group: registration-service
+        # Registration consumes its own topic: seats released by one aggregate promote from another.
+        seatsReleased-in-0:
+          destination: seats-released
           group: registration-service
       kafka:
         binder:

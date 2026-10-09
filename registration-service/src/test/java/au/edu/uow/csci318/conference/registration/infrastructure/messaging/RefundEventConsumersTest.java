@@ -16,6 +16,7 @@ import au.edu.uow.csci318.conference.registration.domain.model.SessionView;
 import au.edu.uow.csci318.conference.registration.domain.model.TimeSlot;
 import au.edu.uow.csci318.conference.registration.domain.repository.SessionViewRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cloud.stream.binder.test.EnableTestBinder;
 import org.springframework.cloud.stream.binder.test.InputDestination;
 import org.springframework.cloud.stream.binder.test.OutputDestination;
+import org.springframework.context.ApplicationContext;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
@@ -64,9 +66,21 @@ class RefundEventConsumersTest {
     @Autowired
     private SessionViewRepository sessions;
 
+    @Autowired
+    private ApplicationContext context;
+
+    /** Registration consumes its own {@code seats-released}, so {@code outbound} cannot see it. */
+    private SeatsReleasedTap releasedSeats;
+
     @BeforeEach
     void setUp() {
         outbound.clear();
+        releasedSeats = SeatsReleasedTap.attach(context);
+    }
+
+    @AfterEach
+    void detachTap() {
+        releasedSeats.close();
     }
 
     private static String keyOf(Message<byte[]> message) {
@@ -138,7 +152,7 @@ class RefundEventConsumersTest {
 
         Map<String, Integer> releasedBySession = new HashMap<>();
         for (int i = 0; i < 2; i++) {
-            Message<byte[]> message = outbound.receive(2000, "seats-released");
+            Message<byte[]> message = releasedSeats.receive(2000);
             assertThat(message).as("one seats-released per session").isNotNull();
             releasedBySession.put(keyOf(message),
                     objectMapper.readTree(message.getPayload()).get("quantity").asInt());
@@ -155,11 +169,11 @@ class RefundEventConsumersTest {
         RefundIssued event = issued(registration.getId());
 
         send(event, "refund-issued");
-        assertThat(outbound.receive(2000, "seats-released")).isNotNull();
+        assertThat(releasedSeats.receive(2000)).isNotNull();
 
         send(event, "refund-issued");
 
-        assertThat(outbound.receive(500, "seats-released")).isNull();
+        assertThat(releasedSeats.receive(500)).isNull();
         assertThat(reservedSeats(session)).isZero();
     }
 
@@ -171,12 +185,13 @@ class RefundEventConsumersTest {
         send(new PaymentFailed(UUID.randomUUID().toString(), Instant.now(), "pay-1",
                 registration.getId(), "CARD_DECLINED"), "payment-failed");
         outbound.clear();
+        releasedSeats.clear();
 
         send(issued(registration.getId()), "refund-issued");
 
         assertThat(registrations.findById(registration.getId()).getStatus())
                 .isEqualTo(RegistrationStatus.CANCELLED);
-        assertThat(outbound.receive(500, "seats-released")).isNull();
+        assertThat(releasedSeats.receive(500)).isNull();
     }
 
     @Test

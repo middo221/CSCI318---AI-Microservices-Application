@@ -9,10 +9,12 @@ import au.edu.uow.csci318.conference.registration.domain.model.Waitlist;
 import au.edu.uow.csci318.conference.registration.domain.model.WaitlistPlace;
 import au.edu.uow.csci318.conference.registration.domain.repository.WaitlistRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -60,6 +62,46 @@ public class WaitlistApplicationService {
         waitlists.save(waitlist);
         domainEvents.publishAll(recorded);
         return place;
+    }
+
+    /**
+     * Offers seats a release just returned to the head of the session's waitlist (FR-10).
+     *
+     * <p>Promotes up to {@code min(releasedSeats, availableSeats)}, with availability read from the
+     * replica now rather than taken from the event: somebody may have registered for a freed seat
+     * before the release was handled, and a capacity cut can leave a session still over-subscribed
+     * after a release, in which case nobody is promoted. A promotion is an offer, not a held seat.
+     *
+     * <p><strong>{@code REQUIRES_NEW}, deliberately.</strong> This runs from the {@code seats-released}
+     * consumer, and registration consumes its own topic. Under the in-JVM test binder that consumer
+     * runs synchronously on the releasing thread, inside the {@code afterCompletion} callback from
+     * which Spring fires the {@code AFTER_COMMIT} listener that sends {@code seats-released}. The
+     * releasing transaction has committed there but is still bound to the thread, so a
+     * {@code REQUIRED} transaction would join it: the promotion would never be written, and Spring,
+     * able to report its outcome only as unknown, would never send its {@code waitlist-promoted}.
+     * Against a real broker the consumer runs on its own thread with nothing bound, and this behaves
+     * exactly like {@code REQUIRED}: correctness never depends on the synchronous delivery.
+     *
+     * @return how many attendees were promoted; zero for a session nobody is waiting for
+     * @throws SessionNotFoundException if a session with a waitlist is unknown to the replica
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public int promoteFor(String sessionId, int releasedSeats) {
+        Optional<Waitlist> found = waitlists.findBySessionId(sessionId);
+        if (found.isEmpty()) {
+            return 0;
+        }
+        int seats = Math.min(releasedSeats, availability.availabilityOf(sessionId).getAvailableSeats());
+        Waitlist waitlist = found.get();
+        List<WaitlistPlace> promoted = waitlist.promote(seats, Instant.now());
+        if (promoted.isEmpty()) {
+            return 0;
+        }
+        // Drain the instance we changed: save() merges the loaded waitlist and returns a copy.
+        List<DomainEvent> recorded = waitlist.pullDomainEvents();
+        waitlists.save(waitlist);
+        domainEvents.publishAll(recorded);
+        return promoted.size();
     }
 
     /**

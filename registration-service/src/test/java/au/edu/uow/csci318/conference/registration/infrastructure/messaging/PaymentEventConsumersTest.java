@@ -15,6 +15,7 @@ import au.edu.uow.csci318.conference.registration.domain.model.TimeSlot;
 import au.edu.uow.csci318.conference.registration.domain.repository.SessionViewRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cloud.stream.binder.test.EnableTestBinder;
 import org.springframework.cloud.stream.binder.test.InputDestination;
 import org.springframework.cloud.stream.binder.test.OutputDestination;
+import org.springframework.context.ApplicationContext;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
 
@@ -62,6 +64,12 @@ class PaymentEventConsumersTest {
     @Autowired
     private SessionViewRepository sessions;
 
+    @Autowired
+    private ApplicationContext context;
+
+    /** Registration consumes its own {@code seats-released}, so {@code outbound} cannot see it. */
+    private SeatsReleasedTap releasedSeats;
+
     private String sessionId;
 
     @BeforeEach
@@ -72,6 +80,12 @@ class PaymentEventConsumersTest {
         view.setCapacity(10);
         sessions.save(view);
         outbound.clear();
+        releasedSeats = SeatsReleasedTap.attach(context);
+    }
+
+    @AfterEach
+    void detachTap() {
+        releasedSeats.close();
     }
 
     private Registration givenAPendingRegistration(int seats) {
@@ -171,7 +185,7 @@ class PaymentEventConsumersTest {
         send(new PaymentFailed(UUID.randomUUID().toString(), Instant.now(),
                 "pay-1", registration.getId(), "CARD_DECLINED"), "payment-failed");
 
-        Message<byte[]> released = outbound.receive(2000, "seats-released");
+        Message<byte[]> released = releasedSeats.receive(2000);
         assertThat(released).isNotNull();
         JsonNode releasedPayload = objectMapper.readTree(released.getPayload());
         assertThat(releasedPayload.get("sessionId").asText()).isEqualTo(sessionId);

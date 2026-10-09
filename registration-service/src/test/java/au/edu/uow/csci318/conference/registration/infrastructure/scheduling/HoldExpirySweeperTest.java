@@ -12,8 +12,10 @@ import au.edu.uow.csci318.conference.registration.domain.model.SeatHoldStatus;
 import au.edu.uow.csci318.conference.registration.domain.model.SessionView;
 import au.edu.uow.csci318.conference.registration.domain.model.TimeSlot;
 import au.edu.uow.csci318.conference.registration.domain.repository.SessionViewRepository;
+import au.edu.uow.csci318.conference.registration.infrastructure.messaging.SeatsReleasedTap;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cloud.stream.binder.test.EnableTestBinder;
 import org.springframework.cloud.stream.binder.test.InputDestination;
 import org.springframework.cloud.stream.binder.test.OutputDestination;
+import org.springframework.context.ApplicationContext;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.test.context.TestPropertySource;
@@ -70,6 +73,12 @@ class HoldExpirySweeperTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private ApplicationContext context;
+
+    /** Registration consumes its own {@code seats-released}, so {@code outbound} cannot see it. */
+    private SeatsReleasedTap releasedSeats;
+
     private String sessionId;
 
     @BeforeEach
@@ -80,6 +89,12 @@ class HoldExpirySweeperTest {
         view.setCapacity(10);
         sessions.save(view);
         outbound.clear();
+        releasedSeats = SeatsReleasedTap.attach(context);
+    }
+
+    @AfterEach
+    void detachTap() {
+        releasedSeats.close();
     }
 
     private Registration givenAPendingRegistration(int seats) {
@@ -122,7 +137,7 @@ class HoldExpirySweeperTest {
         waitOutTheHoldWindow();
         sweeper.sweep();
 
-        Message<byte[]> released = outbound.receive(2000, "seats-released");
+        Message<byte[]> released = releasedSeats.receive(2000);
         assertThat(released).isNotNull();
         JsonNode releasedPayload = objectMapper.readTree(released.getPayload());
         assertThat(releasedPayload.get("sessionId").asText()).isEqualTo(sessionId);
