@@ -784,31 +784,32 @@ two or three seconds.
 | FR-04 | Adjust a published session's capacity | `[x]` |
 | FR-05 | Browse and search the published catalogue | `[x]` |
 | FR-06 | Register for one or more sessions | `[x]` |
-| FR-07 | Pay for a registration and receive a ticket | `[~]` |
-| FR-08 | Confirm registration and issue tickets on payment | `[~]` |
+| FR-07 | Pay for a registration and receive a ticket | `[x]` |
+| FR-08 | Confirm registration and issue tickets on payment | `[x]` |
 | FR-09 | Release seats on payment failure or hold expiry | `[x]` |
-| FR-10 | Join a waitlist for a full session | `[~]` |
-| FR-11 | Request a refund | `[~]` |
+| FR-10 | Join a waitlist for a full session | `[x]` |
+| FR-11 | Request a refund | `[x]` |
 | FR-12 | Transfer a ticket to another person | `[x]` |
 | FR-13 | Check in at a gate | `[x]` |
-| FR-14 | View live per-session fill rate *(real-time)* | `[~]` |
-| FR-15 | Receive a 90% capacity alert *(real-time)* | `[~]` |
-| FR-16 | Monitor gate throughput and queue congestion *(real-time)* | `[~]` |
+| FR-14 | View live per-session fill rate *(real-time)* | `[x]` |
+| FR-15 | Receive a 90% capacity alert *(real-time)* | `[x]` |
+| FR-16 | Monitor gate throughput and queue congestion *(real-time)* | `[x]` |
 | FR-17 | Build a personal agenda from natural language *(agentic AI)* | `[x]` |
-| FR-18 | Raise a support request handled by an agent *(agentic AI)* | `[~]` |
+| FR-18 | Raise a support request handled by an agent *(agentic AI)* | `[x]` |
 
-`[x]` delivered on `main`, with tests, and exercised end to end; `[~]` partially delivered — for every
-`[~]` row above, the code and its offline tests are on `main` and the missing part is the live
-end-to-end run. [`specs/2-user-stories.md`](specs/2-user-stories.md) is the authority and names the
-evidence for each.
+`[x]` delivered on `main`, with tests, and exercised end to end; `[~]` partially delivered; `[ ]` not
+started. No row above is `[~]` or `[ ]`: the live run of 2026-10-09 observed every story that crosses
+a service boundary, as recorded in `docs/verification/`. The late-payment reversal in FR-07 was
+not driven by that run and is covered by offline tests only.
+[`specs/2-user-stories.md`](specs/2-user-stories.md) is the authority and names the evidence for each.
 
 | Milestone | Weeks | Status |
 | :--- | :--- | :--- |
 | M0 — Skeleton | 3–4 | ✅ Complete |
 | M1 — First event across a boundary | 5–6 | ✅ Complete |
-| M2 — The saga | 7–8 | 🟡 Complete in code; the payment and ticket hops await the final live run |
-| M3 — Streams, refunds and the waitlist | 9–10 | 🟡 Complete in code; awaiting the final live run |
-| M4 — Agents | 10–11 | 🟡 Agent 1 delivered; Agent 2 complete in code, awaiting a live run against Gemini |
+| M2 — The saga | 7–8 | ✅ Complete — payment and ticket hops observed live 2026-10-09 (`docs/verification/2026-m2-payment-saga.md`) |
+| M3 — Streams, refunds and the waitlist | 9–10 | ✅ Complete — observed live 2026-10-09 (`2026-m3-refunds-waitlist.md`, `2026-m3-analytics.md`); the late-payment reversal was not driven by that run |
+| M4 — Agents | 10–11 | ✅ Complete — Agent 2 observed live against Gemini 2026-10-09; Agent 1's `demo-m4.sh` row failed on an empty model answer that day and an agenda was produced in a supplementary session (`2026-m4-agenda-builder.md`) |
 | M5 — Submission | 11–12 | 🟡 In progress |
 
 ## Team

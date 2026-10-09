@@ -54,8 +54,8 @@ to the waitlist, which is FR-10 and arrives in M3.
 
 | Feature | Method | Endpoint Path | Request Body | Response (Success) | Inter-Service Dependencies |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **FR-07** | `GET` | `/payment-orders/{id}` | *None* | `200 OK` (`PaymentOrderResponse`) | None *(M2)* |
-| **FR-07** | `GET` | `/registrations/{registrationId}/payment-order` | *None* | `200 OK` (`PaymentOrderResponse`) | None *(M2)* |
+| **FR-07** | `GET` | `/payment-orders/{id}` | *None* | `200 OK` (`PaymentOrderResponse`) | None |
+| **FR-07** | `GET` | `/registrations/{registrationId}/payment-order` | *None* | `200 OK` (`PaymentOrderResponse`) | None |
 | **FR-11** | `GET` | `/refund-policy/quote` | *None* | `200 OK` (`RefundQuoteResponse`) | Query `registrationId`; used by the support agent |
 | **FR-11** | `POST` | `/payment-orders/{id}/refunds` | `IssueRefundRequest` | `201 Created` (`RefundResponse`) | emits `refund-issued` |
 
@@ -68,10 +68,10 @@ to the waitlist, which is FR-10 and arrives in M3.
 
 | Feature | Method | Endpoint Path | Request Body | Response (Success) | Inter-Service Dependencies |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **FR-08** | `GET` | `/tickets/{ticketCode}` | *None* | `200 OK` (`TicketResponse`) | None *(M2)* |
-| **FR-08** | `GET` | `/registrations/{registrationId}/tickets` | *None* | `200 OK` (`Array<TicketResponse>`) | None *(M2)* |
-| **FR-12** | `POST` | `/tickets/{ticketCode}/transfer` | `TransferTicketRequest` | `200 OK` (`TicketResponse`) | emits `ticket-transferred` *(M3)* |
-| **FR-13** | `POST` | `/gates/{gateId}/check-ins` | `CheckInRequest` | `201 Created` (`CheckInResponse`) | emits `attendee-checked-in` *(M2)* |
+| **FR-08** | `GET` | `/tickets/{ticketCode}` | *None* | `200 OK` (`TicketResponse`) | None |
+| **FR-08** | `GET` | `/registrations/{registrationId}/tickets` | *None* | `200 OK` (`Array<TicketResponse>`) | None |
+| **FR-12** | `POST` | `/tickets/{ticketCode}/transfer` | `TransferTicketRequest` | `200 OK` (`TicketResponse`) | emits `ticket-transferred` |
+| **FR-13** | `POST` | `/gates/{gateId}/check-ins` | `CheckInRequest` | `201 Created` (`CheckInResponse`) | emits `attendee-checked-in` |
 
 `CheckInRequest` carries `ticketCode` and `queuedAt`; `queuedAt` is required because the gate
 congestion stream derives wait time from it.

@@ -14,7 +14,7 @@ planned**, and it is maintained by hand.
 | `[~]` | Partially delivered — one side of the story exists, the other does not |
 | `[ ]` | Not started |
 
-**Last checked against the code:** 2026-10-09 — 10 delivered, 8 partial, 0 not started.
+**Last checked against the code:** 2026-10-09 — 18 delivered, 0 partial, 0 not started.
 
 ### Updating these checkboxes is part of delivering a story
 
@@ -48,18 +48,18 @@ crosses a service boundary is delivered when it has been observed crossing it.
 | **Event Catalog** | FR-04 | Adjust a published session's capacity | Organiser | | `[x]` |
 | **Event Catalog** | FR-05 | Browse and search the published catalogue | Attendee, Organiser | | `[x]` |
 | **Registration** | FR-06 | Register for one or more sessions | Attendee | | `[x]` |
-| **Registration** | FR-10 | Join a waitlist for a full session | Attendee | | `[~]` |
-| **Payment** | FR-07 | Pay for a registration and receive a ticket | Attendee | | `[~]` |
-| **Payment** | FR-11 | Request a refund | Attendee | | `[~]` |
+| **Registration** | FR-10 | Join a waitlist for a full session | Attendee | | `[x]` |
+| **Payment** | FR-07 | Pay for a registration and receive a ticket | Attendee | | `[x]` |
+| **Payment** | FR-11 | Request a refund | Attendee | | `[x]` |
 | **Ticketing** | FR-12 | Transfer a ticket to another person | Attendee | | `[x]` |
 | **Ticketing** | FR-13 | Check in at a gate | Gate staff, Attendee | | `[x]` |
-| **System** | FR-08 | Confirm registration and issue tickets on payment | *(system)* | | `[~]` |
+| **System** | FR-08 | Confirm registration and issue tickets on payment | *(system)* | | `[x]` |
 | **System** | FR-09 | Release seats on payment failure or hold expiry | *(system)* | | `[x]` |
-| **Analytics** | FR-14 | View live per-session fill rate | Organiser | **Real-time** | `[~]` |
-| **Analytics** | FR-15 | Receive a 90% capacity alert | Organiser | **Real-time** | `[~]` |
-| **Analytics** | FR-16 | Monitor gate throughput and queue congestion | Organiser | **Real-time** | `[~]` |
+| **Analytics** | FR-14 | View live per-session fill rate | Organiser | **Real-time** | `[x]` |
+| **Analytics** | FR-15 | Receive a 90% capacity alert | Organiser | **Real-time** | `[x]` |
+| **Analytics** | FR-16 | Monitor gate throughput and queue congestion | Organiser | **Real-time** | `[x]` |
 | **Concierge** | FR-17 | Build a personal agenda from natural language | Attendee | **Agentic AI** | `[x]` |
-| **Concierge** | FR-18 | Raise a support request handled by an agent | Attendee | **Agentic AI** | `[~]` |
+| **Concierge** | FR-18 | Raise a support request handled by an agent | Attendee | **Agentic AI** | `[x]` |
 
 **Real-time analysis stories (minimum 2):** FR-14, FR-15, FR-16 — three.
 **Agentic AI stories (minimum 2):** FR-17, FR-18 — two.
@@ -135,12 +135,13 @@ crosses a service boundary is delivered when it has been observed crossing it.
   ticketing still issues its tickets.
 
 ### FR-10: Join a waitlist for a full session
-- [~] **Implemented and tested offline; live-broker run pending (M5 live run).**
-  `POST` / `GET /api/v1/sessions/{sessionId}/waitlist` on `WaitlistController`, the `Waitlist`
-  aggregate, and `WaitlistEventConsumers.seatsReleased` — registration consuming its own
+- [x] **Delivered** — `POST` / `GET /api/v1/sessions/{sessionId}/waitlist` on `WaitlistController`,
+  the `Waitlist` aggregate, and `WaitlistEventConsumers.seatsReleased` — registration consuming its own
   `seats-released` and emitting `waitlist-promoted`, with no REST call anywhere. Proven in-JVM end to
   end by `WaitlistPromotionTest` (`payment-failed` → `seats-released` → `waitlist-promoted`).
-  `scripts/demo-m3.sh` is the live run.
+  **Observed on a live broker on 2026-10-09:** `docs/verification/2026-m3-refunds-waitlist.md`
+  (Sam joined the full keynote's waitlist, position 1; after Dana's refund his entry was `PROMOTED`
+  and `waitlist-promoted` was keyed by the session).
 - **Refinement — joining is explicit.** A registration naming a full session is still refused with
   `409 SESSION_FULL`; the attendee then joins with `POST /sessions/{id}/waitlist`
   (`409 SESSION_NOT_FULL` while seats remain, `409 ALREADY_WAITLISTED` for a duplicate). Falling
@@ -158,14 +159,16 @@ crosses a service boundary is delivered when it has been observed crossing it.
 ## Payment Service
 
 ### FR-07: Pay for a registration and receive a ticket
-- [~] **Implemented and tested; not yet live-verified.** `RegistrationEventConsumers.registrationRequested`
+- [x] **Delivered** — `RegistrationEventConsumers.registrationRequested`
   raises a `PaymentOrder` and charges it through the `PaymentGateway` port, whose
   `SimulatedPaymentGateway` adapter is deterministic by token. Each attempt is recorded as a
   `PaymentAttempt`; the order emits `payment-succeeded` or `payment-failed`, keyed by registration,
   after commit. Read side: `GET /payment-orders/{id}` and
   `GET /registrations/{registrationId}/payment-order`. Proven with the Spring Cloud Stream test
-  binder in `RegistrationEventConsumersTest`, but **not yet observed on a live broker**, so it stays
-  `[~]` until a note under `docs/verification/` exists. Run `scripts/demo-m2.sh` to produce one.
+  binder in `RegistrationEventConsumersTest`. **Observed on a live broker on 2026-10-09:**
+  `docs/verification/2026-m2-payment-saga.md` (a `TOK_OK` order `PAID` with one `SUCCEEDED` attempt,
+  its registration `CONFIRMED`, and `payment-service`'s consumer group at lag 0 on
+  `registration-requested`).
 - **Refinement — the charge happens on receipt, once.** There is no "pay" endpoint: the token
   arrives with `registration-requested` (see FR-06). An order gets one attempt, because registration
   cancels on the first `payment-failed`, so a retry would charge for seats already back on sale.
@@ -178,7 +181,10 @@ crosses a service boundary is delivered when it has been observed crossing it.
   between the deadline and the sweeper's next run is now
   **reversed**: registration answers a `payment-succeeded` for an `EXPIRED` or `CANCELLED`
   registration with a `refund-requested` of kind `LATE_PAYMENT_REVERSAL`, and payment returns it in
-  full without consulting the policy (FR-11). Tested offline; live run pending (M5).
+  full without consulting the policy (FR-11). Tested offline; **not observed in the M5 live run**
+  (2026-10-09), which cannot open the window on demand. The refusal itself was observed live: the
+  order for an expired hold was `FAILED` with no attempt and `payment-failed` carried
+  `HOLD_EXPIRED` (`docs/verification/2026-m2-payment-saga.md`).
 - **As an** Attendee, **I want to** pay for my registration, **so that** I receive tickets.
 - **Scenario:**
   1. `payment-service` consumes `registration-requested` and creates a `PaymentOrder`.
@@ -187,14 +193,15 @@ crosses a service boundary is delivered when it has been observed crossing it.
      are issued (FR-08).
 
 ### FR-11: Request a refund
-- [~] **Implemented and tested offline; live-broker run pending (M5 live run).**
-  `POST /api/v1/registrations/{id}/refund-requests` emits `refund-requested`; `payment-service`
+- [x] **Delivered** — `POST /api/v1/registrations/{id}/refund-requests` emits `refund-requested`; `payment-service`
   decides it with the pure `RefundPolicyService` (injected `Clock`), records a `Refund`, and emits
   `refund-issued` or `refund-declined`; registration refunds the registration — releasing its seats,
   which promotes the waitlist — or settles the request; ticketing voids the tickets.
   `GET /refund-policy/quote` and the organiser override `POST /payment-orders/{id}/refunds` serve
   FR-18. Proven with the test binder in `RefundRequestedConsumerTest`, `RefundEventConsumersTest`
-  and ticketing's `PaymentEventConsumersTest`.
+  and ticketing's `PaymentEventConsumersTest`. **Observed on a live broker on 2026-10-09:**
+  `docs/verification/2026-m3-refunds-waitlist.md` (100%, 50% and a decline, an organiser override,
+  and the refunded registrations `REFUNDED`).
 - **Refinement — days to the first session.** Counted in whole days to the registration's earliest
   session, carried as `registration-requested.firstSessionStartsAt` and read in
   `conference.registration.time-zone` (Australia/Sydney). An order raised before that field existed
@@ -217,7 +224,8 @@ crosses a service boundary is delivered when it has been observed crossing it.
 ### FR-12: Transfer a ticket to another person
 - [x] **Delivered** — `POST /api/v1/tickets/{ticketCode}/transfer` on `TicketController`, over the
   `Ticket` aggregate's `transferTo`. History is an append-only `List<TransferRecord>` behind an
-  unmodifiable getter; emits `ticket-transferred`.
+  unmodifiable getter; emits `ticket-transferred`. Observed live on 2026-10-09, in the supplementary
+  session of the M5 live run: `docs/verification/2026-m2-payment-saga.md`.
 - **As an** Attendee, **I want to** transfer a ticket to somebody else, **so that** my seat is
   not wasted when I cannot attend.
 - **Acceptance:** a void ticket cannot be transferred; transfer history is append-only.
@@ -229,7 +237,8 @@ crosses a service boundary is delivered when it has been observed crossing it.
 ### FR-13: Check in at a gate
 - [x] **Delivered** — `POST /api/v1/gates/{gateId}/check-ins` on `GateController`, guarded by the
   `CheckInPolicy` domain service and again by the aggregate. Emits `attendee-checked-in` keyed by
-  `sessionId`, carrying both timestamps — **this unblocks FR-16.**
+  `sessionId`, carrying both timestamps — **this unblocks FR-16.** Observed live on 2026-10-09, in
+  the supplementary session of the M5 live run: `docs/verification/2026-m2-payment-saga.md`.
 - **As** Gate staff, **I want to** check an attendee in against their ticket code, **so that**
   entry is controlled and attendance is recorded.
 - **Acceptance:** void tickets are rejected; a ticket may be checked in at most once. The
@@ -246,15 +255,17 @@ crosses a service boundary is delivered when it has been observed crossing it.
 ## System Stories
 
 ### FR-08: Confirm registration and issue tickets on payment
-- [~] **Both halves implemented; the hop is not yet live-verified.** Confirmation:
+- [x] **Delivered** — confirmation:
   `PaymentEventConsumers` emits `registration-confirmed`, live-verified in
   `docs/verification/2026-m2-registration-saga.md` against a hand-injected `payment-succeeded`;
   `payment-service` now produces that event itself (FR-07). Issuance:
-  `RegistrationEventConsumers.registrationConfirmed` now consumes it and issues one `Ticket` per
+  `RegistrationEventConsumers.registrationConfirmed` consumes it and issues one `Ticket` per
   session, emitting a `ticket-issued` per ticket — proven with the Spring Cloud Stream test binder
-  in `RegistrationEventConsumersTest`, but **not yet observed crossing a live broker.** This file
-  is explicit that a green suite is not enough for a story that crosses a service boundary, so it
-  stays `[~]` until the verification note under `docs/verification/` exists.
+  in `RegistrationEventConsumersTest`. **Observed crossing a live broker on 2026-10-09:**
+  `docs/verification/2026-m2-payment-saga.md` (a registration for two sessions confirmed and two
+  `ticket-issued` messages with two distinct codes in the run of record; the two tickets read back
+  from port 8084 in the supplementary session; `ticketing-service`'s group at lag 0 on
+  `registration-confirmed`).
 - **As the** System, **I want to** confirm the registration and issue one ticket per confirmed
   session when payment succeeds, **so that** the attendee receives what they paid for.
 
@@ -262,7 +273,8 @@ crosses a service boundary is delivered when it has been observed crossing it.
 - [x] **Delivered** — both paths. Payment failure via `PaymentEventConsumers`; hold expiry via
   `HoldExpirySweeper.sweep()`. Both observed live — `seats-released:2` on the M2 verification run,
   with `payment-failed` hand-injected. `payment-service` now emits it for `TOK_DECLINE` and
-  `TOK_TIMEOUT`; that producer is covered under FR-07.
+  `TOK_TIMEOUT`; that producer is covered under FR-07. Both paths were also observed with the real
+  producer on 2026-10-09: `docs/verification/2026-m2-payment-saga.md`.
 - **As the** System, **I want to** release held seats when payment fails or the hold window
   expires, **so that** abandoned registrations do not lock seats out of inventory.
 - **Acceptance:** the hold window is configuration (`conference.registration.hold-window`),
@@ -273,14 +285,16 @@ crosses a service boundary is delivered when it has been observed crossing it.
 ## Analytics Service — Real-time Analysis
 
 ### FR-14: View live per-session fill rate
-- [~] **Implemented and tested offline; live-broker run pending (M5 live run).** RT1 —
+- [x] **Delivered** — RT1 —
   `SessionFillRateTopology`, bound as the `sessionFillRate` function — left-joins the
   `session-capacity-changed` table with the summed seat deltas of `seats-reserved` and
   `seats-released`, with no repartition topic. Served by
   `GET /api/v1/analytics/sessions/{sessionId}/fill-rate` (`AnalyticsController`) from the
   `session-fill-rates` store by interactive query. Proven by `SessionFillRateTopologyTest` and by
   `BinderWiringTest`, which drives the topology the binder assembled with the exact bytes the
-  catalogue and registration write. Moves to `[x]` when observed against the live broker.
+  catalogue and registration write. **Observed on a live broker on 2026-10-09:**
+  `docs/verification/2026-m3-analytics.md` (`0.0` before the first registration, `0.9` at nine of
+  ten seats, `1.0` at ten).
 - **As an** Organiser, **I want to** see each session's fill rate updating live, **so that** I
   can spot overflow risk during the event rather than afterwards.
 - **Implementation:** Kafka Streams join of a seat-delta stream against a session-capacity
@@ -291,12 +305,14 @@ crosses a service boundary is delivered when it has been observed crossing it.
   before its reservation. See `docs/superpowers/plans/2026-10-09-m3-analytics-streams.md`.
 
 ### FR-15: Receive a 90% capacity alert
-- [~] **Implemented and tested offline; live-broker run pending (M5 live run).** Same topology as
+- [x] **Delivered** — same topology as
   FR-14. `CapacityAlertOnce`, a `processValues` processor with its own changelogged
   `capacity-alerts-sent` store, writes one `SessionCapacityAlert` to `session-capacity-alert`
   (key `sessionId`) the first time a session reaches `conference.analytics.capacity-alert-threshold`
   (default `0.9`). `GET /api/v1/analytics/sessions/at-risk` lists sessions at or above a threshold.
-  Proven by `SessionFillRateTopologyTest` and `BinderWiringTest`.
+  Proven by `SessionFillRateTopologyTest` and `BinderWiringTest`. **Observed on a live broker on
+  2026-10-09:** `docs/verification/2026-m3-analytics.md` (one alert at 9 of 10 seats for the run's
+  session, and the session listed by `at-risk`).
 - **As an** Organiser, **I want to** be alerted when a session crosses 90% of capacity,
   **so that** I can move it to a larger room before it overflows.
 - **Acceptance:** each session alerts **once**, not on every subsequent reservation.
@@ -305,14 +321,16 @@ crosses a service boundary is delivered when it has been observed crossing it.
   the threshold alerts too.
 
 ### FR-16: Monitor gate throughput and queue congestion
-- [~] **Implemented and tested offline; live-broker run pending (M5 live run).** RT2 —
+- [x] **Delivered** — RT2 —
   `GateThroughputTopology`, bound as `gateThroughput` — re-keys `attendee-checked-in` from
   `sessionId` to `gateId` through one named repartition (`checkins-by-gate`) and aggregates
   one-minute tumbling windows into the `gate-throughput` store. Served by
   `GET /api/v1/analytics/gates/{gateId}/throughput` and `GET /api/v1/analytics/gates/congested`;
   `gate-congestion-alert` (key `gateId`) carries at most one alert per gate per window while the
   average wait exceeds `conference.analytics.gate-congestion-threshold` (default `PT2M`). Proven by
-  `GateThroughputTopologyTest` and `BinderWiringTest`.
+  `GateThroughputTopologyTest` and `BinderWiringTest`. **Observed on a live broker on 2026-10-09:**
+  `docs/verification/2026-m3-analytics.md` (a gate `congested` at an average wait of 300991 ms, one
+  `gate-congestion-alert` for its window, and the `checkins-by-gate` repartition topic on the broker).
 - **As an** Organiser, **I want to** see check-ins per minute and average wait per gate,
   **so that** I can open another gate before a queue delays the schedule.
 - **Implementation:** one-minute tumbling window keyed by gate. See §RT2.
@@ -327,7 +345,9 @@ crosses a service boundary is delivered when it has been observed crossing it.
 - [x] **Delivered** — `POST /api/v1/concierge/agenda`, the `AgendaBuilder` agent and its four
   tools, with `ClashDetector` re-run after the agent answers so the clash-free guarantee holds
   even when the model skips the tool. Live-verified against Gemini twice; see
-  `docs/verification/2026-m4-agenda-builder.md`.
+  `docs/verification/2026-m4-agenda-builder.md`, whose *M5 live run — 2026-10-09* section records
+  that the run of record's `demo-m4.sh` failed on an empty model answer (since handled by a single
+  retry), and that an agenda was produced in a supplementary session.
 - **As an** Attendee, **I want to** describe my interests in plain English and receive a
   clash-free personal agenda, **so that** I do not have to read a 60-session programme.
 - **Sample input:** *"I'm into ML infrastructure and observability. Keep my afternoons free on
@@ -336,13 +356,13 @@ crosses a service boundary is delivered when it has been observed crossing it.
   **must** call the deterministic `detectTimeClashes` tool before proposing an agenda.
 
 ### FR-18: Raise a support request handled by an agent
-- [~] **Implemented and tested offline against a scripted model and the agreed contracts; live
-  Gemini + live services run pending (M5 live run).** `POST /api/v1/concierge/support` on
+- [x] **Delivered** — `POST /api/v1/concierge/support` on
   `SupportController`; the `SupportAgent` and its six tools in `SupportTools`; the refund limit in
   `RefundGuard`, checked inside `requestRefund` on a quote the tool fetches itself; the organisers'
-  queue at `GET /api/v1/concierge/escalations`. See `docs/verification/2026-m4-support-agent.md`.
-  The payment and registration tools are coded against the FR-11 contract agreed with that track,
-  which is one more reason this stays `[~]` until a live run crosses those services.
+  queue at `GET /api/v1/concierge/escalations`. **Observed against live Gemini and the live
+  services on 2026-10-09:** `docs/verification/2026-m4-support-agent.md` (four conversations, all
+  answered `200`; the refund requested, the over-limit and ineligible cases escalated, the injection
+  moved nobody's money, and every guardrail checked on the registration service itself).
 - **Refinement — the attendee is never the model's to name.** It comes from the request; no tool
   takes an attendee id, and every tool that names a registration refuses one the requester does
   not hold, with the same answer as for one that does not exist.
