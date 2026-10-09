@@ -1,0 +1,48 @@
+@startuml domain-model
+' Report §2.4 — the whole domain model at class-name level: one package per bounded context
+' plus common-events as the Published Language. Attributes and operations are in the
+' per-context diagrams (domain-programme, -registration, -billing, -access, -assistance,
+' -published-language), which include exactly the same source fragments as this one.
+' New classes go in the include/domain-*.iuml fragments and new event links in
+' include/domain-event-links.iuml.
+!pragma layout smetana
+!include include/style.iuml
+hide members
+left to right direction
+hide empty members
+
+title Converge — domain model overview (bounded contexts and Published Language)
+
+!$overview = "true"
+!include include/domain-programme.iuml
+!include include/domain-registration.iuml
+!include include/domain-billing.iuml
+!include include/domain-access.iuml
+!include include/domain-assistance.iuml
+!include include/domain-insight.iuml
+!include include/domain-published-language.iuml
+!include include/domain-event-links.iuml
+
+' White links (Smetana ignores hidden and transparent ones) only stagger the contexts into two columns.
+Event -[#FFFFFF]-> Registration
+PaymentOrder -[#FFFFFF]-> Ticket
+ClashDetector -[#FFFFFF]-> FillRate
+
+legend right
+  <b>Reading this diagram</b>
+  «AggregateRoot», «Entity», «ValueObject», «DomainService»,
+  «ReadModel», «DomainEvent», «Port»: DDD roles of each class
+  filled-diamond line: composition inside an aggregate
+  solid arrow: association to an enumeration-typed attribute
+  dashed arrow "by id only": a reference across aggregates
+  Every Published Language record implements DomainEvent:
+  topic = eventType(), key = partitionKey().
+  <b>Events are not drawn here.</b> Which aggregate publishes
+  and which reacts to each Published Language record is in the
+  per-context figures (domain-programme, -registration,
+  -billing, -access, -insight, -published-language).
+  Attendee assistance has no events: it reads other contexts
+  over REST. Nothing crosses a context boundary except the
+  Published Language records.
+endlegend
+@enduml

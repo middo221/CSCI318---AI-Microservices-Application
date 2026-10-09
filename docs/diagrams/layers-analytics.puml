@@ -1,0 +1,125 @@
+@startuml layers-analytics
+' Report §3.2 — analytics-service layers, from the classes on main (FR-14, FR-15, FR-16 and the
+' funnel). The topologies themselves are drawn operator by operator in streams-topologies.puml.
+!pragma layout smetana
+!include include/style.iuml
+set separator ::
+hide empty members
+skinparam linetype polyline
+
+title analytics-service — layered architecture (au.edu.uow.csci318.conference.analytics)
+
+package "api  (presentation layer)" as api <<api>> {
+  class AnalyticsController <<@RestController>>
+  class GlobalExceptionHandler <<@RestControllerAdvice>>
+  package "api.dto" as api_dto {
+    class "FillRateResponse\nGateThroughputResponse\nFunnelResponse" as resps <<record>>
+  }
+}
+
+package "application  (service layer)" as application <<application>> {
+  class AnalyticsQueryService <<@Service>>
+}
+
+package "domain  (domain layer)" as domain <<domain>> {
+  package "domain.model" as dom_model {
+    class "FillRate · GateStats\nGateThroughput · RegistrationFunnel\nAlertThresholds" as vos <<ValueObject>>
+    enum FunnelStage
+  }
+  package "domain.event" as dom_event {
+    class SessionCapacityAlert <<DomainEvent>>
+    class GateCongestionAlert <<DomainEvent>>
+  }
+  package "domain.readmodel" as dom_rm {
+    interface SessionFillRates <<Port>>
+    interface GateThroughputs <<Port>>
+    interface RegistrationFunnelCounts <<Port>>
+  }
+}
+
+package "infrastructure  (infrastructure layer)" as infrastructure <<infrastructure>> {
+  package "infrastructure.streams" as inf_streams {
+    class StreamsTopologyConfiguration <<@Configuration>>
+    class SessionFillRateTopology
+    class GateThroughputTopology
+    class RegistrationFunnelTopology
+    class "CapacityAlertOnce\nCongestionAlertOncePerWindow" as procs <<FixedKeyProcessor>>
+    class "EventSerdes · StoreNames" as serdes
+  }
+  package "infrastructure.query" as inf_query {
+    class SessionFillRateStore <<@Component>>
+    class GateThroughputStore <<@Component>>
+    class RegistrationFunnelStore <<@Component>>
+    interface StateStoreLookup
+    class InteractiveQueryStateStoreLookup <<@Component>>
+  }
+  package "infrastructure.config" as inf_config {
+    class AnalyticsConfiguration <<@Configuration>>
+    class AnalyticsProperties <<@ConfigurationProperties>>
+  }
+}
+
+' api -> application
+AnalyticsController ..> AnalyticsQueryService
+resps ..> vos : from(...)
+
+' application -> domain
+AnalyticsQueryService ..> SessionFillRates
+AnalyticsQueryService ..> GateThroughputs
+AnalyticsQueryService ..> RegistrationFunnelCounts
+AnalyticsQueryService ..> vos : thresholds applied here
+
+' infrastructure implements the domain's read-model ports
+SessionFillRates <|.. SessionFillRateStore
+GateThroughputs <|.. GateThroughputStore
+RegistrationFunnelCounts <|.. RegistrationFunnelStore
+SessionFillRateStore ..> StateStoreLookup
+GateThroughputStore ..> StateStoreLookup
+RegistrationFunnelStore ..> StateStoreLookup
+StateStoreLookup <|.. InteractiveQueryStateStoreLookup
+
+' the topologies: inbound adapters that build the read models
+StreamsTopologyConfiguration ..> SessionFillRateTopology : @Bean sessionFillRate
+StreamsTopologyConfiguration ..> GateThroughputTopology : @Bean gateThroughput
+StreamsTopologyConfiguration ..> RegistrationFunnelTopology : @Bean registrationFunnel
+StreamsTopologyConfiguration ..> serdes : Serde<T> beans
+SessionFillRateTopology ..> procs
+GateThroughputTopology ..> procs
+procs ..> SessionCapacityAlert : raise(...)
+procs ..> GateCongestionAlert : raise(...)
+SessionFillRateTopology ..> vos : FillRate
+GateThroughputTopology ..> vos : GateStats
+RegistrationFunnelTopology ..> FunnelStage
+AnalyticsConfiguration ..> AnalyticsProperties
+AnalyticsConfiguration ..> vos : AlertThresholds @Bean
+
+note bottom of InteractiveQueryStateStoreLookup
+  Spring Cloud Stream's InteractiveQueryService.
+  A store that cannot be queried yet (starting,
+  rebalancing, broker unreachable) becomes
+  ReadModelUnavailableException → 503 STORE_REBUILDING.
+end note
+
+note bottom of StreamsTopologyConfiguration
+  Kafka Streams binder, one application-id per function:
+  analytics-session-fill-rate, analytics-gate-throughput,
+  analytics-registration-funnel. State stores are in
+  memory and changelogged — <b>no database</b>; the read
+  models are rebuilt from the topics on every start.
+end note
+
+note bottom of dom_rm
+  Domain exceptions: SessionNotTrackedException (404),
+  GateNotTrackedException (404),
+  ReadModelUnavailableException (503).
+end note
+
+legend right
+  <b>Dependency rule</b>
+  api ──> application ──> domain <── infrastructure
+  The topologies are <i>inbound</i> adapters that write
+  the read models; the query stores are <i>outbound</i>
+  adapters that read them.
+  hollow triangle = implements a port
+endlegend
+@enduml

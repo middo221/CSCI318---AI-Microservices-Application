@@ -1,0 +1,74 @@
+@startuml activity-fr-04
+' Report §2.1 — FR-04 Adjust a published session's capacity.
+' Source: EventController.changeCapacity, UpdateCapacityRequest,
+' EventApplicationService.changeSessionCapacity, Event.changeSessionCapacity,
+' CatalogEventConsumers.sessionCapacityChanged, SessionViewProjection, SessionView.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-04 — Adjust a session's seat capacity
+
+|Organiser|
+start
+:PUT /api/v1/events/{id}/sessions/{sessionId}/capacity
+{seatCapacity};
+
+|event-catalog-service|
+if (seatCapacity <= 0?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:EventApplicationService.changeSessionCapacity;
+if (event exists?) then (no)
+  $ERR:404 EVENT_NOT_FOUND;
+  stop
+else (yes)
+endif
+:Event.changeSessionCapacity(sessionId, capacity);
+if (session in this event?) then (no)
+  $ERR:404 SESSION_NOT_FOUND;
+  stop
+else (yes)
+endif
+:Session.changeSeatCapacity(new value),
+record SessionCapacityChanged;
+:EventRepository.save → catalogdb.sessions;
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:session-capacity-changed
+key: sessionId>
+
+fork
+  |event-catalog-service|
+  $OK:200 OK SessionResponse;
+  |Organiser|
+  :sees the new capacity;
+fork again
+  |registration-service|
+  :session-capacity-changed<
+  :SessionViewProjection.apply
+  find or create the SessionView;
+  :setCapacity(new value)
+  reservedSeats untouched
+  → regdb.session_views;
+end fork
+stop
+
+note right
+  <b>Reductions are accepted, never rejected.</b>
+  Seats already held or confirmed are kept
+  (grandfathered). New registrations are refused
+  with 409 SESSION_FULL while reservedSeats +
+  quantity would exceed the new capacity (FR-06).
+  No processed-event check here: applying the
+  same absolute capacity twice is harmless.
+end note
+
+note left
+  Allowed for DRAFT and PUBLISHED events.
+  A CANCELLED event refuses the change,
+  but no use case on main cancels an event.
+end note
+@enduml

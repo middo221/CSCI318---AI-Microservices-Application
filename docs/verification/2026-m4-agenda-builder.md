@@ -237,3 +237,48 @@ the failed 500 run. Fixed by writing the response to a file and passing the path
 the corrected check was then tested against a deliberately clashing fixture to confirm it *can*
 fail. Worth recording as a lessons-learned item in its own right: **a verification step that
 cannot fail is worse than no verification step, because it manufactures false confidence.**
+
+---
+
+## M5 live run — 2026-10-09
+
+FR-17 stays `[x]`: the live run of 2026-09-03 above is unchanged. This section records what the M5
+live run showed, which was a failure of the agenda request in the run of record and, in a
+supplementary session, an agenda that was produced. Every value is from
+`logs/live-run-20261009-151644/` (gitignored).
+
+**Run of record (commit `448345e`), row 06, `scripts/demo-m4.sh`: failed.** `06-demo-m4.txt`: the
+agenda request answered `502 LLM_UNAVAILABLE` after 17 s, and the script exited 1.
+
+- *What the model did.* `services/concierge-service.log` (15:20:22) records Gemini 2.5 Flash
+  answering `HTTP 200` with a candidate that has `"finishReason": "STOP"` and no `parts`, with
+  `thoughtsTokenCount` 2700 of 7288 tokens in all. LangChain4j then threw
+  `OutputParsingException: Failed to parse null (base64: null) into ...ProposedAgenda`, and the
+  platform answered `502 LLM_UNAVAILABLE`, as its error contract says.
+- *Not a missing key.* Row 07 (the support agent) called Gemini successfully through the same
+  concierge service minutes later in the same run. The script's own hint on the `502` ("the concierge
+  has no language model ... Put GEMINI_API_KEY in .env") was therefore wrong for this failure; commit
+  `9876485` changed `demo-m4.sh` to tell a missing key from a failed model call.
+
+**Fix: commit `d666952`.** `EmptyAnswer.retryOnce` asks the agenda agent once more when the model's
+answer cannot be read. It wraps the agenda agent only: that agent's tools only read, so asking again
+is safe, whereas the support agent's tools act (they can request refunds) and is excluded.
+
+**Supplementary session (services restarted from commit `9876485`; not part of the run of record).**
+
+- `06b-demo-m4.txt`: the agenda request answered `429 LLM_RATE_LIMITED` after 47 s. The concierge
+  log shows the empty answer recurring (15:35:28, WARN `EmptyAnswer`: "the model's answer could not
+  be read (...); asking once more"), so the retry fired, and the retried loop was then rate-limited
+  by Gemini (15:35:41). The retry therefore ran, but this request did not produce an agenda.
+- `08b-newman.txt`: the Newman request `Build Dana a personal agenda (FR-17)` answered `200 OK`
+  in 39.4 s and its assertions `200 OK` and `an agenda came back` held. In the same run the FR-18
+  request answered `429` (see `docs/verification/2026-m4-support-agent.md`). The concierge log names
+  the exhausted quota as `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, `quotaValue` 20, the
+  model's free daily allowance.
+
+**What this does and does not show.** FR-17 produced an agenda on a live model on 2026-09-03 and,
+in the supplementary session, on 2026-10-09. The run of record's own `demo-m4.sh` row did not: it
+failed on an empty model answer, a condition the free-tier model can produce and which the
+supplementary session shows the retry handling, though not on the request that script made. The
+clash guarantee is not re-demonstrated by this run: the agenda Newman received was not checked for
+clashes beyond the collection's `an agenda came back` assertion.

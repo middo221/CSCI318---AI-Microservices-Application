@@ -1,0 +1,185 @@
+@startuml layers-concierge
+' Report §3.2 — concierge-service layers, from the classes on main (Agent 1 FR-17, Agent 2 FR-18).
+!pragma layout smetana
+!include include/style.iuml
+set separator ::
+hide empty members
+allowmixing
+skinparam linetype polyline
+
+title concierge-service — layered architecture (au.edu.uow.csci318.conference.concierge)
+
+package "api  (presentation layer)" as api <<api>> {
+  class ConciergeController <<@RestController>>
+  class SupportController <<@RestController>>
+  class GlobalExceptionHandler <<@RestControllerAdvice>>
+  package "api.dto" as api_dto {
+    class "AgendaRequest · AgendaResponse\nSupportRequest · SupportResponse\nEscalationResponse" as dtos <<record>>
+  }
+}
+
+package "application  (service layer)" as application <<application>> {
+  class AgendaApplicationService <<@Service>>
+  class SupportApplicationService <<@Service>>
+  class "AgendaResult · SupportResult" as results <<record>>
+  class "LlmUnavailableException\nAgentLoopLimitException" as app_ex
+  package "application.command" as app_cmd {
+    class "BuildAgendaCommand\nHandleSupportRequestCommand" as cmds <<record>>
+  }
+  package "application.agent" as app_agent {
+    interface AgendaBuilder <<Agent>>
+    class AgendaTools <<Agent>>
+    class AgendaToolsFactory <<@Component>>
+    interface AgendaAgentFactory <<Port>>
+    interface SupportAgent <<Agent>>
+    class SupportTools <<Agent>>
+    class SupportToolsFactory <<@Component>>
+    interface SupportAgentFactory <<Port>>
+    class "ProposedAgenda · SupportReply" as replies <<record>>
+  }
+  package "application.port" as app_port {
+    interface CatalogPort <<Port>>
+    interface RegistrationPort <<Port>>
+    interface PaymentPort <<Port>>
+    interface TicketingPort <<Port>>
+    interface EscalationStore <<Port>>
+    interface UpstreamResult
+  }
+}
+
+package "domain  (domain layer)" as domain <<domain>> {
+  package "domain.model" as dom_model {
+    class "SessionSummary · TimeSlot · AvailabilitySummary\nRegistrationSummary · Clash" as vos <<ValueObject>>
+    class "RegistrationDetails · TicketSummary · RefundQuote\nRefundDecision · RefundReceipt · RequestedRefund\nEscalation · SupportOutcome" as support_vos <<ValueObject>>
+  }
+  package "domain.service" as dom_service {
+    class ClashDetector <<DomainService>>
+    class RefundGuard <<DomainService>>
+  }
+}
+
+package "infrastructure  (infrastructure layer)" as infrastructure <<infrastructure>> {
+  package "infrastructure.agent" as inf_agent {
+    class LangChain4jAgendaAgentFactory <<@Component>>
+    class LangChain4jSupportAgentFactory <<@Component>>
+    class ConfiguredChatModel <<@Component>>
+    class LoopLimit
+  }
+  package "infrastructure.client" as inf_client {
+    class RestCatalogClient
+    class RestRegistrationClient
+    class RestPaymentClient
+    class RestTicketingClient
+    class UpstreamResults
+    class "client.dto payloads" as payloads <<record>>
+  }
+  package "infrastructure.escalation" as inf_esc {
+    class InMemoryEscalationStore
+  }
+  package "infrastructure.config" as inf_config {
+    class ConciergeConfiguration <<@Configuration>>
+    class ConciergeProperties <<@ConfigurationProperties>>
+  }
+}
+
+component "event-catalog-service :8081" as catalog_svc
+component "registration-service :8082" as registration_svc
+component "payment-service :8083" as payment_svc
+component "ticketing-service :8084" as ticketing_svc
+cloud "Google Gemini API" as gemini
+
+' api -> application
+ConciergeController ..> AgendaApplicationService
+SupportController ..> SupportApplicationService : handle,\nescalations
+dtos ..> cmds : toCommand()
+dtos ..> results : from(...)
+
+' Agent 1 (FR-17)
+AgendaApplicationService ..> AgendaToolsFactory : create() per request
+AgendaApplicationService ..> AgendaAgentFactory : agentFor(tools)
+AgendaApplicationService ..> ClashDetector : verify
+AgendaAgentFactory ..> AgendaBuilder : returns
+AgendaToolsFactory ..> AgendaTools : new
+AgendaTools ..> CatalogPort
+AgendaTools ..> RegistrationPort
+AgendaTools ..> ClashDetector : detectTimeClashes
+
+' Agent 2 (FR-18)
+SupportApplicationService ..> SupportToolsFactory : create(attendeeId,\nmessage) per request
+SupportApplicationService ..> SupportAgentFactory : agentFor(tools)
+SupportApplicationService ..> support_vos : outcome from\nthe tools' record
+SupportAgentFactory ..> SupportAgent : returns
+SupportAgent ..> replies : structured output
+SupportToolsFactory ..> SupportTools : new, bound\nto one attendee
+SupportTools ..> RegistrationPort : lookups,\nrequestRefund
+SupportTools ..> PaymentPort : quoteRefund
+SupportTools ..> TicketingPort : ticketsFor
+SupportTools ..> EscalationStore : open
+SupportTools ..> RefundGuard : evaluate(quote,\nalreadyRequested)
+RefundGuard ..> support_vos
+ClashDetector ..> vos
+
+' infrastructure implements the application's ports
+AgendaAgentFactory <|.. LangChain4jAgendaAgentFactory
+SupportAgentFactory <|.. LangChain4jSupportAgentFactory
+LangChain4jAgendaAgentFactory ..> ConfiguredChatModel
+LangChain4jSupportAgentFactory ..> ConfiguredChatModel
+LangChain4jAgendaAgentFactory ..> LoopLimit
+LangChain4jSupportAgentFactory ..> LoopLimit
+CatalogPort <|.. RestCatalogClient
+RegistrationPort <|.. RestRegistrationClient
+PaymentPort <|.. RestPaymentClient
+TicketingPort <|.. RestTicketingClient
+EscalationStore <|.. InMemoryEscalationStore
+RestRegistrationClient ..> UpstreamResults
+RestPaymentClient ..> UpstreamResults
+RestTicketingClient ..> UpstreamResults
+UpstreamResults ..> UpstreamResult : Ok / Rejected /\nUnavailable
+RestCatalogClient ..> payloads
+RestRegistrationClient ..> payloads
+RestPaymentClient ..> payloads
+RestTicketingClient ..> payloads
+ConciergeConfiguration ..> ConciergeProperties
+ConciergeConfiguration ..> RefundGuard : @Bean (threshold,\ncurrency)
+ConciergeConfiguration ..> InMemoryEscalationStore : @Bean
+
+' outbound calls
+RestCatalogClient --> catalog_svc : GET /api/v1/sessions/search
+RestRegistrationClient --> registration_svc : GET availability, registrations\nPOST /registrations/{id}/refund-requests
+RestPaymentClient --> payment_svc : GET /api/v1/refund-policy/quote
+RestTicketingClient --> ticketing_svc : GET /api/v1/registrations/{id}/tickets
+ConfiguredChatModel --> gemini : ChatModel\n(gemini-2.5-flash)
+
+note right of app_port
+  Unlike the other services, the concierge's
+  ports live in the <b>application</b> layer
+  (application.port, application.agent), not in
+  domain. Its domain holds only immutable
+  records and two stateless services — no
+  repositories, no persistence, no database.
+end note
+
+note bottom of SupportTools
+  Not a Spring bean: one instance per conversation,
+  bound to the attendee from the HTTP request.
+  @Tool methods: listMyRegistrations, lookupRegistration,
+  lookupTickets, evaluateRefundPolicy, requestRefund,
+  escalateToOrganiser. No tool takes an attendee id.
+  Round-trip ceiling 8 (Agent 1: 12) → LLM_LOOP_LIMIT.
+end note
+
+note bottom of AgendaTools
+  Not a Spring bean: a fresh instance per request,
+  so its "dossier" of sessions the agent actually
+  retrieved cannot leak between attendees.
+  @Tool methods: searchSessions, getSessionAvailability,
+  getAttendeeRegistrations, detectTimeClashes.
+end note
+
+legend right
+  <b>Dependency rule</b>
+  api ──> application ──> domain
+  infrastructure implements the application's ports
+  hollow triangle = implements a port
+endlegend
+@enduml

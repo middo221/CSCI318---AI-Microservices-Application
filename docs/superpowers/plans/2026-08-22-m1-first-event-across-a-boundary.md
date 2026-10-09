@@ -1,5 +1,10 @@
 # Converge M1 — First Event Across a Boundary Implementation Plan
 
+> **STATUS: COMPLETE** — merged to `main` on 2026-08-22 (`ff3c896`) and re-verified end to end on
+> 2026-08-28 (`ef3c622`). Live-broker evidence: `docs/verification/2026-m1-kafka-hop.md` and
+> `docs/verification/2026-m1-catalogue-replication.md`. The step checkboxes below were not kept
+> current during execution; the git history and the verification notes are the record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Complete the Programme bounded context — sessions, speakers, publication and catalogue search — and get domain events travelling from `event-catalog-service` to `registration-service` over Apache Kafka, feeding a local `SessionView` read replica.

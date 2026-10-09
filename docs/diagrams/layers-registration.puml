@@ -1,0 +1,166 @@
+@startuml layers-registration
+' Report §3.2 — registration-service layers, from the classes on main (FR-06, FR-09, FR-10, FR-11).
+!pragma layout smetana
+!include include/style.iuml
+set separator ::
+hide empty members
+skinparam linetype polyline
+
+title registration-service — layered architecture (au.edu.uow.csci318.conference.registration)
+
+package "api  (presentation layer)" as api <<api>> {
+  class RegistrationController <<@RestController>>
+  class SessionAvailabilityController <<@RestController>>
+  class WaitlistController <<@RestController>>
+  class GlobalExceptionHandler <<@RestControllerAdvice>>
+  package "api.dto" as api_dto {
+    class "CreateRegistrationRequest (SessionLine)\nRefundRequest · JoinWaitlistRequest" as reqs <<record>>
+    class "RegistrationResponse · SessionAvailabilityResponse\nRefundRequestResponse · WaitlistEntryResponse" as resps <<record>>
+  }
+}
+
+package "application  (service layer)" as application <<application>> {
+  class RegistrationApplicationService <<@Service>>
+  class WaitlistApplicationService <<@Service>>
+  class SessionAvailabilityService <<@Service>>
+  class SessionViewProjection <<@Service>>
+  class ConflictRetry
+  enum PaymentSettlement
+  package "application.command" as app_cmd {
+    class "RequestRegistrationCommand\nSessionRequest" as cmds <<record>>
+  }
+}
+
+package "domain  (domain layer)" as domain <<domain>> {
+  package "domain.model" as dom_model {
+    class Registration <<AggregateRoot>>
+    class SeatHold <<Entity>>
+    class Waitlist <<AggregateRoot>>
+    class WaitlistEntry <<Entity>>
+    class SessionView <<ReadModel>>
+    class "AttendeeRef · Money · HoldWindow\nTimeSlot · WaitlistPlace" as vos <<ValueObject>>
+  }
+  package "domain.service" as dom_service {
+    class SeatAllocationService <<DomainService>>
+    class RegistrationPricingService <<DomainService>>
+  }
+  package "domain.repository" as dom_repo {
+    interface RegistrationRepository <<Port>>
+    interface SessionViewRepository <<Port>>
+    interface WaitlistRepository <<Port>>
+  }
+  package "domain.event" as dom_event {
+    interface DomainEventPublisher <<Port>>
+  }
+}
+
+package "infrastructure  (infrastructure layer)" as infrastructure <<infrastructure>> {
+  package "infrastructure.messaging" as inf_msg {
+    class CatalogEventConsumers <<@Configuration>>
+    class PaymentEventConsumers <<@Configuration>>
+    class WaitlistEventConsumers <<@Configuration>>
+    class ProcessedEventStore <<@Component>>
+    class ProcessedEvent <<@Entity>>
+    interface ProcessedEventJpaRepository <<Spring Data>>
+    class StreamBridgeDomainEventPublisher <<@Component>>
+  }
+  package "infrastructure.scheduling" as inf_sched {
+    class HoldExpirySweeper <<@Component>>
+  }
+  package "infrastructure.persistence" as inf_persist {
+    class JpaRegistrationRepository <<@Repository>>
+    class JpaSessionViewRepository <<@Repository>>
+    class JpaWaitlistRepository <<@Repository>>
+    interface "RegistrationJpaRepository\nSessionViewJpaRepository\nWaitlistJpaRepository" as springdata <<Spring Data>>
+  }
+}
+
+' api -> application
+RegistrationController ..> RegistrationApplicationService
+SessionAvailabilityController ..> SessionAvailabilityService
+WaitlistController ..> WaitlistApplicationService
+reqs ..> cmds : toCommand()
+resps ..> Registration : from(...)
+
+' application -> domain
+RegistrationApplicationService ..> Registration
+RegistrationApplicationService ..> SeatAllocationService
+RegistrationApplicationService ..> RegistrationPricingService
+RegistrationApplicationService ..> RegistrationRepository
+RegistrationApplicationService ..> SessionViewRepository
+RegistrationApplicationService ..> DomainEventPublisher
+RegistrationApplicationService ..> PaymentSettlement : settlePayment returns
+WaitlistApplicationService ..> Waitlist
+WaitlistApplicationService ..> WaitlistRepository
+WaitlistApplicationService ..> SessionAvailabilityService : is the session full?
+WaitlistApplicationService ..> DomainEventPublisher
+SessionAvailabilityService ..> SessionViewRepository
+SessionViewProjection ..> SessionViewRepository
+
+' domain internals
+Registration *-- SeatHold
+Registration *-- vos
+Waitlist *-- WaitlistEntry
+Waitlist ..> vos : WaitlistPlace
+SeatAllocationService ..> SessionView
+SeatAllocationService ..> SeatHold : creates
+RegistrationPricingService ..> SessionView
+
+' infrastructure implements the domain's ports
+RegistrationRepository <|.. JpaRegistrationRepository
+SessionViewRepository <|.. JpaSessionViewRepository
+WaitlistRepository <|.. JpaWaitlistRepository
+DomainEventPublisher <|.. StreamBridgeDomainEventPublisher
+JpaRegistrationRepository --> springdata : delegates
+JpaSessionViewRepository --> springdata : delegates
+JpaWaitlistRepository --> springdata : delegates
+ProcessedEventStore --> ProcessedEventJpaRepository
+ProcessedEventJpaRepository ..> ProcessedEvent
+
+' inbound adapters call the application layer, as the controllers do
+SessionViewProjection <.. CatalogEventConsumers : session-added,\nsession-capacity-changed
+RegistrationApplicationService <.. PaymentEventConsumers : payment-succeeded → settlePayment\npayment-failed → cancelUnpaid\nrefund-issued → applyRefundIssued\nrefund-declined → applyRefundDeclined
+WaitlistApplicationService <.. WaitlistEventConsumers : seats-released →\npromoteFor (its own topic)
+RegistrationApplicationService <.. HoldExpirySweeper : expireOverdue(now)\nevery sweep-interval
+CatalogEventConsumers --> ProcessedEventStore : event-published only
+PaymentEventConsumers --> ProcessedEventStore : markProcessed(eventId)
+WaitlistEventConsumers --> ProcessedEventStore : markProcessed(eventId)
+PaymentEventConsumers ..> ConflictRetry
+WaitlistEventConsumers ..> ConflictRetry
+
+note bottom of StreamBridgeDomainEventPublisher
+  AFTER_COMMIT send, key = partitionKey().
+  Topics: registration-requested, seats-reserved,
+  seats-released, registration-confirmed,
+  registration-cancelled, registration-expired,
+  refund-requested, waitlist-joined,
+  waitlist-promoted.
+end note
+
+note bottom of dom_model
+  Domain exceptions: SessionNotFoundException (404),
+  RegistrationNotFoundException (404),
+  SessionFullException (409 SESSION_FULL),
+  SessionNotFullException, AlreadyWaitlistedException,
+  RegistrationNotConfirmedException,
+  NothingToRefundException,
+  RefundAlreadyRequestedException (all 409).
+end note
+
+note bottom of ConflictRetry
+  Bounded retry of a unit of work that lost an
+  optimistic race; promoteFor and the processed-event
+  claim each run in their own (REQUIRES_NEW)
+  transaction.
+end note
+
+legend right
+  <b>Dependency rule</b>
+  api ──> application ──> domain <── infrastructure
+  Kafka consumers and the scheduler are <i>inbound</i>
+  adapters: like controllers, they call the
+  application layer.
+  dashed arrow = depends on / calls
+  hollow triangle = implements a domain port
+endlegend
+@enduml

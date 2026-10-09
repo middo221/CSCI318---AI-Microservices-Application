@@ -1,0 +1,64 @@
+@startuml activity-fr-05
+' Report §2.1 — FR-05 Browse and search the published catalogue.
+' Source: EventController.list, SessionController.search, CatalogSearchService.search.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-05 — Browse and search the published catalogue
+
+|Attendee|
+start
+if (browse whole events, or search sessions?) then (browse)
+  :GET /api/v1/events?status=PUBLISHED;
+  |event-catalog-service|
+  if (status given but not DRAFT,
+  PUBLISHED or CANCELLED?) then (yes)
+    $ERR:400 INVALID_REQUEST
+    "unknown event status";
+    stop
+  else (no)
+  endif
+  :EventApplicationService.list(status)
+  (every event when no status is given);
+  $OK:200 OK, a list of EventResponse,
+  each with its sessions;
+else (search)
+  :GET /api/v1/sessions/search
+  ?track=&day=&speaker=&q=
+  (every parameter optional);
+  |event-catalog-service|
+  if (day not an ISO date?) then (yes)
+    $ERR:400 Bad Request
+    (Spring parameter conversion);
+    stop
+  else (no)
+  endif
+  :CatalogSearchService.search(SessionSearchQuery);
+  if (speaker given?) then (yes)
+    :resolve speaker ids: id equals the value,
+    or name contains it (case-insensitive);
+  else (no)
+  endif
+  :load events with status PUBLISHED
+  and flatten their sessions;
+  :keep sessions matching every filter given:
+  · track — Track.matches, case-insensitive
+  · day — the slot's start date
+  · speaker — one of the resolved ids
+  · q — in title or track, case-insensitive;
+  $OK:200 OK, a list of SessionResponse
+  (empty when nothing matches);
+endif
+
+|Attendee|
+:reads the programme;
+stop
+
+note right
+  Only search is restricted to PUBLISHED
+  events. GET /events with no status lists
+  every event, drafts included.
+  The concierge's searchSessions tool calls
+  this same search endpoint (FR-17).
+end note
+@enduml

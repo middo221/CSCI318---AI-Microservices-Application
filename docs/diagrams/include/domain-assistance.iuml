@@ -1,0 +1,152 @@
+' Attendee assistance bounded context — concierge-service, package ...concierge.domain
+' Shared by domain-assistance.puml (full detail) and domain-model.puml (overview).
+' Non-persistent: every class here is an immutable record or a stateless service.
+
+package "Attendee assistance  (concierge-service)" as assistance {
+
+  class SessionSummary <<ValueObject>> {
+    sessionId : String
+    eventId : String
+    title : String
+    track : String
+    slot : TimeSlot
+    speakerId : String
+    seatCapacity : int
+    priceAmount : BigDecimal
+    priceCurrency : String
+    --
+    clashesWith(SessionSummary) : boolean
+  }
+
+  class "TimeSlot" as X_TimeSlot <<ValueObject>> {
+    start : LocalDateTime
+    end : LocalDateTime
+    --
+    day() : LocalDate
+    overlaps(TimeSlot) : boolean
+  }
+
+  class AvailabilitySummary <<ValueObject>> {
+    sessionId : String
+    title : String
+    capacity : int
+    reservedSeats : int
+    availableSeats : int
+    --
+    isFull() : boolean
+  }
+
+  class RegistrationSummary <<ValueObject>> {
+    registrationId : String
+    attendeeId : String
+    eventId : String
+    status : String
+    sessionIds : List<String>
+  }
+
+  class Clash <<ValueObject>> {
+    firstSessionId : String
+    firstTitle : String
+    secondSessionId : String
+    secondTitle : String
+    --
+    describe() : String
+  }
+
+  class ClashDetector <<DomainService>> {
+    + detect(List<SessionSummary>) : List<Clash>
+    + firstConflict(SessionSummary, List<SessionSummary>) : Optional<SessionSummary>
+    + clashFreePrefix(List<SessionSummary>) : List<SessionSummary>
+  }
+
+  ' ---- Agent 2, the support agent (FR-18) ----
+
+  class RegistrationDetails <<ValueObject>> {
+    registrationId : String
+    attendeeId : String
+    eventId : String
+    status : String
+    totalAmount : BigDecimal
+    currency : String
+    sessionIds : List<String>
+    refundRequested : boolean
+    --
+    belongsTo(requester) : boolean
+    describe() : String
+  }
+
+  class TicketSummary <<ValueObject>> {
+    ticketCode : String
+    sessionId : String
+    status : String
+    holderName : String
+  }
+
+  class "RefundQuote" as X_RefundQuote <<ValueObject>> {
+    registrationId : String
+    paymentOrderId : String
+    paidAmount : BigDecimal
+    currency : String
+    daysUntilEvent : Integer  {null when unknown}
+    refundPercent : int
+    refundAmount : BigDecimal
+    rule : String
+    eligible : boolean
+    --
+    describe() : String
+  }
+
+  class "RefundDecision" as X_RefundDecision <<ValueObject>> {
+    approved : boolean
+    reason : String
+  }
+
+  class RefundReceipt <<ValueObject>> {
+    registrationId : String
+    status : String
+    requestedAt : Instant
+  }
+
+  class RequestedRefund <<ValueObject>> {
+    registrationId : String
+    refundAmount : BigDecimal
+    refundPercent : int
+    currency : String
+    rule : String
+    requestedAt : Instant
+  }
+
+  class Escalation <<ValueObject>> {
+    escalationId : String
+    attendeeId : String
+    registrationId : String  {only if verified}
+    reason : String  {<= 300}
+    summary : String  {<= 1000}
+    attendeeMessage : String
+    createdAt : Instant
+  }
+
+  enum SupportOutcome {
+    RESOLVED
+    REFUND_REQUESTED
+    ESCALATED
+    --
+    {static} of(refundRequested, escalated)
+    isBorneOutBy(refundRequested, escalated)
+  }
+
+  class RefundGuard <<DomainService>> {
+    - autoApproveThreshold : BigDecimal  {200.00}
+    - currency : String  {AUD}
+    --
+    + evaluate(RefundQuote, BigDecimal alreadyRequested) : RefundDecision
+  }
+
+  SessionSummary *-- "1" X_TimeSlot : slot
+  ClashDetector ..> SessionSummary : compares slots
+  ClashDetector ..> Clash : creates
+  RefundGuard ..> X_RefundQuote : judges
+  RefundGuard ..> X_RefundDecision : returns
+  RequestedRefund ..> X_RefundQuote : built from
+  RequestedRefund ..> RefundReceipt : built from
+}

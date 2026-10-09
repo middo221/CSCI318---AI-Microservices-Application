@@ -35,7 +35,7 @@ PAYMENT="http://localhost:8083/api/v1"
 HOLD_WINDOW_SECONDS="${HOLD_WINDOW_SECONDS:-20}"
 SKIP_EXPIRY="${SKIP_EXPIRY:-0}"
 
-bold=$'\033[1m'; dim=$'\033[2m'; green=$'\033[32m'; cyan=$'\033[36m'; yellow=$'\033[33m'; off=$'\033[0m'
+bold=$'\033[1m'; dim=$'\033[2m'; green=$'\033[32m'; cyan=$'\033[36m'; yellow=$'\033[33m'; red=$'\033[31m'; off=$'\033[0m'
 
 step()  { printf '\n%s──────────────────────────────────────────────────────────────%s\n%s%s%s\n\n' "$dim" "$off" "$bold" "$1" "$off"; }
 run()   { printf '%s$ %s%s\n' "$cyan" "$1" "$off"; }
@@ -43,8 +43,78 @@ note()  { printf '%s   %s%s\n' "$dim" "$1" "$off"; }
 ok()    { printf '%s   %s%s\n' "$green" "$1" "$off"; }
 warn()  { printf '%s   %s%s\n' "$yellow" "$1" "$off"; }
 
-PAUSE_MODE=0
+fail()  { printf '%s   %s%s\n' "$red" "$1" "$off"; }
+
+# expiry_verdict <status> <hold-window-seconds>: ok only when the registration really is EXPIRED.
+# Prints a line starting FAILED: and returns 1 otherwise, saying why when the hold window is the cause.
+expiry_verdict() {
+  if [ "$1" = "EXPIRED" ]; then ok "EXPIRED without anybody touching it"; return 0; fi
+  if [ "$1" = "PENDING_PAYMENT" ]; then
+    fail "FAILED: the registration is still PENDING_PAYMENT after the hold window. registration-service's hold window is probably longer than HOLD_WINDOW_SECONDS=$2; start it with CONFERENCE_REGISTRATION_HOLD_WINDOW=PT${2}S (the default is PT2M)"
+  else
+    fail "FAILED: expected the registration to be EXPIRED, found '${1:-nothing}'"
+  fi
+  return 1
+}
+
+# hold_expired_verdict <order-json> <payment-failed-lines> <registration-id>: payment refused a
+# charge for an expired hold. The order is FAILED with no gateway attempt, and the reason
+# HOLD_EXPIRED travels on payment-failed, keyed by the registration. The order's REST body has no
+# reason field (only an attempt carries one, and this order has none), so the reason is read from
+# the topic. Prints the FAILED: line and returns 1 when any part is missing.
+hold_expired_verdict() {
+  ORDER="$1" LINES="$2" REG="$3" python -c '
+import json, os, sys
+try:
+    order = json.loads(os.environ["ORDER"])
+except Exception:
+    print("FAILED: the payment order is not JSON"); sys.exit(1)
+if not isinstance(order, dict) or order.get("status") != "FAILED":
+    print("FAILED: the order is %r, not FAILED" % (order.get("status") if isinstance(order, dict) else order)); sys.exit(1)
+if order.get("attempts"):
+    print("FAILED: the order has a gateway attempt, so the card was tried"); sys.exit(1)
+reg = os.environ["REG"]
+for line in os.environ["LINES"].splitlines():
+    key, sep, value = line.partition(" :: ")
+    if sep and key.strip() == reg:
+        try:
+            event = json.loads(value)
+        except Exception:
+            continue
+        if event.get("reason") == "HOLD_EXPIRED":
+            sys.exit(0)
+print("FAILED: no payment-failed message keyed by %s with reason HOLD_EXPIRED" % reg); sys.exit(1)
+'
+}
+
+PAUSE_MODE=0; EXIT_CODE=0
 case "${1:-}" in --pause|-p) PAUSE_MODE=1 ;; esac
+
+if [ "${1:-}" = "--self-test" ]; then
+  bad=0
+  expiry_verdict EXPIRED 20 >/dev/null || { echo "FAILED: EXPIRED was refused"; bad=1; }
+  out=$(expiry_verdict PENDING_PAYMENT 20); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:.*hold window'; } || { echo "FAILED: PENDING_PAYMENT was accepted"; bad=1; }
+  out=$(expiry_verdict CONFIRMED 20); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: CONFIRMED was accepted"; bad=1; }
+  out=$(expiry_verdict "" 20); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: an empty status was accepted"; bad=1; }
+  GOOD='{"status":"FAILED","attempts":[]}'
+  MSG='reg-3 :: {"registrationId":"reg-3","reason":"HOLD_EXPIRED"}'
+  hold_expired_verdict "$GOOD" "$MSG" reg-3 >/dev/null || { echo "FAILED: a refused expired hold was not recognised"; bad=1; }
+  out=$(hold_expired_verdict '{"status":"PAID","attempts":[{"outcome":"SUCCEEDED"}]}' "$MSG" reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: a PAID order passed"; bad=1; }
+  out=$(hold_expired_verdict '{"status":"FAILED","attempts":[{"outcome":"DECLINED"}]}' "$MSG" reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'gateway attempt'; } || { echo "FAILED: an order with an attempt passed"; bad=1; }
+  out=$(hold_expired_verdict "$GOOD" 'reg-3 :: {"reason":"CARD_DECLINED"}' reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'HOLD_EXPIRED'; } || { echo "FAILED: a CARD_DECLINED message passed"; bad=1; }
+  out=$(hold_expired_verdict "$GOOD" 'reg-9 :: {"reason":"HOLD_EXPIRED"}' reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: another registration's message passed"; bad=1; }
+  out=$(hold_expired_verdict '{"code":"PAYMENT_ORDER_NOT_FOUND"}' "$MSG" reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: a missing order passed"; bad=1; }
+  [ $bad = 0 ] && echo "demo-m2 self-test: the expiry and HOLD_EXPIRED assertions pass the right answers and fail the wrong ones" && exit 0
+  exit 1
+fi
 
 pause() {
   [ "$PAUSE_MODE" = "1" ] || return 0
@@ -168,9 +238,17 @@ else
     note "reservedSeats is now $(reserved) of 10 — status $(statusOf "$REG_3_ID"), and nobody is charging it"
     printf '%s   waiting %ss for the hold window to elapse, then the sweeper runs...%s\n' \
       "$dim" "$((HOLD_WINDOW_SECONDS + 15))" "$off"
-    sleep $((HOLD_WINDOW_SECONDS + 15))
+    # Poll rather than sleep once, so a slow sweeper is not mistaken for a long hold window.
+    for _ in $(seq 1 $((HOLD_WINDOW_SECONDS + 15))); do
+      [ "$(statusOf "$REG_3_ID")" = "EXPIRED" ] && break
+      sleep 1
+    done
     curl -s "$REGISTRATION/registrations/$REG_3_ID" | pretty
-    ok "EXPIRED without anybody touching it, and reservedSeats is back to $(reserved)"
+    if expiry_verdict "$(statusOf "$REG_3_ID")" "$HOLD_WINDOW_SECONDS"; then
+      note "reservedSeats is back to $(reserved)"
+    else
+      EXIT_CODE=1
+    fi
     offsets
     pause "registration-expired, NOT registration-cancelled. Abandonment and failure are different events."
 
@@ -180,14 +258,29 @@ else
       note "it picked up the registration-requested it missed while it was down"
       run "GET $PAYMENT/registrations/$REG_3_ID/payment-order"
       paymentOrder "$REG_3_ID" | pretty
-      ok "FAILED, reason HOLD_EXPIRED, and NO attempt — the gateway was never called"
+      run "kafka-console-consumer.sh --topic payment-failed   (key :: value, this registration)"
+      FAILED_MSGS=""
+      if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx converge-kafka; then
+        FAILED_MSGS=$(MSYS_NO_PATHCONV=1 docker exec converge-kafka \
+          /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+          --topic payment-failed --from-beginning --timeout-ms 10000 \
+          --property print.key=true --property key.separator=" :: " 2>/dev/null | grep -v deprecated)
+        printf '%s\n' "$FAILED_MSGS" | grep -F "$REG_3_ID :: "
+      else
+        warn "converge-kafka is not running here, so payment-failed cannot be read"
+      fi
+      if verdict=$(hold_expired_verdict "$(paymentOrder "$REG_3_ID")" "$FAILED_MSGS" "$REG_3_ID"); then
+        ok "FAILED, reason HOLD_EXPIRED, and NO attempt — the gateway was never called"
+      else
+        fail "$verdict"; EXIT_CODE=1
+      fi
       note "registration is still $(statusOf "$REG_3_ID"). Nobody paid for seats they no longer hold."
     else
-      warn "payment-service did not come back with an order for $REG_3_ID; skipping"
+      fail "FAILED: payment-service did not come back with an order for $REG_3_ID"; EXIT_CODE=1
     fi
     pause "The hold deadline travels on registration-requested, so a late charge is refused, not taken."
   else
-    warn "payment-service is still answering on 8083; skipping the hold-expiry steps"
+    fail "FAILED: payment-service is still answering on 8083; the hold-expiry steps could not run"; EXIT_CODE=1
   fi
 fi
 
@@ -213,3 +306,4 @@ note "H2 console for the payments: http://localhost:8083/h2-console"
 note "  JDBC URL: jdbc:h2:mem:paydb    user: sa    password: (blank)"
 note "  then:     SELECT * FROM PAYMENT_ORDERS;  and  SELECT * FROM PAYMENT_ATTEMPTS;"
 echo
+exit $EXIT_CODE

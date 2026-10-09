@@ -1,0 +1,79 @@
+@startuml activity-fr-13
+' Report §2.1 — FR-13 Check in at a gate.
+' Source: GateController.checkIn, CheckInRequest, TicketApplicationService.checkIn,
+' CheckInPolicy.admit, Ticket.checkIn, CheckIn.record, Gate.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-13 — Check in at a gate
+
+|Gate staff|
+start
+:attendee joins the queue — gate client
+notes queuedAt;
+:scan the ticket code;
+:POST /api/v1/gates/{gateId}/check-ins
+{ticketCode, queuedAt};
+
+|ticketing-service|
+if (ticketCode blank or queuedAt missing?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:TicketApplicationService.checkIn(command);
+if (ticket with this code?) then (no)
+  $ERR:404 TICKET_NOT_FOUND;
+  stop
+else (yes)
+endif
+:CheckInPolicy.admit(ticket);
+if (status VOID?) then (yes)
+  $ERR:409 TICKET_VOID;
+  stop
+else (no)
+endif
+if (status USED (already checked in)?) then (yes)
+  $ERR:409 ALREADY_CHECKED_IN;
+  stop
+else (no)
+endif
+:Ticket.checkIn(Gate(gateId), queuedAt,
+checkedInAt = now)
+(the aggregate re-checks VOID / USED);
+if (queuedAt later than now?) then (yes)
+  $ERR:400 INVALID_REQUEST
+  "admission cannot precede queueing";
+  stop
+else (no)
+endif
+:append CheckIn(gate, queuedAt, checkedInAt),
+status → USED,
+record AttendeeCheckedIn(ticketCode, sessionId,
+gateId, queuedAt, checkedInAt);
+:save → ticketdb.tickets, check_ins;
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:attendee-checked-in
+key: sessionId>
+
+|ticketing-service|
+$OK:201 Created CheckInResponse
+(gateId, queuedAt, checkedInAt,
+waitMillis = checkedInAt − queuedAt);
+
+|Gate staff|
+:admits the attendee;
+stop
+
+note right
+  Both timestamps travel on the event, so the
+  M3 gate-throughput topology (FR-16) can derive
+  the wait from the event alone, re-keying the
+  stream from sessionId to gateId.
+  CheckInPolicy does not yet refuse check-ins
+  outside the session's time window: ticketing
+  holds no programme data (specs/2 FR-13).
+end note
+@enduml

@@ -1,0 +1,101 @@
+@startuml domain-assistance
+' Report §2.4 — Attendee assistance context. The domain classes come from
+' include/domain-assistance.iuml, the same source the overview (domain-model.puml) uses.
+' The agent types below are application-layer classes, drawn here because they are
+' how this context uses its domain.
+!pragma layout smetana
+!include include/style.iuml
+skinparam classAttributeIconSize 0
+hide empty members
+
+title Attendee assistance context (concierge-service) — domain model and both agents
+
+!include include/domain-assistance.iuml
+
+package "application.agent  (not domain: the LangChain4j agent around it)" as agent_pkg {
+  interface AgendaBuilder <<Agent>> {
+    @SystemMessage / @UserMessage
+    --
+    + buildAgenda(attendeeId, interests) : ProposedAgenda
+  }
+  class AgendaTools <<Agent>> {
+    - dossier : Map<String, SessionSummary>
+    --
+    + @Tool searchSessions(track, day, speaker, keyword) : List<SessionSummary>
+    + @Tool getSessionAvailability(sessionId) : AvailabilityAnswer
+    + @Tool getAttendeeRegistrations(attendeeId) : List<RegistrationSummary>
+    + @Tool detectTimeClashes(List<String> sessionIds) : List<Clash>
+  }
+  class ProposedAgenda <<record>> {
+    items : List<ProposedItem(sessionId, rationale)>
+    summary : String
+  }
+  class AgendaResult <<record>> {
+    attendeeId : String
+    summary : String
+    items : List<AgendaItem>
+    notes : List<String>
+  }
+  interface SupportAgent <<Agent>> {
+    @SystemMessage / @UserMessage
+    --
+    + handle(message) : SupportReply
+  }
+  class SupportTools <<Agent>> {
+    - attendeeId : String  {from the HTTP request}
+    - refundsRequested : List<RequestedRefund>
+    - escalations : List<Escalation>
+    --
+    + @Tool listMyRegistrations()
+    + @Tool lookupRegistration(registrationId)
+    + @Tool lookupTickets(registrationId)
+    + @Tool evaluateRefundPolicy(registrationId)
+    + @Tool requestRefund(registrationId, reason)
+    + @Tool escalateToOrganiser(registrationId?, reason, summary)
+  }
+  class SupportReply <<record>> {
+    reply : String
+    outcome : String  {a claim, checked in code}
+  }
+}
+
+AgendaBuilder ..> AgendaTools : may call (tool use)
+AgendaBuilder ..> ProposedAgenda : structured output
+AgendaTools "1" o-- "0..*" SessionSummary : dossier\n(retrieved this request)
+AgendaTools ..> AvailabilitySummary : via RegistrationPort
+AgendaTools ..> RegistrationSummary : via RegistrationPort
+AgendaTools ..> ClashDetector : detectTimeClashes
+AgendaResult ..> SessionSummary : verified items only
+SupportAgent ..> SupportTools : may call (tool use)
+SupportAgent ..> SupportReply : structured output
+SupportTools ..> RegistrationDetails : ownership guard
+SupportTools ..> TicketSummary
+SupportTools ..> RefundGuard : inside requestRefund
+SupportTools "1" o-- "0..*" RequestedRefund : this conversation
+SupportTools "1" o-- "0..1" Escalation : this conversation
+SupportReply ..> SupportOutcome : claimed outcome\nchecked against the record
+
+note bottom of RefundGuard
+  The refund limit is code, not prompt:
+  requestRefund fetches its own quote and the
+  guard refuses when this conversation's total
+  would pass 200.00 AUD, telling the agent to
+  escalate instead.
+end note
+
+note bottom of ClashDetector
+  The clash-free guarantee is code, not prompt:
+  AgendaApplicationService re-runs firstConflict(...)
+  over the model's answer and drops any session that
+  overlaps one already accepted, or that the agent
+  never retrieved, or that repeats.
+end note
+
+legend right
+  Nothing in this context is persisted: every domain
+  class is an immutable record (or stateless service)
+  built from other services' REST responses; the
+  escalation queue is an in-memory list.
+  This context publishes and consumes no events.
+endlegend
+@enduml

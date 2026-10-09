@@ -69,6 +69,17 @@ public class ScriptedChatModel implements ChatModel {
         return this;
     }
 
+    /**
+     * Queue a turn in which the model stops without saying anything: no text, no tool call.
+     *
+     * <p>What Gemini 2.5 Flash sent in the M5 live run after spending its turn thinking - a
+     * candidate with {@code finishReason: STOP} and no parts.
+     */
+    public ScriptedChatModel thenAnswersNothing() {
+        script.add(ChatResponse.builder().aiMessage(AiMessage.builder().build()).build());
+        return this;
+    }
+
     /** Queue the model's final answer, as the JSON its structured return type expects. */
     public ScriptedChatModel thenAnswers(String json) {
         script.add(ChatResponse.builder().aiMessage(AiMessage.from(json)).build());

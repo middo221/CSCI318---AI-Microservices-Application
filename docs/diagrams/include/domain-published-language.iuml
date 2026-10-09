@@ -1,0 +1,219 @@
+' Published Language — common-events, package au.edu.uow.csci318.conference.common.event
+' Shared by domain-published-language.puml (full detail) and domain-model.puml (overview).
+' Every record implements DomainEvent; the topic is eventType() (kebab-case of the class name)
+' and the Kafka key is partitionKey(), shown on each record below.
+' The two analytics alerts (SessionCapacityAlert, GateCongestionAlert) also implement DomainEvent
+' but live in analytics-service, because no other context consumes them: see domain-insight.iuml.
+' There is no EventCancelled record: nothing would produce it.
+
+package "Published Language  (common-events)" as published_language {
+
+  interface DomainEvent {
+    + eventId() : String
+    + occurredAt() : Instant
+    + eventType() : String  {default: kebab-case of class name}
+    + partitionKey() : String  {default: eventId}
+  }
+
+  package "emitted by Programme" as pl_programme {
+    class EventPublished <<DomainEvent>> {
+      .. key: conferenceEventId ..
+      eventId : String
+      occurredAt : Instant
+      conferenceEventId : String
+      name : String
+      startDate : LocalDate
+      endDate : LocalDate
+    }
+    class SessionAdded <<DomainEvent>> {
+      .. key: sessionId ..
+      eventId : String
+      occurredAt : Instant
+      sessionId : String
+      conferenceEventId : String
+      title : String
+      track : String
+      startsAt : LocalDateTime
+      endsAt : LocalDateTime
+      speakerId : String
+      priceAmount : BigDecimal
+      priceCurrency : String
+    }
+    class SessionCapacityChanged <<DomainEvent>> {
+      .. key: sessionId ..
+      eventId : String
+      occurredAt : Instant
+      sessionId : String
+      conferenceEventId : String
+      seatCapacity : int
+    }
+  }
+
+  package "emitted by Registration" as pl_registration {
+    class RegistrationRequested <<DomainEvent>> {
+      .. key: registrationId ..
+      eventId : String
+      occurredAt : Instant
+      registrationId : String
+      attendeeId : String
+      conferenceEventId : String
+      totalAmount : BigDecimal
+      currency : String
+      holdExpiresAt : Instant
+      cardToken : String
+      firstSessionStartsAt : Instant
+    }
+    class SeatsReserved <<DomainEvent>> {
+      .. key: sessionId ..
+      eventId : String
+      occurredAt : Instant
+      registrationId : String
+      sessionId : String
+      quantity : int
+    }
+    class SeatsReleased <<DomainEvent>> {
+      .. key: sessionId ..
+      eventId : String
+      occurredAt : Instant
+      registrationId : String
+      sessionId : String
+      quantity : int
+    }
+    class RegistrationConfirmed <<DomainEvent>> {
+      .. key: registrationId ..
+      eventId : String
+      occurredAt : Instant
+      registrationId : String
+      attendeeId : String
+      attendeeName : String
+      attendeeEmail : String
+      conferenceEventId : String
+      sessionIds : List<String>  {non-empty}
+    }
+    class RegistrationCancelled <<DomainEvent>> {
+      .. key: registrationId ..
+      eventId : String
+      occurredAt : Instant
+      registrationId : String
+      attendeeId : String
+    }
+    class RegistrationExpired <<DomainEvent>> {
+      .. key: registrationId ..
+      eventId : String
+      occurredAt : Instant
+      registrationId : String
+      attendeeId : String
+    }
+    class RefundRequested <<DomainEvent>> {
+      .. key: registrationId ..
+      eventId : String
+      occurredAt : Instant
+      registrationId : String
+      attendeeId : String
+      reason : String
+      requestedBy : String  {ATTENDEE, AGENT, SYSTEM}
+      kind : String  {ATTENDEE_REQUEST, LATE_PAYMENT_REVERSAL}
+    }
+    class WaitlistJoined <<DomainEvent>> {
+      .. key: sessionId ..
+      eventId : String
+      occurredAt : Instant
+      waitlistEntryId : String
+      sessionId : String
+      attendeeId : String
+      position : int
+    }
+    class WaitlistPromoted <<DomainEvent>> {
+      .. key: sessionId ..
+      eventId : String
+      occurredAt : Instant
+      waitlistEntryId : String
+      sessionId : String
+      attendeeId : String
+    }
+  }
+
+  package "emitted by Billing" as pl_billing {
+    class PaymentSucceeded <<DomainEvent>> {
+      .. key: registrationId ..
+      eventId : String
+      occurredAt : Instant
+      paymentOrderId : String
+      registrationId : String
+      amount : BigDecimal
+      currency : String
+    }
+    class PaymentFailed <<DomainEvent>> {
+      .. key: registrationId ..
+      eventId : String
+      occurredAt : Instant
+      paymentOrderId : String
+      registrationId : String
+      reason : String
+    }
+    class RefundIssued <<DomainEvent>> {
+      .. key: registrationId ..
+      eventId : String
+      occurredAt : Instant
+      refundId : String
+      paymentOrderId : String
+      registrationId : String
+      amount : BigDecimal
+      currency : String
+      refundPercent : int
+      decidedBy : String  {POLICY, AGENT, ORGANISER}
+    }
+    class RefundDeclined <<DomainEvent>> {
+      .. key: registrationId ..
+      eventId : String
+      occurredAt : Instant
+      registrationId : String
+      reason : String  {the rule, or a refusal code}
+    }
+  }
+
+  package "emitted by Access" as pl_access {
+    class TicketIssued <<DomainEvent>> {
+      .. key: ticketCode ..
+      eventId : String
+      occurredAt : Instant
+      ticketCode : String
+      registrationId : String
+      sessionId : String
+      attendeeId : String
+    }
+    class TicketTransferred <<DomainEvent>> {
+      .. key: ticketCode ..
+      eventId : String
+      occurredAt : Instant
+      ticketCode : String
+      registrationId : String
+      sessionId : String
+      fromHolderName : String
+      fromHolderEmail : String
+      toHolderName : String
+      toHolderEmail : String
+    }
+    class TicketVoided <<DomainEvent>> {
+      .. key: ticketCode ..
+      eventId : String
+      occurredAt : Instant
+      ticketCode : String
+      registrationId : String
+      sessionId : String
+      reason : String
+    }
+    class AttendeeCheckedIn <<DomainEvent>> {
+      .. key: sessionId ..
+      eventId : String
+      occurredAt : Instant
+      ticketCode : String
+      sessionId : String
+      gateId : String
+      queuedAt : Instant
+      checkedInAt : Instant
+      --
+      waitMillis() : long
+    }
+  }
+}

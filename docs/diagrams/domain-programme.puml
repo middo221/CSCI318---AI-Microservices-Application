@@ -1,0 +1,44 @@
+@startuml domain-programme
+' Report §2.4 — Programme bounded context in full. The classes come from
+' include/domain-programme.iuml, the same source the overview (domain-model.puml) uses.
+!pragma layout smetana
+!include include/style.iuml
+skinparam classAttributeIconSize 0
+hide empty members
+
+title Programme context (event-catalog-service) — domain model
+
+!include include/domain-programme.iuml
+!include include/domain-published-language.iuml
+!$only = "programme"
+!include include/domain-event-links.iuml
+
+' Show only the events this context touches, by name.
+remove @unlinked
+hide <<DomainEvent>> members
+
+note top of Event
+  <b>Invariants</b>
+  · sessions are added only while DRAFT
+  · a session's slot falls inside dateRange
+  · publish() needs at least one session
+    and is allowed only from DRAFT
+  · capacity may change unless CANCELLED
+end note
+
+note bottom of SessionSchedulingPolicy
+  Checks the candidate slot against every session in
+  the catalogue: a speaker may not be booked for two
+  overlapping slots. Called by EventApplicationService
+  before Event.addSession(...).
+end note
+
+legend right
+  Value objects are Java records, mapped as
+  JPA @Embeddable. Session is inside the Event
+  aggregate (cascade ALL, orphanRemoval).
+  Speaker is a separate aggregate referenced
+  only by id. EventStatus.CANCELLED exists, but
+  no use case on main sets it.
+endlegend
+@enduml

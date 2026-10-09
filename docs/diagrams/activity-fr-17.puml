@@ -1,0 +1,122 @@
+@startuml activity-fr-17
+' Report §2.1 — FR-17 Build a personal agenda from natural language (Agent 1).
+' Source: ConciergeController, AgendaRequest, AgendaApplicationService.buildAgenda/verify,
+' AgendaToolsFactory, AgendaTools, LangChain4jAgendaAgentFactory, AgendaBuilder,
+' RestCatalogClient, RestRegistrationClient, ClashDetector, GlobalExceptionHandler.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-17 — Build a personal agenda from natural language
+
+|Attendee|
+start
+:POST /api/v1/concierge/agenda
+{attendeeId, interests (free text)};
+
+|concierge-service|
+if (attendeeId or interests blank,
+or interests over 2000 characters?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:BuildAgendaCommand;
+:AgendaToolsFactory.create()
+a fresh AgendaTools with an empty dossier;
+:LangChain4jAgendaAgentFactory.agentFor(tools);
+if (GEMINI_API_KEY set and a
+ChatModel available?) then (no)
+  $ERR:502 LLM_UNAVAILABLE;
+  stop
+else (yes)
+endif
+:AgendaBuilder.buildAgenda(attendeeId, interests)
+system prompt + the attendee's own words;
+
+repeat
+  |Gemini|
+  :model turn: request tool calls,
+  or give the final answer;
+  |concierge-service|
+  if (tool calls requested?) then (yes)
+    repeat
+      switch (tool requested)
+      case (searchSessions)
+        :searchSessions(track, day, speaker, keyword)
+        via CatalogPort → RestCatalogClient;
+        |event-catalog-service|
+        :GET /api/v1/sessions/search
+        ?track&day&speaker&q;
+        |concierge-service|
+        :add the sessions to the dossier
+        (REST failure → empty list);
+      case (getSessionAvailability)
+        :getSessionAvailability(sessionId)
+        via RegistrationPort → RestRegistrationClient;
+        |registration-service|
+        :GET /api/v1/sessions/{id}/availability;
+        |concierge-service|
+        :seats remaining / full
+        (404 or failure → "unknown");
+      case (getAttendeeRegistrations)
+        :getAttendeeRegistrations(attendeeId)
+        via RegistrationPort → RestRegistrationClient;
+        |registration-service|
+        :GET /api/v1/attendees/{id}/registrations;
+        |concierge-service|
+        :sessions already booked
+        (failure → empty list);
+      case (detectTimeClashes)
+        :detectTimeClashes(sessionIds)
+        ClashDetector.detect over the dossier
+        — local, deterministic Java;
+      endswitch
+    repeat while (more tool calls this turn?) is (yes) not (no)
+    :return the tool results to the model;
+  else (no)
+  endif
+repeat while (tools were called, and fewer than 12 round trips?) is (yes) not (final answer)
+
+|Gemini|
+:structured output: ProposedAgenda
+{items [sessionId, rationale], summary};
+
+|concierge-service|
+:AgendaApplicationService.verify(proposed, dossier)
+— the model's answer is checked in code;
+repeat
+  :next proposed item, in the model's order;
+  if (8 sessions (maxAgendaItems) already accepted?) then (yes)
+    :drop it and count it;
+  elseif (session not in the dossier
+  (never retrieved, or invented)?) then (yes)
+    :drop it, add a note;
+  elseif (already on the agenda?) then (yes)
+    :drop it, add a note;
+  elseif (ClashDetector.firstConflict with an
+  accepted session?) then (yes)
+    :drop it, add a note naming the overlap;
+  else (no)
+    :accept it with the model's rationale;
+  endif
+repeat while (more proposed items?) is (yes) not (no)
+$OK:200 OK AgendaResponse
+{attendeeId, summary, items, notes};
+
+|Attendee|
+:reads a clash-free agenda,
+with a note for every dropped session;
+stop
+
+note right
+  <b>Model failures</b> (GlobalExceptionHandler):
+  RateLimitException → 429 LLM_RATE_LIMITED
+  TimeoutException → 504 LLM_TIMEOUT
+  other LangChain4jException → 502 LLM_UNAVAILABLE
+  More than 12 tool round trips → LoopLimit turns
+  LangChain4j's plain RuntimeException into
+  AgentLoopLimitException → 502 LLM_LOOP_LIMIT.
+  Full sessions are kept off the agenda by the prompt
+  only: verify() does not re-check availability.
+end note
+@enduml

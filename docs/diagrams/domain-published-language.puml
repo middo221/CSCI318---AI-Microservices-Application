@@ -1,0 +1,51 @@
+@startuml domain-published-language
+' Report §2.4 / §3.5 — the Published Language: every event record in common-events, its
+' payload and its Kafka key. Source: include/domain-published-language.iuml.
+!pragma layout smetana
+!include include/style.iuml
+skinparam classAttributeIconSize 0
+hide empty members
+
+title Published Language (common-events) — domain events
+
+!include include/domain-published-language.iuml
+
+EventPublished ..|> DomainEvent
+SessionAdded ..|> DomainEvent
+SessionCapacityChanged ..|> DomainEvent
+RegistrationRequested ..|> DomainEvent
+SeatsReserved ..|> DomainEvent
+SeatsReleased ..|> DomainEvent
+RegistrationConfirmed ..|> DomainEvent
+RegistrationCancelled ..|> DomainEvent
+RegistrationExpired ..|> DomainEvent
+RefundRequested ..|> DomainEvent
+WaitlistJoined ..|> DomainEvent
+WaitlistPromoted ..|> DomainEvent
+PaymentSucceeded ..|> DomainEvent
+PaymentFailed ..|> DomainEvent
+RefundIssued ..|> DomainEvent
+RefundDeclined ..|> DomainEvent
+TicketIssued ..|> DomainEvent
+TicketTransferred ..|> DomainEvent
+TicketVoided ..|> DomainEvent
+AttendeeCheckedIn ..|> DomainEvent
+
+note top of DomainEvent
+  Topic = eventType(): the record's simple name in kebab-case,
+  so SessionCapacityChanged → session-capacity-changed.
+  Key = partitionKey(): every record overrides it (shown as
+  "key:" on each record). Records carry data only — no Spring,
+  no JPA, no behaviour beyond derived accessors.
+end note
+
+legend right
+  The key choice is deliberate: the seat topics and
+  session-capacity-changed share sessionId so the RT1
+  fill-rate join needs no repartition; the saga topics
+  share registrationId so one registration's messages
+  stay in order; the ticket topics use ticketCode.
+  AttendeeCheckedIn rejects checkedInAt < queuedAt;
+  RegistrationConfirmed rejects an empty sessionIds.
+endlegend
+@enduml

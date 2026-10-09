@@ -1,0 +1,38 @@
+@startuml domain-insight
+' Report §2.4 — Operational insight context in full. The classes come from
+' include/domain-insight.iuml, the same source the overview (domain-model.puml) uses.
+!pragma layout smetana
+!include include/style.iuml
+skinparam classAttributeIconSize 0
+hide empty members
+
+title Operational insight context (analytics-service) — read models and alerts
+
+!include include/domain-insight.iuml
+!include include/domain-published-language.iuml
+!$only = "insight"
+!include include/domain-event-links.iuml
+
+remove @unlinked
+restore AlertThresholds
+hide <<DomainEvent>> members
+show SessionCapacityAlert members
+show GateCongestionAlert members
+
+note bottom of AlertThresholds
+  Configuration, not code:
+  conference.analytics.capacity-alert-threshold (0.9)
+  conference.analytics.gate-congestion-threshold (PT2M).
+  The query service applies them, so one table
+  answers "at or above 90%" and "at or above 50%".
+end note
+
+legend right
+  Every class is a Java record, an enum or an interface.
+  The read-model ports are implemented in infrastructure
+  by interactive queries over Kafka Streams state stores;
+  this context owns no database. The two alerts implement
+  DomainEvent but stay in this service, because no other
+  context consumes them.
+endlegend
+@enduml

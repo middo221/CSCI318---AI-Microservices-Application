@@ -1,0 +1,89 @@
+@startuml activity-fr-09
+' Report §2.1 — FR-09 Release seats on payment failure or hold expiry.
+' Source: PaymentEventConsumers.paymentFailed, RegistrationApplicationService.cancelUnpaid
+' and expireOverdue, Registration.cancel/expire/isExpiredAt, HoldExpirySweeper.sweep,
+' SessionView.release.
+' seats-released is also consumed by registration itself, to promote the session's waitlist
+' (activity-fr-10.puml).
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-09 — Release seats on payment failure or hold expiry
+
+|registration-service|
+start
+:payment-failed<
+note right: compensation path 1 — the charge was refused (FR-07)
+:PaymentEventConsumers.paymentFailed;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:record eventId in processed_events;
+:RegistrationApplicationService.cancelUnpaid(registrationId);
+if (registration found and still
+PENDING_PAYMENT?) then (no)
+  :log a warning and drop;
+  stop
+else (yes)
+endif
+:Registration.cancel()
+each HELD SeatHold → RELEASED,
+record SeatsReleased per hold,
+status → CANCELLED,
+record RegistrationCancelled;
+:save → regdb.registrations, seat_holds,
+return seats: SessionView.release(quantity)
+→ regdb.session_views;
+:after commit, StreamBridge sends;
+|Kafka|
+$EVT:seats-released ×N
+key: sessionId>
+note right: promotes the waitlist (FR-10)
+$EVT:registration-cancelled
+key: registrationId>
+stop
+
+|registration-service|
+start
+:time event: HoldExpirySweeper.sweep()
+every sweep-interval (PT10S)<
+note right: compensation path 2 — nobody paid in time
+:RegistrationApplicationService.expireOverdue(now)
+loads every PENDING_PAYMENT registration;
+:keep those with any SeatHold
+where now is after expiresAt;
+if (any overdue?) then (no)
+  :nothing to release;
+  stop
+else (yes)
+endif
+repeat
+  :Registration.expire()
+  each HELD SeatHold → RELEASED,
+  record SeatsReleased per hold,
+  status → EXPIRED,
+  record RegistrationExpired;
+  :save, and return seats to SessionView;
+repeat while (more overdue registrations?) is (yes) not (no)
+:after the sweep's single commit, StreamBridge sends;
+|Kafka|
+$EVT:seats-released ×N
+key: sessionId>
+$EVT:registration-expired
+key: registrationId>
+stop
+
+note right
+  The hold window is configuration:
+  conference.registration.hold-window
+  is PT2M for demos (15 minutes is the
+  stated business rule).
+  A free registration is never
+  PENDING_PAYMENT, so never expires.
+  Cancelled and expired are separate
+  events so the analytics funnel counts
+  failure and abandonment apart.
+end note
+@enduml

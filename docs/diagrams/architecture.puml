@@ -1,0 +1,104 @@
+@startuml architecture
+' Report §3.1 — microservice architecture as it runs on main.
+' Topics listed are only those a class on main actually produces or consumes.
+!pragma layout smetana
+!include include/style.iuml
+left to right direction
+
+title Converge — microservice architecture (main, October 2026)
+
+skinparam component {
+  BackgroundColor #E8F0FE
+  BorderColor #3D5A99
+}
+skinparam database {
+  BackgroundColor #FFF4E0
+  BorderColor #A67C00
+}
+skinparam rectangle {
+  BackgroundColor #F3ECF8
+  BorderColor #6A4C93
+}
+
+actor "Organiser" as organiser
+actor "Attendee" as attendee
+actor "Gate staff" as gatestaff
+
+component "concierge-service\n:8086 · Attendee assistance\nLangChain4j Agenda Builder (FR-17)\nand Support agent (FR-18)\n<i>owns no database</i>" as concierge
+cloud "Google Gemini API\ngemini-2.5-flash" as gemini
+
+component "event-catalog-service\n:8081 · Programme" as catalog
+component "registration-service\n:8082 · Registration\nsaga orchestrator, waitlist,\nHoldExpirySweeper" as registration
+component "payment-service\n:8083 · Billing\nSimulatedPaymentGateway,\nRefundPolicyService" as payment
+component "ticketing-service\n:8084 · Access" as ticketing
+component "analytics-service\n:8085 · Operational insight\nthree Kafka Streams topologies,\nread by interactive query\n<i>owns no database</i>" as analytics
+
+database "catalogdb\nH2 in-memory" as catalogdb
+database "regdb\nH2 in-memory" as regdb
+database "paydb\nH2 in-memory" as paydb
+database "ticketdb\nH2 in-memory" as ticketdb
+
+node "Kafka broker · apache/kafka:4.3.1 (KRaft)\nDocker Compose · localhost:9092" as kafka {
+  rectangle "<b>produced by event-catalog-service</b>\nevent-published (key conferenceEventId)\nsession-added (key sessionId)\nsession-capacity-changed (key sessionId)" as from_catalog
+  rectangle "<b>produced by registration-service</b>\nregistration-requested, registration-confirmed,\nregistration-cancelled, registration-expired,\nrefund-requested (key registrationId)\nseats-reserved, seats-released,\nwaitlist-joined, waitlist-promoted (key sessionId)" as from_registration
+  rectangle "<b>produced by payment-service</b>\npayment-succeeded, payment-failed,\nrefund-issued, refund-declined\n(key registrationId)" as from_payment
+  rectangle "<b>produced by ticketing-service</b>\nticket-issued, ticket-transferred,\nticket-voided (key ticketCode)\nattendee-checked-in (key sessionId)" as from_ticketing
+  rectangle "<b>produced by analytics-service</b>\nsession-capacity-alert (key sessionId)\ngate-congestion-alert (key gateId)" as from_analytics
+}
+component "Kafka UI\nprovectuslabs/kafka-ui:v0.7.2\n:8080 (Docker Compose)" as kafkaui
+
+' ---- REST from people --------------------------------------------------------------------
+organiser --> catalog : REST\nevents, sessions,\nspeakers, capacity
+organiser --> payment : REST\nrefund override
+organiser --> analytics : REST GET\n/analytics/...
+organiser --> concierge : REST GET\n/concierge/escalations
+attendee --> catalog : REST\nGET /sessions/search
+attendee --> registration : REST\nregistrations, availability,\nrefund-requests, waitlist
+attendee --> payment : REST\npayment order,\nrefund quote
+attendee --> ticketing : REST\ntickets, transfer
+attendee --> concierge : REST\nPOST /concierge/agenda,\n/concierge/support
+gatestaff --> ticketing : REST\nPOST /gates/{gateId}/check-ins
+
+' ---- Concierge: synchronous REST and the LLM -----------------------------------------------
+concierge --> catalog : REST GET\n/api/v1/sessions/search
+concierge --> registration : REST\nGET availability, registrations;\nPOST refund-requests
+concierge --> payment : REST GET\n/api/v1/refund-policy/quote
+concierge --> ticketing : REST GET\n/api/v1/registrations/{id}/tickets
+concierge --> gemini : HTTPS\n(LangChain4j\ntool calling)
+
+' ---- Database per service -----------------------------------------------------------------
+catalog --> catalogdb : JPA
+registration --> regdb : JPA
+payment --> paydb : JPA
+ticketing --> ticketdb : JPA
+
+' ---- Publishing (StreamBridge after the database commit) ------------------------------------
+catalog --> from_catalog : publish
+registration --> from_registration : publish
+payment --> from_payment : publish
+ticketing --> from_ticketing : publish
+analytics --> from_analytics : publish
+
+' ---- Consuming: one edge per service, topics named in the label ---------------------------------
+kafka --> registration : consume\nevent-published, session-added,\nsession-capacity-changed (SessionView replica),\npayment-succeeded, payment-failed,\nrefund-issued, refund-declined,\nseats-released (waitlist promotion)
+kafka --> payment : consume\nregistration-requested,\nrefund-requested
+kafka --> ticketing : consume\nregistration-confirmed,\nrefund-issued (void tickets)
+kafka --> analytics : Kafka Streams consumes\nRT1 seats-reserved, seats-released,\nsession-capacity-changed\nRT2 attendee-checked-in\nfunnel registration-requested,\npayment-succeeded, payment-failed,\nregistration-expired
+kafkaui --> kafka : inspects topics
+
+legend right
+  <b>Not consumed by any service</b> (read in Kafka UI):
+  registration-cancelled, waitlist-joined, waitlist-promoted,
+  ticket-issued, ticket-transferred, ticket-voided and both
+  alerts. Analytics also writes its own changelog and two
+  repartition topics (…-checkins-by-gate, …-funnel-by-stage).
+  <b>Arrows</b>
+  solid = runs on main
+  Topics are created on first publish
+  (KAFKA_AUTO_CREATE_TOPICS_ENABLE).
+  Every key is DomainEvent.partitionKey(),
+  serialised as a String.
+  analytics-service and concierge-service
+  own no database.
+endlegend
+@enduml

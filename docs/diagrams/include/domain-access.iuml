@@ -1,0 +1,77 @@
+' Access bounded context — ticketing-service, package ...ticketing.domain
+' Shared by domain-access.puml (full detail) and domain-model.puml (overview).
+
+package "Access  (ticketing-service)" as access {
+
+  class Ticket <<AggregateRoot>> {
+    - id : String
+    - ticketCode : TicketCode  {unique}
+    - registrationId : String
+    - sessionId : String
+    - attendeeId : String
+    - holder : Holder
+    - status : TicketStatus
+    - issuedAt : Instant
+    - checkIns : List<CheckIn>
+    - transfers : List<TransferRecord>
+    --
+    + {static} issue(id, TicketCode, registrationId, sessionId, attendeeId, Holder) : Ticket
+    + transferTo(Holder) : TransferRecord
+    + checkIn(Gate, queuedAt, checkedInAt) : CheckIn
+    + voidTicket(reason) : void
+    + pullDomainEvents() : List<DomainEvent>
+  }
+
+  class CheckIn <<Entity>> {
+    - id : String
+    - gate : Gate
+    - queuedAt : Instant
+    - checkedInAt : Instant  {>= queuedAt}
+    --
+    + {static} record(id, Gate, queuedAt, checkedInAt) : CheckIn
+  }
+
+  class TransferRecord <<Entity>> {
+    - id : String
+    - fromHolder : Holder
+    - toHolder : Holder
+    - transferredAt : Instant
+    --
+    + {static} record(id, from, to, transferredAt) : TransferRecord
+  }
+
+  class TicketCode <<ValueObject>> {
+    value : String  {URL-safe, "TKT-" + 12 chars}
+    --
+    + {static} generate() : TicketCode
+  }
+
+  class Holder <<ValueObject>> {
+    name : String
+    email : String
+  }
+
+  class Gate <<ValueObject>> {
+    gateId : String
+  }
+
+  enum TicketStatus {
+    ISSUED
+    TRANSFERRED
+    VOID
+    USED
+  }
+
+  class CheckInPolicy <<DomainService>> {
+    + admit(Ticket) : void
+  }
+
+  Ticket "1" *-- "0..1" CheckIn : checkIns\n(at most one)
+  Ticket "1" *-- "0..*" TransferRecord : transfers\n(append-only)
+  Ticket *-- "1" TicketCode
+  Ticket *-- "1" Holder : holder
+  Ticket --> "1" TicketStatus : status
+  CheckIn *-- "1" Gate
+  TransferRecord *-- "2" Holder : fromHolder,\ntoHolder
+  CheckInPolicy ..> Ticket : rejects VOID\nand USED
+}

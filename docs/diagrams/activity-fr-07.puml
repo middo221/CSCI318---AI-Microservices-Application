@@ -1,0 +1,106 @@
+@startuml activity-fr-07
+' Report §2.1 — FR-07 Pay for a registration (and, through FR-08, receive a ticket).
+' Source: RegistrationEventConsumers.registrationRequested (payment), ProcessedEventStore,
+' PaymentApplicationService.payForRegistration, PaymentOrder.raise/pay,
+' SimulatedPaymentGateway, PaymentController.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-07 — Pay for a registration
+
+|payment-service|
+start
+:registration-requested<
+note right
+  Produced by registration-service when a
+  paid registration is requested (FR-06).
+  There is no "pay" endpoint: the charge
+  happens when this event arrives.
+end note
+:RegistrationEventConsumers.registrationRequested;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:record eventId in processed_events;
+:build PayForRegistrationCommand:
+Money(totalAmount, currency), holdExpiresAt,
+CardToken(cardToken), firstSessionStartsAt;
+if (token blank or shaped like a card number,
+or amount missing or negative?) then (yes)
+  :log a warning and drop the message
+  (the seat hold expires on its own, FR-09);
+  stop
+else (no)
+endif
+:PaymentApplicationService.payForRegistration;
+if (a PaymentOrder already exists
+for this registrationId?) then (yes)
+  :return it unchanged
+  (a registration is never charged twice);
+  stop
+else (no)
+endif
+:PaymentOrder.raise(new UUID, registrationId,
+amount, holdExpiresAt, firstSessionStartsAt)
+→ status PENDING (the refund policy reads
+firstSessionStartsAt later, FR-11);
+:PaymentOrder.pay(token, gateway, now);
+if (now after holdExpiresAt?) then (yes)
+  :status FAILED, reason HOLD_EXPIRED,
+  gateway never called, no attempt recorded,
+  record PaymentFailed;
+else (no)
+  :SimulatedPaymentGateway.charge(orderId, amount, token);
+  switch (card token)
+  case (TOK_OK)
+    :SUCCEEDED;
+  case (TOK_TIMEOUT)
+    :TIMED_OUT
+    reason GATEWAY_TIMEOUT;
+  case (anything else, e.g. TOK_DECLINE)
+    :DECLINED
+    reason CARD_DECLINED;
+  endswitch
+  :append PaymentAttempt (token, outcome,
+  failureReason, gatewayReference, occurredAt);
+  if (SUCCEEDED?) then (yes)
+    :status PAID,
+    record PaymentSucceeded(amount, currency);
+  else (no)
+    :status FAILED,
+    record PaymentFailed(reason);
+  endif
+endif
+:save → paydb.payment_orders, payment_attempts;
+:after commit, StreamBridge sends;
+
+|Kafka|
+if (order status?) then (PAID)
+  $EVT:payment-succeeded
+  key: registrationId>
+  note right: registration-service confirms, ticketing issues tickets — FR-08
+else (FAILED)
+  $EVT:payment-failed
+  key: registrationId>
+  note right: registration-service cancels and releases seats — FR-09
+endif
+stop
+
+|Attendee|
+start
+:GET /api/v1/registrations/{registrationId}/payment-order
+or GET /api/v1/payment-orders/{id};
+|payment-service|
+if (order found?) then (no)
+  $ERR:404 PAYMENT_ORDER_NOT_FOUND;
+  stop
+else (yes)
+endif
+$OK:200 OK PaymentOrderResponse
+(status, holdExpiresAt, attempts);
+|Attendee|
+:sees PAID or FAILED and why;
+stop
+@enduml

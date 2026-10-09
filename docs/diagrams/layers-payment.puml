@@ -1,0 +1,154 @@
+@startuml layers-payment
+' Report §3.2 — payment-service layers, from the classes on main (FR-07, FR-11).
+!pragma layout smetana
+!include include/style.iuml
+set separator ::
+hide empty members
+skinparam linetype polyline
+
+title payment-service — layered architecture (au.edu.uow.csci318.conference.payment)
+
+package "api  (presentation layer)" as api <<api>> {
+  class PaymentController <<@RestController>>
+  class RefundController <<@RestController>>
+  class GlobalExceptionHandler <<@RestControllerAdvice>>
+  package "api.dto" as api_dto {
+    class "PaymentOrderResponse (AttemptResponse)\nRefundQuoteResponse · RefundResponse" as resps <<record>>
+    class IssueRefundRequest <<record>>
+  }
+}
+
+package "application  (service layer)" as application <<application>> {
+  class PaymentApplicationService <<@Service>>
+  class RefundApplicationService <<@Service>>
+  class RefundQuote <<record>>
+  package "application.command" as app_cmd {
+    class "PayForRegistrationCommand\nDecideRefundCommand\nIssueRefundCommand" as cmds <<record>>
+  }
+}
+
+package "domain  (domain layer)" as domain <<domain>> {
+  package "domain.model" as dom_model {
+    class PaymentOrder <<AggregateRoot>>
+    class PaymentAttempt <<Entity>>
+    class Refund <<AggregateRoot>>
+    class "Money · CardToken\nRefundDecision" as vos <<ValueObject>>
+  }
+  package "domain.service" as dom_service {
+    class RefundPolicyService <<DomainService>>
+  }
+  package "domain.gateway" as dom_gateway {
+    interface PaymentGateway <<Port>>
+    class ChargeResult <<ValueObject>>
+  }
+  package "domain.repository" as dom_repo {
+    interface PaymentOrderRepository <<Port>>
+    interface RefundRepository <<Port>>
+  }
+  package "domain.event" as dom_event {
+    interface DomainEventPublisher <<Port>>
+  }
+}
+
+package "infrastructure  (infrastructure layer)" as infrastructure <<infrastructure>> {
+  package "infrastructure.messaging" as inf_msg {
+    class RegistrationEventConsumers <<@Configuration>>
+    class ProcessedEventStore <<@Component>>
+    class ProcessedEvent <<@Entity>>
+    interface ProcessedEventJpaRepository <<Spring Data>>
+    class StreamBridgeDomainEventPublisher <<@Component>>
+  }
+  package "infrastructure.gateway" as inf_gateway {
+    class SimulatedPaymentGateway <<@Component>>
+  }
+  package "infrastructure.persistence" as inf_persist {
+    class JpaPaymentOrderRepository <<@Repository>>
+    class JpaRefundRepository <<@Repository>>
+    interface "PaymentOrderJpaRepository\nRefundJpaRepository" as springdata <<Spring Data>>
+  }
+  package "infrastructure.config" as inf_config {
+    class ClockConfiguration <<@Configuration>>
+  }
+}
+
+' api -> application
+PaymentController ..> PaymentApplicationService
+RefundController ..> RefundApplicationService : quote,\nissueByOrganiser
+IssueRefundRequest ..> cmds : toCommand(paymentOrderId)
+resps ..> PaymentOrder : from(...)
+resps ..> RefundQuote : from(...)
+
+' application -> domain
+PaymentApplicationService ..> PaymentOrder
+PaymentApplicationService ..> PaymentOrderRepository
+PaymentApplicationService ..> PaymentGateway
+PaymentApplicationService ..> DomainEventPublisher
+RefundApplicationService ..> PaymentOrder : requireRefundable,\nmarkRefunded
+RefundApplicationService ..> Refund : issue / decline
+RefundApplicationService ..> RefundPolicyService : evaluate
+RefundApplicationService ..> PaymentOrderRepository
+RefundApplicationService ..> RefundRepository
+RefundApplicationService ..> DomainEventPublisher
+
+' domain internals
+PaymentOrder *-- PaymentAttempt
+PaymentOrder *-- vos
+Refund *-- vos
+RefundPolicyService ..> vos : RefundDecision
+PaymentOrder ..> PaymentGateway : pay(token, gateway, now)
+PaymentGateway ..> ChargeResult : returns
+
+' infrastructure implements the domain's ports
+PaymentOrderRepository <|.. JpaPaymentOrderRepository
+RefundRepository <|.. JpaRefundRepository
+PaymentGateway <|.. SimulatedPaymentGateway
+DomainEventPublisher <|.. StreamBridgeDomainEventPublisher
+JpaPaymentOrderRepository --> springdata : delegates
+JpaRefundRepository --> springdata : delegates
+ProcessedEventStore --> ProcessedEventJpaRepository
+ProcessedEventJpaRepository ..> ProcessedEvent
+
+' inbound adapter calls the application layer
+PaymentApplicationService <.. RegistrationEventConsumers : registration-requested →\npayForRegistration(command)
+RefundApplicationService <.. RegistrationEventConsumers : refund-requested →\ndecide(command)
+RegistrationEventConsumers ..> cmds : builds
+RegistrationEventConsumers --> ProcessedEventStore : markProcessed(eventId)
+
+note bottom of SimulatedPaymentGateway
+  Deterministic by token:
+  TOK_OK → SUCCEEDED
+  TOK_TIMEOUT → TIMED_OUT (GATEWAY_TIMEOUT)
+  anything else → DECLINED (CARD_DECLINED)
+end note
+
+note bottom of StreamBridgeDomainEventPublisher
+  AFTER_COMMIT send, key = registrationId.
+  Topics: payment-succeeded, payment-failed,
+  refund-issued, refund-declined.
+end note
+
+note bottom of RefundPolicyService
+  Pure Java with an injected Clock:
+  30+ days → 100%, 7–29 → 50%, under 7 → 0%,
+  event cancelled → 100%, date unknown → 0%.
+  Days are whole days to the registration's
+  first session (firstSessionStartsAt). The Clock
+  bean comes from ClockConfiguration.
+end note
+
+note bottom of dom_model
+  Domain exceptions: PaymentOrderNotFoundException (404),
+  OrderNotPaidException (409 NOT_PAID),
+  AlreadyRefundedException (409 ALREADY_REFUNDED).
+  There is no "pay" endpoint: the charge is triggered
+  by the registration-requested event.
+end note
+
+legend right
+  <b>Dependency rule</b>
+  api ──> application ──> domain <── infrastructure
+  The Kafka consumer is an <i>inbound</i> adapter:
+  like a controller, it calls the application layer.
+  hollow triangle = implements a domain port
+endlegend
+@enduml

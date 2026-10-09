@@ -1,5 +1,10 @@
 # Converge — Ticketing Service Implementation Plan
 
+> **STATUS: IMPLEMENTED, NOT YET LIVE-VERIFIED** — Tasks 1–10 merged to `main` on 2026-09-12
+> (`5fd96be`). Task 11, the live-broker run, is still outstanding and is folded into the single
+> end-to-end live run scheduled for M5; FR-08 stays `[~]` until it is written up. The commit-step
+> checkboxes below were not kept current during execution.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.

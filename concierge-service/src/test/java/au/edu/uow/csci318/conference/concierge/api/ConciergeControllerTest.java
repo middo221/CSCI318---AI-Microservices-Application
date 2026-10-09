@@ -183,6 +183,10 @@ class ConciergeControllerTest {
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value("LLM_RATE_LIMITED"))
                 .andExpect(jsonPath("$.message").exists());
+
+        // Never asked again: only an unreadable answer is retried, and a retry here would just
+        // spend more of the quota that has run out.
+        assertThat(model.turns()).isEqualTo(1);
     }
 
     @Test
@@ -195,6 +199,42 @@ class ConciergeControllerTest {
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.code").value("LLM_UNAVAILABLE"))
                 .andExpect(jsonPath("$.message").exists());
+    }
+
+    /**
+     * Regression from the M5 live run: Gemini ended its turn with an empty answer, LangChain4j
+     * could not parse {@code null} into an agenda, and the attendee got a 502. The agenda tools
+     * only read, so asking again is safe, and a second request usually answers.
+     */
+    @Test
+    void asksTheModelOnceMoreWhenItEndsItsTurnWithNoAnswer() throws Exception {
+        model.thenCallsTool("searchSessions", "{\"track\":\"PLATFORM\"}")
+                .thenAnswersNothing()
+                .thenAnswers("{\"items\":[{\"sessionId\":\"ses-1\",\"rationale\":\"Streams.\"}],"
+                        + "\"summary\":\"Answered on the second try.\"}");
+
+        mockMvc.perform(post("/api/v1/concierge/agenda")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody("streams")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.summary").value("Answered on the second try."))
+                .andExpect(jsonPath("$.items[0].sessionId").value("ses-1"));
+
+        assertThat(model.turns()).isEqualTo(3);
+    }
+
+    @Test
+    void reportsTwoEmptyAnswersInARowAsTheModelBeingUnavailableWithoutAThirdTry() throws Exception {
+        model.thenAnswersNothing()
+                .thenAnswersNothing();
+
+        mockMvc.perform(post("/api/v1/concierge/agenda")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody("streams")))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("LLM_UNAVAILABLE"));
+
+        assertThat(model.turns()).isEqualTo(2);
     }
 
     /**

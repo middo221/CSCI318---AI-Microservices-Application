@@ -1,0 +1,138 @@
+' Billing bounded context — payment-service, package ...payment.domain
+' Shared by domain-billing.puml (full detail) and domain-model.puml (overview).
+
+package "Billing  (payment-service)" as billing {
+
+  class PaymentOrder <<AggregateRoot>> {
+    - id : String
+    - registrationId : String  {unique}
+    - amount : Money  {> 0}
+    - holdExpiresAt : Instant
+    - firstSessionStartsAt : Instant  {null on orders raised before it existed}
+    - status : PaymentStatus
+    - attempts : List<PaymentAttempt>
+    - createdAt : Instant
+    - version : Long  {@Version}
+    --
+    + {static} raise(id, registrationId, Money, holdExpiresAt, firstSessionStartsAt) : PaymentOrder
+    + pay(CardToken, PaymentGateway, Instant now) : void
+    + requireRefundable() : void
+    + markRefunded() : void
+    + pullDomainEvents() : List<DomainEvent>
+  }
+
+  class PaymentAttempt <<Entity>> {
+    - id : String
+    - cardToken : CardToken
+    - outcome : AttemptOutcome
+    - failureReason : String
+    - gatewayReference : String
+    - occurredAt : Instant
+    --
+    ~ {static} record(CardToken, ChargeResult) : PaymentAttempt
+  }
+
+  class Refund <<AggregateRoot>> {
+    - id : String
+    - paymentOrderId : String
+    - registrationId : String
+    - amount : Money
+    - refundPercent : int
+    - status : RefundStatus
+    - reason : String
+    - decisionCode : String
+    - decidedBy : DecisionMaker
+    - decidedAt : Instant
+    --
+    + {static} issue(id, paymentOrderId, registrationId, Money, refundPercent, reason, decisionCode, DecisionMaker, decidedAt) : Refund
+    + {static} decline(id, paymentOrderId, registrationId, Money paid, reason, decisionCode, DecisionMaker, decidedAt) : Refund
+    + pullDomainEvents() : List<DomainEvent>
+  }
+
+  class "Money" as B_Money <<ValueObject>> {
+    amount : BigDecimal  {>= 0, scale 2}
+    currency : String  {3 letters}
+    --
+    isZero() : boolean
+    percentage(int) : Money
+  }
+
+  class CardToken <<ValueObject>> {
+    value : String  {opaque; never card-number shaped}
+  }
+
+  class ChargeResult <<ValueObject>> {
+    outcome : AttemptOutcome
+    gatewayReference : String
+    failureReason : String
+    --
+    succeeded() : boolean
+  }
+
+  class RefundDecision <<ValueObject>> {
+    rule : RefundRule
+    refundAmount : Money
+    daysUntilEvent : Integer  {null when the date is unknown}
+    --
+    refundPercent() : int
+    approved() : boolean
+  }
+
+  interface PaymentGateway <<Port>> {
+    + charge(paymentOrderId, Money, CardToken) : ChargeResult
+  }
+
+  class RefundPolicyService <<DomainService>> {
+    - clock : Clock
+    --
+    + evaluate(Money paid, Instant firstSessionStartsAt, boolean eventCancelled) : RefundDecision
+  }
+
+  enum PaymentStatus {
+    PENDING
+    PAID
+    FAILED
+    REFUNDED
+  }
+
+  enum AttemptOutcome {
+    SUCCEEDED
+    DECLINED
+    TIMED_OUT
+  }
+
+  enum RefundRule {
+    EVENT_CANCELLED  (100)
+    FULL_30_DAYS_OR_MORE  (100)
+    HALF_7_TO_29_DAYS  (50)
+    NONE_UNDER_7_DAYS  (0)
+    EVENT_DATE_UNKNOWN  (0)
+  }
+
+  enum RefundStatus {
+    ISSUED
+    DECLINED
+  }
+
+  enum DecisionMaker {
+    POLICY
+    AGENT
+    ORGANISER
+  }
+
+  PaymentOrder "1" *-- "0..*" PaymentAttempt : attempts
+  PaymentOrder *-- "1" B_Money : amount
+  PaymentOrder --> "1" PaymentStatus : status
+  PaymentAttempt *-- "1" CardToken
+  PaymentAttempt --> "1" AttemptOutcome : outcome
+  PaymentOrder ..> PaymentGateway : charges through\n(port, passed to pay)
+  PaymentGateway ..> ChargeResult : returns
+  PaymentAttempt ..> ChargeResult : recorded from
+  Refund *-- "1" B_Money : amount
+  Refund --> "1" RefundStatus : status
+  Refund --> "1" DecisionMaker : decidedBy
+  Refund "0..*" ..> "1" PaymentOrder : paymentOrderId\n(by id only)
+  RefundPolicyService ..> RefundDecision : evaluate
+  RefundDecision --> "1" RefundRule : rule
+  RefundDecision *-- "1" B_Money : refundAmount
+}

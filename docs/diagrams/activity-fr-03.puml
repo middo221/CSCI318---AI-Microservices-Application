@@ -1,0 +1,68 @@
+@startuml activity-fr-03
+' Report §2.1 — FR-03 Publish an event.
+' Source: EventController.publish, EventApplicationService.publish, Event.publish,
+' StreamBridgeDomainEventPublisher, CatalogEventConsumers.eventPublished, ProcessedEventStore.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-03 — Publish an event
+
+|Organiser|
+start
+:POST /api/v1/events/{id}/publish;
+
+|event-catalog-service|
+:EventApplicationService.publish(id);
+if (event exists?) then (no)
+  $ERR:404 EVENT_NOT_FOUND;
+  stop
+else (yes)
+endif
+:Event.publish();
+if (at least one session?) then (no)
+  $ERR:409 EVENT_HAS_NO_SESSIONS;
+  stop
+else (yes)
+endif
+if (status DRAFT?) then (no)
+  $ERR:409 EVENT_ALREADY_PUBLISHED;
+  stop
+else (yes)
+endif
+:status → PUBLISHED,
+record EventPublished
+(conferenceEventId, name, startDate, endDate);
+:EventRepository.save → catalogdb.events;
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:event-published
+key: conferenceEventId>
+
+fork
+  |event-catalog-service|
+  $OK:200 OK EventResponse (status "PUBLISHED");
+  |Organiser|
+  :the event's sessions now appear
+  in catalogue search (FR-05);
+fork again
+  |registration-service|
+  :event-published<
+  :CatalogEventConsumers.eventPublished;
+  if (eventId already in processed_events?) then (yes)
+    :ignore the redelivery;
+  else (no)
+    :record eventId in processed_events;
+    :log "open for registration"
+    (no other state changes);
+  endif
+end fork
+stop
+
+note right
+  Publishing emits only event-published.
+  Session capacities were already sent
+  as session-capacity-changed when each
+  session was added (FR-02).
+end note
+@enduml

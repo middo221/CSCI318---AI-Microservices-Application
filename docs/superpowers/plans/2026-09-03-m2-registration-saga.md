@@ -1,5 +1,9 @@
 # Converge M2 — The Registration Saga Implementation Plan
 
+> **STATUS: COMPLETE** — merged to `main` on 2026-09-03 (`ef25de1`) and verified against a live
+> broker (`docs/verification/2026-m2-registration-saga.md`). The step checkboxes below were not
+> kept current during execution; the git history and the verification note are the record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.

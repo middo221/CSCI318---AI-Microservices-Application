@@ -1,6 +1,8 @@
 package au.edu.uow.csci318.conference.analytics.support;
 
+import au.edu.uow.csci318.conference.analytics.infrastructure.streams.EventSerdes;
 import au.edu.uow.csci318.conference.common.event.EventPublished;
+import au.edu.uow.csci318.conference.common.event.RegistrationRequested;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -38,5 +40,23 @@ class ProducerWireTest {
 
         assertThat(payload.get("totalAmount").isNumber()).isTrue();
         assertThat(payload.get("holdExpiresAt").isTextual()).isTrue();
+    }
+
+    /**
+     * Verbatim from the M5 live run (docs/verification/2026-m2-payment-saga.md), written by
+     * registration-service and read off the broker with kafka-console-consumer.
+     */
+    private static final String REGISTRATION_REQUESTED_ON_THE_BROKER = "{\"eventId\":\"adb9e011-ceab-4d83-99a3-aed3f8f2f0c7\",\"occurredAt\":\"2026-10-09T04:17:26.884092200Z\",\"registrationId\":\"3cfac26e-bcf0-49a6-8a07-3795d47e4fab\",\"attendeeId\":\"att-1042\",\"conferenceEventId\":\"cf07d5d7-0b31-4afb-aa7f-ac6485a4cea1\",\"totalAmount\":148.50,\"currency\":\"AUD\",\"holdExpiresAt\":\"2026-10-09T04:17:46.884092200Z\",\"cardToken\":\"TOK_OK\",\"firstSessionStartsAt\":\"2026-09-13T23:00:00Z\"}";
+
+    @Test
+    void readsARegistrationRequestedExactlyAsTheProducerWroteItLive() throws Exception {
+        JsonNode payload = new ObjectMapper().readTree(REGISTRATION_REQUESTED_ON_THE_BROKER);
+
+        assertThat(payload.get("totalAmount").isNumber()).isTrue();
+        assertThat(payload.get("holdExpiresAt").isTextual()).isTrue();
+        assertThat(payload.get("registrationId").asText()).isNotBlank();
+        assertThat(EventSerdes.json(RegistrationRequested.class).deserializer()
+                .deserialize("registration-requested", REGISTRATION_REQUESTED_ON_THE_BROKER.getBytes(StandardCharsets.UTF_8))
+                .registrationId()).isEqualTo(payload.get("registrationId").asText());
     }
 }

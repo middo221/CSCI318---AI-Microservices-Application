@@ -1,0 +1,632 @@
+#!/usr/bin/env python3
+"""Generates the Converge Postman collection and its environment.
+
+    python postman/build_collection.py           write both JSON files next to this script
+    python postman/build_collection.py --check   exit 1 if the committed files differ from what
+                                                 this script would write
+
+The two JSON files are build output: edit this script, never the JSON, then regenerate. The
+collection is a demonstration flow that runs top to bottom in Postman's Collection Runner against
+freshly started services (scripts/run-all.sh): every request names the status it expects, and the
+ids it creates are captured into collection variables for the requests after it.
+
+Standard library only, and deterministic: the same script always writes the same bytes, which is
+what lets --check catch a JSON file edited by hand or a script change that was never regenerated.
+"""
+import argparse
+import json
+import sys
+import uuid
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+COLLECTION_FILE = HERE / "converge.postman_collection.json"
+ENVIRONMENT_FILE = HERE / "converge.postman_environment.json"
+SCHEMA = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+
+# One environment variable per service. scripts/check_endpoints.py maps each to its port.
+BASE_URLS = [
+    ("catalogUrl", "http://localhost:8081"),
+    ("registrationUrl", "http://localhost:8082"),
+    ("paymentUrl", "http://localhost:8083"),
+    ("ticketingUrl", "http://localhost:8084"),
+    ("analyticsUrl", "http://localhost:8085"),
+    ("conciergeUrl", "http://localhost:8086"),
+]
+
+# Collection variables. The first block are inputs a presenter may change; the rest start empty
+# and are filled in by the test scripts as the run goes.
+VARIABLES = [
+    ("geminiCooldownMs", "65000"),
+    ("danaAttendeeId", "att-1042"),
+    ("samAttendeeId", "att-2000"),
+    ("leeAttendeeId", "att-3000"),
+    ("kimAttendeeId", "att-5000"),
+    ("missingEventId", "no-such-event"),
+    ("missingTicketCode", "TKT-NOSUCHCODE"),
+    ("eventStart", ""),
+    ("eventEnd", ""),
+    ("speakerId", ""),
+    ("eventId", ""),
+    ("keynoteSessionId", ""),
+    ("workshopSessionId", ""),
+    ("danaRegistrationId", ""),
+    ("danaPaymentOrderId", ""),
+    ("keynoteTicketCode", ""),
+    ("workshopTicketCode", ""),
+    ("gateId", ""),
+    ("queuedAt", ""),
+    ("samRegistrationId", ""),
+    ("samPaymentOrderId", ""),
+    ("kimRegistrationId", ""),
+]
+
+REASONS = {200: "OK", 201: "Created", 202: "Accepted", 400: "Bad Request", 404: "Not Found", 409: "Conflict"}
+
+VENUE = {"name": "Innovation Campus", "addressLine": "Squires Way", "city": "North Wollongong"}
+
+COLLECTION_DESCRIPTION = """Every REST endpoint of the six Converge services, ordered as one demonstration.
+
+**Before running.** Start Kafka and all six services (`bash scripts/run-all.sh`), import this
+collection and `converge.postman_environment.json`, and select the **Converge - local**
+environment. Then run the whole collection in the Collection Runner, in order, or send the
+requests one by one from the top.
+
+**Order matters.** Each request captures the ids it creates (event, sessions, registrations,
+payment orders, ticket codes) into collection variables that later requests use. Folders 1 to 8
+are the demonstration flow; folder 9 shows the common error body `{code, message}`.
+
+**Kafka between requests.** Several requests read state that arrives over Kafka: the registration
+replica of the programme, payment confirming a registration, tickets being issued, a refund
+promoting the waitlist, and the analytics read models. Their pre-request scripts poll the same
+read up to ten times, one second apart, and stop as soon as the expected state appears. If it
+never appears the request is sent anyway and its own test fails with a clear message.
+
+**Gemini quota (folder 8).** The free Gemini tier allows five model requests per minute, and one
+agent conversation spends three to five. The support request therefore waits `geminiCooldownMs`
+(default 65000 ms) after the agenda request. Set it to 0 on a paid tier. Without `GEMINI_API_KEY`
+in the concierge's environment, both agent requests answer `502 LLM_UNAVAILABLE`.
+
+**Running it again.** Every run creates its own event and sessions, so a second run against the
+same services passes too, but the four attendees' histories accumulate (Dana's registration list
+grows, the escalation queue keeps old cases). For a clean slate restart the services:
+`bash scripts/stop-all.sh && bash scripts/run-all.sh --no-build`. The services keep their data
+in memory, so a restart empties them; Kafka keeps its topics until `docker compose down -v`.
+
+**FR-15's alert is not a REST response.** The keynote session fills to 100% in folder 5, which
+writes one message to the `session-capacity-alert` topic; see it in Kafka UI at
+http://localhost:8080. FR-16's `gate-congestion-alert` is written by the check-in in folder 4.
+
+Generated by `postman/build_collection.py`; edit that script, not this file."""
+
+
+def stable_id(name):
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "converge/postman/" + name))
+
+
+def url(host_var, path, query=None):
+    """A Postman URL object. ``path`` starts with /api/v1 and names its parameters {{like_this}}."""
+    raw = "{{%s}}%s" % (host_var, path)
+    entry = {"raw": raw, "host": ["{{%s}}" % host_var], "path": [s for s in path.split("/") if s]}
+    if query:
+        entry["raw"] = raw + "?" + "&".join("%s=%s" % (key, value) for key, value in query)
+        entry["query"] = [{"key": key, "value": value} for key, value in query]
+    return entry
+
+
+def poll_until(host_var, path, ready, why, query=""):
+    """Pre-request script that polls ``path`` until ``ready(body)`` holds: at most 10 tries, one second
+    apart, chained with setTimeout (the sandbox waits for pending timers and sendRequest callbacks).
+    If the state never appears the request is sent anyway, so its own test fails with a clear message."""
+    return [
+        "// " + why,
+        "// Polls up to 10 times, 1 s apart, and stops as soon as the expected state is seen.",
+        'const pollUrl = pm.variables.replaceIn("{{%s}}%s%s");' % (host_var, path, query),
+        "const ready = function (body) { return %s; };" % ready,
+        "let tries = 0;",
+        "(function poll() {",
+        "    pm.sendRequest(pollUrl, function (err, res) {",
+        "        let seen = false;",
+        "        if (!err && res.code === 200) {",
+        "            try { seen = ready(res.json()); } catch (e) { seen = false; }",
+        "        }",
+        "        tries += 1;",
+        "        if (!seen && tries < 10) { setTimeout(poll, 1000); }",
+        "    });",
+        "})();",
+    ]
+
+
+def capture(variable, field):
+    """Stores ``field`` of the response, but only when the expected status came back and the field is there."""
+    return [
+        'pm.test("response carries %s", function () {' % field,
+        '    pm.expect(pm.response.code, "status was " + pm.response.code).to.eql(@@STATUS@@);',
+        "    const value = pm.response.json().%s;" % field,
+        '    pm.expect(value, "%s is missing from the response").to.exist;' % field,
+        '    pm.collectionVariables.set("%s", value);' % variable,
+        "});",
+    ]
+
+
+def expect_field(field, value):
+    return [
+        'pm.test("%s is %s", function () {' % (field, value),
+        '    pm.expect(pm.response.json().%s).to.eql("%s");' % (field, value),
+        "});",
+    ]
+
+
+def expect_code(code):
+    return [
+        'pm.test("error code is %s", function () {' % code,
+        '    pm.expect(pm.response.json().code).to.eql("%s");' % code,
+        "});",
+    ]
+
+
+def request(name, method, host_var, path, status, *, body=None, query=None, tests=(), pre=(),
+            description=""):
+    test_lines = [
+        'pm.test("%d %s", function () {' % (status, REASONS[status]),
+        "    pm.response.to.have.status(%d);" % status,
+        "});",
+    ] + list(tests)
+    test_lines = [line.replace("@@STATUS@@", str(status)) for line in test_lines]
+    events = []
+    if pre:
+        events.append({"listen": "prerequest", "script": {"type": "text/javascript", "exec": list(pre)}})
+    events.append({"listen": "test", "script": {"type": "text/javascript", "exec": test_lines}})
+    req = {"method": method, "header": [], "url": url(host_var, path, query)}
+    if body is not None:
+        req["header"] = [{"key": "Content-Type", "value": "application/json"}]
+        req["body"] = {"mode": "raw", "raw": json.dumps(body, indent=2),
+                       "options": {"raw": {"language": "json"}}}
+    if description:
+        req["description"] = description
+    return {"name": name, "event": events, "request": req}
+
+
+def folder(name, description, items):
+    return {"name": name, "description": description, "item": items}
+
+
+def catalogue():
+    return folder("1. Catalogue (FR-01 to FR-05)",
+                  "An organiser builds a programme: a speaker, a draft event 45 days out, two sessions, "
+                  "publication, a capacity change, and the attendee-facing search.", [
+        request("Create a speaker (FR-02)", "POST", "catalogUrl", "/api/v1/speakers", 201,
+                body={"name": "Dr Chen", "bio": "Works on observability",
+                      "organisation": "University of Wollongong"},
+                tests=capture("speakerId", "id")),
+        request("Read the speaker back", "GET", "catalogUrl", "/api/v1/speakers/{{speakerId}}", 200,
+                tests=expect_field("name", "Dr Chen")),
+        request("Create a draft event 45 days out (FR-01)", "POST", "catalogUrl", "/api/v1/events", 201,
+                pre=[
+                    "// 45 days out, so the refund policy in folder 6 quotes FULL_30_DAYS_OR_MORE.",
+                    "function isoDay(offsetDays) {",
+                    "    const day = new Date();",
+                    "    day.setUTCDate(day.getUTCDate() + offsetDays);",
+                    "    return day.toISOString().slice(0, 10);",
+                    "}",
+                    'pm.collectionVariables.set("eventStart", isoDay(45));',
+                    'pm.collectionVariables.set("eventEnd", isoDay(46));',
+                ],
+                body={"name": "SoftEng Summit", "description": "Two days of practice", "venue": VENUE,
+                      "startDate": "{{eventStart}}", "endDate": "{{eventEnd}}"},
+                tests=expect_field("status", "DRAFT") + capture("eventId", "id")),
+        request("Read the event back", "GET", "catalogUrl", "/api/v1/events/{{eventId}}", 200,
+                tests=['pm.test("it is the event just created", function () {',
+                       '    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get("eventId"));',
+                       "});"]),
+        request("Add the keynote: two seats at 149.00 (FR-02)", "POST", "catalogUrl",
+                "/api/v1/events/{{eventId}}/sessions", 201,
+                body={"title": "Observability keynote", "track": "ML Infrastructure",
+                      "startsAt": "{{eventStart}}T09:00", "endsAt": "{{eventStart}}T10:30",
+                      "speakerId": "{{speakerId}}", "seatCapacity": 2, "priceAmount": "149.00"},
+                tests=capture("keynoteSessionId", "id"),
+                description="Two seats, so folder 5 can fill it and open its waitlist."),
+        request("Add a workshop: fifty seats at 75.00 (FR-02)", "POST", "catalogUrl",
+                "/api/v1/events/{{eventId}}/sessions", 201,
+                body={"title": "Tracing workshop", "track": "ML Infrastructure",
+                      "startsAt": "{{eventStart}}T11:00", "endsAt": "{{eventStart}}T12:30",
+                      "speakerId": "{{speakerId}}", "seatCapacity": 50, "priceAmount": "75.00"},
+                tests=capture("workshopSessionId", "id")),
+        request("Publish the event (FR-03)", "POST", "catalogUrl", "/api/v1/events/{{eventId}}/publish", 200,
+                tests=expect_field("status", "PUBLISHED")),
+        request("Move the workshop to a bigger room (FR-04)", "PUT", "catalogUrl",
+                "/api/v1/events/{{eventId}}/sessions/{{workshopSessionId}}/capacity", 200,
+                body={"seatCapacity": 60},
+                tests=['pm.test("capacity is now 60", function () {',
+                       "    pm.expect(pm.response.json().seatCapacity).to.eql(60);",
+                       "});"]),
+        request("List published events (FR-05)", "GET", "catalogUrl", "/api/v1/events", 200,
+                query=[("status", "PUBLISHED")],
+                tests=['pm.test("the new event is listed", function () {',
+                       "    const ids = pm.response.json().map(function (event) { return event.id; });",
+                       '    pm.expect(ids).to.include(pm.collectionVariables.get("eventId"));',
+                       "});"]),
+        request("Search sessions by track and day (FR-05)", "GET", "catalogUrl", "/api/v1/sessions/search", 200,
+                query=[("track", "ML Infrastructure"), ("day", "{{eventStart}}")],
+                tests=['pm.test("both sessions are found", function () {',
+                       "    const ids = pm.response.json().map(function (session) { return session.id; });",
+                       '    pm.expect(ids).to.include(pm.collectionVariables.get("keynoteSessionId"));',
+                       '    pm.expect(ids).to.include(pm.collectionVariables.get("workshopSessionId"));',
+                       "});"]),
+    ])
+
+
+def registration():
+    return folder("2. Registration (FR-06)",
+                  "Dana registers for both sessions and pays as she registers with the simulated "
+                  "gateway's TOK_OK token. Nothing calls payment over HTTP.", [
+        request("Seats on the registration replica (FR-06)", "GET", "registrationUrl",
+                "/api/v1/sessions/{{keynoteSessionId}}/availability", 200,
+                pre=poll_until("registrationUrl", "/api/v1/sessions/{{keynoteSessionId}}/availability",
+                               "body.availableSeats === 2",
+                               "The replica on 8082 is fed by session-added and session-capacity-changed."),
+                tests=['pm.test("both keynote seats are free", function () {',
+                       "    pm.expect(pm.response.json().availableSeats).to.eql(2);",
+                       "});"]),
+        request("Register Dana for both sessions, paying with TOK_OK (FR-06)", "POST", "registrationUrl",
+                "/api/v1/registrations", 201,
+                body={"attendeeId": "{{danaAttendeeId}}", "attendeeName": "Dana Okafor",
+                      "attendeeEmail": "dana@example.com", "eventId": "{{eventId}}", "cardToken": "TOK_OK",
+                      "sessions": [{"sessionId": "{{keynoteSessionId}}", "quantity": 1},
+                                   {"sessionId": "{{workshopSessionId}}", "quantity": 1}]},
+                tests=expect_field("status", "PENDING_PAYMENT")
+                + capture("danaRegistrationId", "id")),
+        request("Dana's registration is confirmed (FR-08)", "GET", "registrationUrl",
+                "/api/v1/registrations/{{danaRegistrationId}}", 200,
+                pre=poll_until("registrationUrl", "/api/v1/registrations/{{danaRegistrationId}}",
+                               'body.status === "CONFIRMED"',
+                               "registration-requested -> payment-succeeded -> confirmed, over Kafka."),
+                tests=expect_field("status", "CONFIRMED")),
+        request("Every registration Dana holds", "GET", "registrationUrl",
+                "/api/v1/attendees/{{danaAttendeeId}}/registrations", 200,
+                tests=['pm.test("Dana\'s registration is listed", function () {',
+                       "    const ids = pm.response.json().map(function (r) { return r.id; });",
+                       '    pm.expect(ids).to.include(pm.collectionVariables.get("danaRegistrationId"));',
+                       "});"]),
+    ])
+
+
+def payment():
+    return folder("3. Payment (FR-07)",
+                  "payment-service raised and charged an order from registration-requested on its own.", [
+        request("Dana's payment order, by registration (FR-07)", "GET", "paymentUrl",
+                "/api/v1/registrations/{{danaRegistrationId}}/payment-order", 200,
+                tests=expect_field("status", "PAID") + capture("danaPaymentOrderId", "id")),
+        request("The same order, by its id (FR-07)", "GET", "paymentUrl",
+                "/api/v1/payment-orders/{{danaPaymentOrderId}}", 200,
+                tests=['pm.test("amount is a JSON number: 224.00 = 149.00 + 75.00", function () {',
+                       "    pm.expect(pm.response.json().amount).to.eql(224);",
+                       "});"]),
+    ])
+
+
+def tickets():
+    return folder("4. Tickets, transfer and check-in (FR-08, FR-12, FR-13)",
+                  "One ticket per confirmed session appears on 8084, issued from registration-confirmed. "
+                  "Dana hands the workshop ticket to Sam Patel, who is admitted at a gate after a "
+                  "five-minute queue - long enough for FR-16 to call the gate congested.", [
+        request("Dana's tickets: one per session (FR-08)", "GET", "ticketingUrl",
+                "/api/v1/registrations/{{danaRegistrationId}}/tickets", 200,
+                pre=poll_until("ticketingUrl", "/api/v1/registrations/{{danaRegistrationId}}/tickets",
+                               "body.length === 2", "Tickets are issued from registration-confirmed."),
+                tests=["const tickets = pm.response.json();",
+                       'pm.test("one ticket per confirmed session", function () {',
+                       "    pm.expect(tickets.length).to.eql(2);",
+                       "});",
+                       "tickets.forEach(function (ticket) {",
+                       '    if (ticket.sessionId === pm.collectionVariables.get("keynoteSessionId")) {',
+                       '        pm.collectionVariables.set("keynoteTicketCode", ticket.ticketCode);',
+                       "    }",
+                       '    if (ticket.sessionId === pm.collectionVariables.get("workshopSessionId")) {',
+                       '        pm.collectionVariables.set("workshopTicketCode", ticket.ticketCode);',
+                       "    }",
+                       "});",
+                       'pm.test("both ticket codes were captured", function () {',
+                       '    pm.expect(pm.collectionVariables.get("keynoteTicketCode"), "keynote ticket").to.be.a("string");',
+                       '    pm.expect(pm.collectionVariables.get("workshopTicketCode"), "workshop ticket").to.be.a("string");',
+                       "});"]),
+        request("Read a ticket by its code (FR-08)", "GET", "ticketingUrl", "/api/v1/tickets/{{keynoteTicketCode}}",
+                200, tests=expect_field("status", "ISSUED")),
+        request("Transfer the workshop ticket to Sam Patel (FR-12)", "POST", "ticketingUrl",
+                "/api/v1/tickets/{{workshopTicketCode}}/transfer", 200,
+                body={"toHolderName": "Sam Patel", "toHolderEmail": "sam@example.com"},
+                tests=expect_field("status", "TRANSFERRED")),
+        request("Admit Sam at a gate after a five-minute queue (FR-13)", "POST", "ticketingUrl",
+                "/api/v1/gates/{{gateId}}/check-ins", 201,
+                pre=["// A fresh gate per run, and a queue that started five minutes ago, so the gate's",
+                     "// one-minute window averages a wait above the PT2M congestion threshold (FR-16).",
+                     'pm.collectionVariables.set("gateId", "north-" + Date.now());',
+                     'pm.collectionVariables.set("queuedAt", new Date(Date.now() - 5 * 60 * 1000).toISOString());'],
+                body={"ticketCode": "{{workshopTicketCode}}", "queuedAt": "{{queuedAt}}"},
+                tests=['pm.test("waited about five minutes", function () {',
+                       "    pm.expect(pm.response.json().waitMillis).to.be.above(120000);",
+                       "});"]),
+    ])
+
+
+def waitlist():
+    return folder("5. Waitlist (FR-10)",
+                  "Sam takes the keynote's second seat, so it is full. Lee is refused and joins the waitlist.", [
+        request("Register Sam for the keynote's last seat (FR-06)", "POST", "registrationUrl",
+                "/api/v1/registrations", 201,
+                body={"attendeeId": "{{samAttendeeId}}", "attendeeName": "Sam Reyes",
+                      "attendeeEmail": "sam.reyes@example.com", "eventId": "{{eventId}}", "cardToken": "TOK_OK",
+                      "sessions": [{"sessionId": "{{keynoteSessionId}}", "quantity": 1}]},
+                tests=capture("samRegistrationId", "id")),
+        request("Lee is refused: the keynote is full (FR-06)", "POST", "registrationUrl",
+                "/api/v1/registrations", 409,
+                body={"attendeeId": "{{leeAttendeeId}}", "attendeeName": "Lee Park",
+                      "attendeeEmail": "lee@example.com", "eventId": "{{eventId}}", "cardToken": "TOK_OK",
+                      "sessions": [{"sessionId": "{{keynoteSessionId}}", "quantity": 1}]},
+                tests=expect_code("SESSION_FULL")),
+        request("Lee joins the keynote's waitlist (FR-10)", "POST", "registrationUrl",
+                "/api/v1/sessions/{{keynoteSessionId}}/waitlist", 201,
+                body={"attendeeId": "{{leeAttendeeId}}"},
+                tests=expect_field("status", "WAITING")
+                + ['pm.test("Lee is first in line", function () {',
+                   "    pm.expect(pm.response.json().position).to.eql(1);",
+                   "});"]),
+        request("The keynote's waitlist (FR-10)", "GET", "registrationUrl",
+                "/api/v1/sessions/{{keynoteSessionId}}/waitlist", 200,
+                tests=['pm.test("one attendee waiting", function () {',
+                       "    pm.expect(pm.response.json().length).to.eql(1);",
+                       "});"]),
+    ])
+
+
+def refunds():
+    return folder("6. Refunds (FR-11)",
+                  "Sam asks what he would get back, then asks for it. Payment decides by the policy, "
+                  "registration releases his seat, and seats-released promotes Lee - with no REST call "
+                  "between any of the services. Lee then registers, and an organiser refunds Dana by hand.", [
+        request("Sam's refund quote: 45 days out (FR-11)", "GET", "paymentUrl", "/api/v1/refund-policy/quote", 200,
+                query=[("registrationId", "{{samRegistrationId}}")],
+                pre=poll_until("registrationUrl", "/api/v1/registrations/{{samRegistrationId}}",
+                               'body.status === "CONFIRMED"',
+                               "Sam's registration must be paid and confirmed before he can ask."),
+                tests=expect_field("rule", "FULL_30_DAYS_OR_MORE")
+                + ['pm.test("eligible for 100%", function () {',
+                   "    pm.expect(pm.response.json().eligible).to.eql(true);",
+                   "    pm.expect(pm.response.json().refundPercent).to.eql(100);",
+                   "});"]),
+        request("Sam asks for a refund (FR-11)", "POST", "registrationUrl",
+                "/api/v1/registrations/{{samRegistrationId}}/refund-requests", 202,
+                body={"reason": "I have been hospitalised and cannot attend", "requestedBy": "ATTENDEE"},
+                tests=expect_field("status", "REFUND_REQUESTED")),
+        request("Sam's registration is refunded (FR-11)", "GET", "registrationUrl",
+                "/api/v1/registrations/{{samRegistrationId}}", 200,
+                pre=poll_until("registrationUrl", "/api/v1/registrations/{{samRegistrationId}}",
+                               'body.status === "REFUNDED"',
+                               "refund-requested -> refund-issued -> registration refunded, over Kafka."),
+                tests=expect_field("status", "REFUNDED")),
+        request("Sam's payment order is refunded (FR-11)", "GET", "paymentUrl",
+                "/api/v1/registrations/{{samRegistrationId}}/payment-order", 200,
+                tests=expect_field("status", "REFUNDED") + capture("samPaymentOrderId", "id")),
+        request("Lee was promoted by seats-released alone (FR-10)", "GET", "registrationUrl",
+                "/api/v1/sessions/{{keynoteSessionId}}/waitlist", 200,
+                pre=poll_until("registrationUrl", "/api/v1/sessions/{{keynoteSessionId}}/waitlist",
+                               "body.some(function (e) { return e.attendeeId === pm.collectionVariables.get(\"leeAttendeeId\") "
+                               "&& e.status === \"PROMOTED\"; })",
+                               "seats-released -> waitlist-promoted, consumed by registration itself."),
+                tests=['pm.test("Lee is PROMOTED", function () {',
+                       "    const lee = pm.response.json().find(function (entry) {",
+                       '        return entry.attendeeId === pm.collectionVariables.get("leeAttendeeId");',
+                       "    });",
+                       "    pm.expect(lee).to.be.an(\"object\");",
+                       '    pm.expect(lee.status).to.eql("PROMOTED");',
+                       "});"]),
+        request("Lee takes up the offer and registers (FR-06, FR-10)", "POST", "registrationUrl",
+                "/api/v1/registrations", 201,
+                body={"attendeeId": "{{leeAttendeeId}}", "attendeeName": "Lee Park",
+                      "attendeeEmail": "lee@example.com", "eventId": "{{eventId}}", "cardToken": "TOK_OK",
+                      "sessions": [{"sessionId": "{{keynoteSessionId}}", "quantity": 1}]},
+                description="Promotion is an offer, not a held seat: Lee registers in the ordinary way."),
+        request("An organiser refunds Dana in full (FR-11 override)", "POST", "paymentUrl",
+                "/api/v1/payment-orders/{{danaPaymentOrderId}}/refunds", 201,
+                body={"refundPercent": 100, "reason": "Organiser override: escalated by the support agent"},
+                tests=expect_field("decidedBy", "ORGANISER") + expect_field("status", "ISSUED")),
+    ])
+
+
+def analytics():
+    return folder("7. Analytics (FR-14, FR-15, FR-16)",
+                  "Read models built by Kafka Streams and served by interactive query. FR-15's alert itself "
+                  "is on the session-capacity-alert topic (Kafka UI), written when the keynote filled in folder 5.", [
+        request("The keynote's live fill rate (FR-14)", "GET", "analyticsUrl",
+                "/api/v1/analytics/sessions/{{keynoteSessionId}}/fill-rate", 200,
+                pre=poll_until("analyticsUrl", "/api/v1/analytics/sessions/{{keynoteSessionId}}/fill-rate",
+                               "body.seatCapacity === 2", "The streams commit every second; wait for the read model."),
+                tests=['pm.test("tracked out of two seats", function () {',
+                       "    pm.expect(pm.response.json().seatCapacity).to.eql(2);",
+                       '    pm.expect(pm.response.json().fillRate).to.be.a("number");',
+                       "});"]),
+        request("Sessions at or above the alert threshold (FR-15)", "GET", "analyticsUrl",
+                "/api/v1/analytics/sessions/at-risk", 200,
+                tests=['pm.test("an array", function () {',
+                       '    pm.expect(pm.response.json()).to.be.an("array");',
+                       "});"],
+                description="Default threshold 0.9 (conference.analytics.capacity-alert-threshold)."),
+        request("Sessions at or above half full (FR-15)", "GET", "analyticsUrl", "/api/v1/analytics/sessions/at-risk",
+                200, query=[("threshold", "0.5")],
+                pre=poll_until("analyticsUrl", "/api/v1/analytics/sessions/at-risk",
+                               "body.some(function (r) { return r.sessionId === pm.collectionVariables.get(\"keynoteSessionId\"); })",
+                               "The fill rate follows Lee's registration over Kafka.", "?threshold=0.5"),
+                tests=['pm.test("the keynote is at least half full", function () {',
+                       "    const ids = pm.response.json().map(function (rate) { return rate.sessionId; });",
+                       '    pm.expect(ids).to.include(pm.collectionVariables.get("keynoteSessionId"));',
+                       "});"]),
+        request("The gate's latest one-minute window (FR-16)", "GET", "analyticsUrl",
+                "/api/v1/analytics/gates/{{gateId}}/throughput", 200,
+                pre=poll_until("analyticsUrl", "/api/v1/analytics/gates/{{gateId}}/throughput",
+                               "body.congested === true", "The gate window closes a moment after the check-in."),
+                tests=['pm.test("congested: average wait above two minutes", function () {',
+                       "    pm.expect(pm.response.json().averageWaitMillis).to.be.above(120000);",
+                       "    pm.expect(pm.response.json().congested).to.eql(true);",
+                       "});"]),
+        request("Every congested gate (FR-16)", "GET", "analyticsUrl", "/api/v1/analytics/gates/congested", 200,
+                pre=poll_until("analyticsUrl", "/api/v1/analytics/gates/congested",
+                               "body.some(function (g) { return g.gateId === pm.collectionVariables.get(\"gateId\"); })",
+                               "The gate window closes a moment after the check-in."),
+                tests=['pm.test("this run\'s gate is listed", function () {',
+                       "    const ids = pm.response.json().map(function (gate) { return gate.gateId; });",
+                       '    pm.expect(ids).to.include(pm.collectionVariables.get("gateId"));',
+                       "});"]),
+        request("The registration funnel", "GET", "analyticsUrl", "/api/v1/analytics/funnel", 200,
+                pre=poll_until("analyticsUrl", "/api/v1/analytics/funnel", "body.requested > 0",
+                               "The funnel counts registration-requested events over Kafka."),
+                tests=['pm.test("registrations were counted", function () {',
+                       "    pm.expect(pm.response.json().requested).to.be.above(0);",
+                       "});"]),
+    ])
+
+
+def agents():
+    return folder("8. Agents (FR-17, FR-18)",
+                  "Both agents call Gemini. Five model requests a minute on the free tier: the support "
+                  "request waits geminiCooldownMs after the agenda request.", [
+        request("Register Kim for the workshop: 75.00, under the agent's limit", "POST", "registrationUrl",
+                "/api/v1/registrations", 201,
+                body={"attendeeId": "{{kimAttendeeId}}", "attendeeName": "Kim Nguyen",
+                      "attendeeEmail": "kim@example.com", "eventId": "{{eventId}}", "cardToken": "TOK_OK",
+                      "sessions": [{"sessionId": "{{workshopSessionId}}", "quantity": 1}]},
+                tests=capture("kimRegistrationId", "id")),
+        request("Kim's registration is confirmed", "GET", "registrationUrl",
+                "/api/v1/registrations/{{kimRegistrationId}}", 200,
+                pre=poll_until("registrationUrl", "/api/v1/registrations/{{kimRegistrationId}}",
+                               'body.status === "CONFIRMED"',
+                               "Payment confirms over Kafka; the support agent refunds only CONFIRMED registrations."),
+                tests=expect_field("status", "CONFIRMED")),
+        request("Build Dana a personal agenda (FR-17)", "POST", "conciergeUrl", "/api/v1/concierge/agenda", 200,
+                body={"attendeeId": "{{danaAttendeeId}}",
+                      "interests": "I work on ML infrastructure. I want the observability keynote and "
+                                   "anything else by Dr Chen, and I would like my afternoon free."},
+                tests=['pm.test("an agenda came back", function () {',
+                       '    pm.expect(pm.response.json().items).to.be.an("array");',
+                       "});"],
+                description="502 LLM_UNAVAILABLE means the concierge has no GEMINI_API_KEY; "
+                            "429 LLM_RATE_LIMITED means the free-tier minute is spent."),
+        request("Kim asks the support agent for her money back (FR-18)", "POST", "conciergeUrl",
+                "/api/v1/concierge/support", 200,
+                pre=["// Let the free-tier quota refill after the agenda request (five model requests a minute).",
+                     'setTimeout(function () {}, Number(pm.collectionVariables.get("geminiCooldownMs") || 0));'],
+                body={"attendeeId": "{{kimAttendeeId}}",
+                      "message": "I've been hospitalised and can't attend. Can I get my money back for "
+                                 "registration {{kimRegistrationId}}?"},
+                tests=['pm.test("an outcome the tools can produce", function () {',
+                       '    pm.expect(["RESOLVED", "REFUND_REQUESTED", "ESCALATED"]).to.include(pm.response.json().outcome);',
+                       "});",
+                       'pm.test("never more than the 200.00 AUD limit without a human", function () {',
+                       "    const total = pm.response.json().refunds.reduce(function (sum, refund) {",
+                       "        return sum + refund.refundAmount;",
+                       "    }, 0);",
+                       "    pm.expect(total).to.be.at.most(200);",
+                       "});"]),
+        request("The organisers' escalation queue (FR-18)", "GET", "conciergeUrl", "/api/v1/concierge/escalations",
+                200,
+                tests=['pm.test("an array, newest first", function () {',
+                       '    pm.expect(pm.response.json()).to.be.an("array");',
+                       "});"]),
+    ])
+
+
+def errors():
+    return folder("9. Error contract examples",
+                  "Every non-2xx response in every service has the same body: {code, message}.", [
+        request("404 EVENT_NOT_FOUND", "GET", "catalogUrl", "/api/v1/events/{{missingEventId}}", 404,
+                tests=expect_code("EVENT_NOT_FOUND")),
+        request("400 VALIDATION_FAILED: a blank event name", "POST", "catalogUrl", "/api/v1/events", 400,
+                body={"name": "  ", "venue": VENUE, "startDate": "{{eventStart}}", "endDate": "{{eventEnd}}"},
+                tests=expect_code("VALIDATION_FAILED")),
+        request("409 EVENT_ALREADY_PUBLISHED", "POST", "catalogUrl", "/api/v1/events/{{eventId}}/publish", 409,
+                tests=expect_code("EVENT_ALREADY_PUBLISHED")),
+        request("409 SESSION_NOT_FULL: no waitlist while seats remain", "POST", "registrationUrl",
+                "/api/v1/sessions/{{workshopSessionId}}/waitlist", 409,
+                body={"attendeeId": "att-6000"}, tests=expect_code("SESSION_NOT_FULL")),
+        request("404 TICKET_NOT_FOUND", "GET", "ticketingUrl", "/api/v1/tickets/{{missingTicketCode}}", 404,
+                tests=expect_code("TICKET_NOT_FOUND")),
+        request("409 ALREADY_CHECKED_IN: the same ticket twice", "POST", "ticketingUrl",
+                "/api/v1/gates/{{gateId}}/check-ins", 409,
+                body={"ticketCode": "{{workshopTicketCode}}", "queuedAt": "{{queuedAt}}"},
+                tests=expect_code("ALREADY_CHECKED_IN")),
+        request("409 ALREADY_REFUNDED: Sam's order a second time", "POST", "paymentUrl",
+                "/api/v1/payment-orders/{{samPaymentOrderId}}/refunds", 409,
+                body={"refundPercent": 100, "reason": "A second refund of the same order"},
+                tests=expect_code("ALREADY_REFUNDED")),
+        request("400 VALIDATION_FAILED: a quote without registrationId", "GET", "paymentUrl",
+                "/api/v1/refund-policy/quote", 400, tests=expect_code("VALIDATION_FAILED")),
+        request("400 INVALID_REQUEST: an unusable threshold", "GET", "analyticsUrl",
+                "/api/v1/analytics/sessions/at-risk", 400, query=[("threshold", "ninety")],
+                tests=expect_code("INVALID_REQUEST")),
+        request("400 VALIDATION_FAILED: a support request with no message", "POST", "conciergeUrl",
+                "/api/v1/concierge/support", 400,
+                body={"attendeeId": "{{kimAttendeeId}}", "message": ""},
+                tests=expect_code("VALIDATION_FAILED"),
+                description="Refused by validation before any model is called, so it spends no quota."),
+    ])
+
+
+def build_collection():
+    return {
+        "info": {
+            "_postman_id": stable_id("collection"),
+            "name": "Converge - every endpoint as a demo flow",
+            "description": COLLECTION_DESCRIPTION,
+            "schema": SCHEMA,
+        },
+        "item": [catalogue(), registration(), payment(), tickets(), waitlist(), refunds(), analytics(),
+                 agents(), errors()],
+        "variable": [{"key": key, "value": value, "type": "string"} for key, value in VARIABLES],
+    }
+
+
+def build_environment():
+    return {
+        "id": stable_id("environment"),
+        "name": "Converge - local",
+        "values": [{"key": key, "value": value, "type": "default", "enabled": True} for key, value in BASE_URLS],
+        "_postman_variable_scope": "environment",
+    }
+
+
+def render(document):
+    return json.dumps(document, indent=2) + "\n"
+
+
+def count_requests(collection):
+    return sum(len(group["item"]) for group in collection["item"])
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--check", action="store_true",
+                        help="exit 1 if the committed JSON differs from what this script writes")
+    args = parser.parse_args(argv)
+    collection = build_collection()
+    outputs = {COLLECTION_FILE: render(collection), ENVIRONMENT_FILE: render(build_environment())}
+    if args.check:
+        stale = []
+        for path, text in outputs.items():
+            current = path.read_bytes().decode("utf-8") if path.exists() else None
+            if current != text:
+                stale.append(path.name)
+        if stale:
+            for name in stale:
+                print("FAILED: postman/%s is out of date - run: python postman/build_collection.py" % name)
+            return 1
+        print("up to date: %d requests in %d folders" % (count_requests(collection), len(collection["item"])))
+        return 0
+    for path, text in outputs.items():
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    print("wrote %s and %s: %d requests in %d folders" % (
+        COLLECTION_FILE.name, ENVIRONMENT_FILE.name, count_requests(collection), len(collection["item"])))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

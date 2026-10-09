@@ -1,24 +1,58 @@
 openapi: 3.0.3
 info:
-  title: Converge Event Catalog Service
+  title: Converge — conference registration platform
   description: >
-    Programme bounded context. CSCI318 Spring 2026 group project.
-    This contract covers the endpoints implemented as of milestone M0;
-    later milestones extend it. Integration tests are generated from it.
-  version: 0.1.0
+    REST contract of all six Converge services, CSCI318 Spring 2026 group project:
+    event-catalog-service (8081, Programme), registration-service (8082, Registration),
+    payment-service (8083, Billing), ticketing-service (8084, Access),
+    analytics-service (8085, operational insight, served from Kafka Streams state stores) and
+    concierge-service (8086, attendee assistance through LangChain4j agents).
+    One document covers every service, so each path item names its own server.
+    Hand-written, because springdoc-openapi is excluded by the fixed dependency allowlist
+    (specs/1-technical-architecture.md). Every schema that mirrors a Java record names it in
+    x-java-record, and scripts/check_endpoints.py checks the property names against the code.
+    Every error response documented here carries the ApiError body.
+  version: 1.0.0
 servers:
   - url: http://localhost:8081
-    description: Local development
+    description: event-catalog-service
+  - url: http://localhost:8082
+    description: registration-service
+  - url: http://localhost:8083
+    description: payment-service
+  - url: http://localhost:8084
+    description: ticketing-service
+  - url: http://localhost:8085
+    description: analytics-service
+  - url: http://localhost:8086
+    description: concierge-service
 tags:
-  - name: Events
-    description: Conference programme
+  - name: Event catalog
+    description: Programme context — events, sessions and speakers (event-catalog-service, 8081)
+  - name: Registration
+    description: Registration context — registrations, seat holds, refunds requests and waitlists (registration-service, 8082)
+  - name: Payment
+    description: Billing context — payment orders, the refund policy and organiser refunds (payment-service, 8083)
+  - name: Ticketing
+    description: Access context — tickets, transfers and gate check-ins (ticketing-service, 8084)
+  - name: Analytics
+    description: Live read models built by Kafka Streams and served by interactive query (analytics-service, 8085)
+  - name: Concierge
+    description: LangChain4j agents — the agenda builder and the support agent (concierge-service, 8086)
+
 paths:
+
+  # ── event-catalog-service ──────────────────────────────────────────────────────────────────
+
   /api/v1/events:
+    servers:
+      - url: http://localhost:8081
+        description: event-catalog-service
     post:
       summary: Create a draft event
-      description: Implements FR-01. The event is created with status DRAFT.
+      description: Implements FR-01. The event is created with status DRAFT and no sessions.
       operationId: createDraftEvent
-      tags: [Events]
+      tags: [Event catalog]
       requestBody:
         required: true
         content:
@@ -35,8 +69,8 @@ paths:
                     name: Innovation Campus
                     addressLine: Squires Way
                     city: North Wollongong
-                  startDate: '2026-09-14'
-                  endDate: '2026-09-16'
+                  startDate: '2026-11-23'
+                  endDate: '2026-11-25'
       responses:
         '201':
           description: Draft event created
@@ -45,7 +79,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/EventResponse'
         '400':
-          description: Bean validation failure (VALIDATION_FAILED) or domain invariant violation (INVALID_REQUEST)
+          description: VALIDATION_FAILED (bean validation) or INVALID_REQUEST (a domain invariant, such as the end date preceding the start date)
           content:
             application/json:
               schema:
@@ -61,27 +95,59 @@ paths:
                   value:
                     code: INVALID_REQUEST
                     message: date range end must not precede its start
+    get:
+      summary: List events
+      description: Implements FR-05. Every event, each carrying its sessions, optionally filtered by status.
+      operationId: listEvents
+      tags: [Event catalog]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: DRAFT, PUBLISHED or CANCELLED, case-insensitive. Absent or blank returns every event.
+          schema:
+            type: string
+            example: PUBLISHED
+      responses:
+        '200':
+          description: The matching events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventResponse'
+        '400':
+          description: INVALID_REQUEST — an unknown status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                unknownStatus:
+                  value:
+                    code: INVALID_REQUEST
+                    message: unknown event status OPEN
+
   /api/v1/events/{id}:
+    servers:
+      - url: http://localhost:8081
+        description: event-catalog-service
     get:
       summary: Get an event by id
       operationId: getEventById
-      tags: [Events]
+      tags: [Event catalog]
       parameters:
-        - name: id
-          in: path
-          required: true
-          description: Event identifier returned by createDraftEvent
-          schema:
-            type: string
+        - $ref: '#/components/parameters/EventId'
       responses:
         '200':
-          description: The event
+          description: The event, with its sessions
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/EventResponse'
         '404':
-          description: No event with that id
+          description: EVENT_NOT_FOUND
           content:
             application/json:
               schema:
@@ -91,23 +157,1288 @@ paths:
                   value:
                     code: EVENT_NOT_FOUND
                     message: no event with id no-such-event
+
+  /api/v1/events/{id}/publish:
+    servers:
+      - url: http://localhost:8081
+        description: event-catalog-service
+    post:
+      summary: Publish an event
+      description: >
+        Implements FR-03. Opens the event for registration and emits event-published. An event
+        with no sessions cannot be published.
+      operationId: publishEvent
+      tags: [Event catalog]
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: The published event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '404':
+          description: EVENT_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: EVENT_ALREADY_PUBLISHED or EVENT_HAS_NO_SESSIONS
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                emptyProgramme:
+                  value:
+                    code: EVENT_HAS_NO_SESSIONS
+                    message: event 4f1c2a7e-0d55-4e8e-9a51-6f0c3b9d2e11 needs at least one session before it can be published
+
+  /api/v1/events/{id}/sessions:
+    servers:
+      - url: http://localhost:8081
+        description: event-catalog-service
+    post:
+      summary: Add a session to a draft event
+      description: >
+        Implements FR-02. Emits session-added and a session-capacity-changed carrying the initial
+        capacity once the event is published. The slot must fall inside the event's dates and the
+        speaker must not be double-booked.
+      operationId: addSession
+      tags: [Event catalog]
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+            examples:
+              observability:
+                summary: A 90-minute talk with 120 seats
+                value:
+                  title: Observability in practice
+                  track: ML Infrastructure
+                  startsAt: '2026-11-23T09:00'
+                  endsAt: '2026-11-23T10:30'
+                  speakerId: 9b2d7c1e-3f4a-4b5c-8d6e-7f8091a2b3c4
+                  seatCapacity: 120
+                  priceAmount: 49.50
+      responses:
+        '201':
+          description: Session added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: VALIDATION_FAILED, or INVALID_REQUEST when the slot falls outside the event's dates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: EVENT_NOT_FOUND or SPEAKER_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: EVENT_ALREADY_PUBLISHED (sessions are added to drafts only) or SPEAKER_DOUBLE_BOOKED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                doubleBooked:
+                  value:
+                    code: SPEAKER_DOUBLE_BOOKED
+                    message: 'speaker 9b2d7c1e-3f4a-4b5c-8d6e-7f8091a2b3c4 is already presenting "Streams deep dive" from 2026-11-23T09:00 to 2026-11-23T10:30'
+
+  /api/v1/events/{id}/sessions/{sessionId}/capacity:
+    servers:
+      - url: http://localhost:8081
+        description: event-catalog-service
+    put:
+      summary: Adjust a session's seat capacity
+      description: >
+        Implements FR-04. Emits session-capacity-changed, which the registration replica and the
+        analytics fill-rate table both consume. Held and confirmed seats are grandfathered.
+      operationId: changeSessionCapacity
+      tags: [Event catalog]
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - name: sessionId
+          in: path
+          required: true
+          description: Session identifier returned by addSession
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCapacityRequest'
+            examples:
+              largerRoom:
+                summary: Move the session to a larger room
+                value:
+                  seatCapacity: 200
+      responses:
+        '200':
+          description: The session with its new capacity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: VALIDATION_FAILED — capacity must be greater than zero
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: EVENT_NOT_FOUND or SESSION_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/sessions/search:
+    servers:
+      - url: http://localhost:8081
+        description: event-catalog-service
+    get:
+      summary: Search published sessions
+      description: >
+        Implements FR-05. Only sessions of PUBLISHED events are returned. Every parameter is
+        optional and they combine with AND.
+      operationId: searchSessions
+      tags: [Event catalog]
+      parameters:
+        - name: track
+          in: query
+          required: false
+          description: Track name, case-insensitive
+          schema:
+            type: string
+            example: ml infrastructure
+        - name: day
+          in: query
+          required: false
+          description: Sessions starting on this date (ISO-8601)
+          schema:
+            type: string
+            format: date
+            example: '2026-11-23'
+        - name: speaker
+          in: query
+          required: false
+          description: A speaker id, or a fragment of the speaker's name
+          schema:
+            type: string
+            example: chen
+        - name: q
+          in: query
+          required: false
+          description: Free-text fragment matched against the session title
+          schema:
+            type: string
+            example: observability
+      responses:
+        '200':
+          description: The matching sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionResponse'
+
+  /api/v1/speakers:
+    servers:
+      - url: http://localhost:8081
+        description: event-catalog-service
+    post:
+      summary: Create a speaker
+      description: Supports FR-02. A session names its speaker by id.
+      operationId: createSpeaker
+      tags: [Event catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSpeakerRequest'
+            examples:
+              drChen:
+                value:
+                  name: Dr Chen
+                  bio: Works on observability
+                  organisation: University of Wollongong
+      responses:
+        '201':
+          description: Speaker created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeakerResponse'
+        '400':
+          description: VALIDATION_FAILED — blank name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/speakers/{id}:
+    servers:
+      - url: http://localhost:8081
+        description: event-catalog-service
+    get:
+      summary: Get a speaker by id
+      operationId: getSpeakerById
+      tags: [Event catalog]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Speaker identifier returned by createSpeaker
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The speaker
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeakerResponse'
+        '404':
+          description: SPEAKER_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  # ── registration-service ───────────────────────────────────────────────────────────────────
+
+  /api/v1/registrations:
+    servers:
+      - url: http://localhost:8082
+        description: registration-service
+    post:
+      summary: Register for one or more sessions
+      description: >
+        Implements FR-06. Holds seats for the configured hold window and answers PENDING_PAYMENT,
+        emitting registration-requested (carrying the card token to payment-service) and one
+        seats-reserved per session. A free registration needs no token and is CONFIRMED at once.
+        A registration naming any full session is refused whole with 409 SESSION_FULL; the
+        attendee may then join that session's waitlist (FR-10).
+      operationId: createRegistration
+      tags: [Registration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRegistrationRequest'
+            examples:
+              twoSessionsPaid:
+                summary: Two sessions, paid with the simulated gateway's success token
+                value:
+                  attendeeId: att-1042
+                  attendeeName: Dana Okafor
+                  attendeeEmail: dana@example.com
+                  eventId: 4f1c2a7e-0d55-4e8e-9a51-6f0c3b9d2e11
+                  cardToken: TOK_OK
+                  sessions:
+                    - sessionId: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+                      quantity: 1
+                    - sessionId: 7d8e9f0a-1b2c-4d3e-9f4a-5b6c7d8e9f01
+                      quantity: 1
+      responses:
+        '201':
+          description: Registration created, seats held
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationResponse'
+        '400':
+          description: VALIDATION_FAILED, or INVALID_REQUEST (for example a paid registration without a cardToken)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: SESSION_NOT_FOUND — the session has not been replicated from the catalogue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: SESSION_FULL, or CONCURRENT_UPDATE when another write won the race for the same seats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                full:
+                  value:
+                    code: SESSION_FULL
+                    message: 'session 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d cannot take 1 more seats: only 0 remain'
+
+  /api/v1/registrations/{registrationId}:
+    servers:
+      - url: http://localhost:8082
+        description: registration-service
+    get:
+      summary: Get a registration
+      operationId: getRegistration
+      tags: [Registration]
+      parameters:
+        - $ref: '#/components/parameters/RegistrationId'
+      responses:
+        '200':
+          description: The registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationResponse'
+        '404':
+          description: REGISTRATION_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/attendees/{attendeeId}/registrations:
+    servers:
+      - url: http://localhost:8082
+        description: registration-service
+    get:
+      summary: List an attendee's registrations
+      description: An attendee with no registrations gets an empty array, not 404.
+      operationId: listAttendeeRegistrations
+      tags: [Registration]
+      parameters:
+        - name: attendeeId
+          in: path
+          required: true
+          description: Caller-supplied attendee identifier (authentication is out of scope)
+          schema:
+            type: string
+            example: att-1042
+      responses:
+        '200':
+          description: The attendee's registrations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RegistrationResponse'
+
+  /api/v1/registrations/{registrationId}/refund-requests:
+    servers:
+      - url: http://localhost:8082
+        description: registration-service
+    post:
+      summary: Ask for a confirmed registration's money back
+      description: >
+        Implements FR-11. Emits refund-requested; payment-service decides it against the refund
+        policy and answers refund-issued or refund-declined. 202 because nothing has been
+        refunded yet. The FR-18 support agent calls this with requestedBy AGENT.
+      operationId: requestRefund
+      tags: [Registration]
+      parameters:
+        - $ref: '#/components/parameters/RegistrationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundRequest'
+            examples:
+              hospitalised:
+                value:
+                  reason: I have been hospitalised and cannot attend
+                  requestedBy: ATTENDEE
+      responses:
+        '202':
+          description: Refund requested; the decision arrives as an event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundRequestResponse'
+        '400':
+          description: VALIDATION_FAILED — blank reason, a reason over 500 characters, or requestedBy other than ATTENDEE or AGENT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: REGISTRATION_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: REGISTRATION_NOT_CONFIRMED, REFUND_ALREADY_REQUESTED, NOTHING_TO_REFUND or CONCURRENT_UPDATE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                alreadyRequested:
+                  value:
+                    code: REFUND_ALREADY_REQUESTED
+                    message: a refund of registration 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a has already been requested and is awaiting a decision
+
+  /api/v1/sessions/{sessionId}/availability:
+    servers:
+      - url: http://localhost:8082
+        description: registration-service
+    get:
+      summary: Seat availability from the local replica
+      description: >
+        Supports FR-06. Served from registration-service's own SessionView, replicated from
+        session-added and session-capacity-changed; no call reaches the catalogue. 404 until both
+        events have arrived.
+      operationId: getSessionAvailability
+      tags: [Registration]
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: The session's availability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionAvailabilityResponse'
+        '404':
+          description: SESSION_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/sessions/{sessionId}/waitlist:
+    servers:
+      - url: http://localhost:8082
+        description: registration-service
+    post:
+      summary: Join a full session's waitlist
+      description: >
+        Implements FR-10. Emits waitlist-joined. Promotion needs no REST call: it is driven by
+        seats-released alone and emits waitlist-promoted (an offer, not a held seat).
+      operationId: joinWaitlist
+      tags: [Registration]
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinWaitlistRequest'
+            examples:
+              sam:
+                value:
+                  attendeeId: att-2000
+      responses:
+        '201':
+          description: Joined; position is 1-based among waiting entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaitlistEntryResponse'
+        '400':
+          description: VALIDATION_FAILED — blank attendeeId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: SESSION_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: SESSION_NOT_FULL, ALREADY_WAITLISTED or CONCURRENT_UPDATE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                notFull:
+                  value:
+                    code: SESSION_NOT_FULL
+                    message: 'session 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d still has 3 seat(s) free; register for it instead of joining its waitlist'
+    get:
+      summary: Read a session's waitlist
+      description: Every entry, in joining order. Supports FR-10.
+      operationId: listWaitlist
+      tags: [Registration]
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: The waitlist; empty when nobody has joined
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WaitlistEntryResponse'
+        '404':
+          description: SESSION_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  # ── payment-service ────────────────────────────────────────────────────────────────────────
+
+  /api/v1/payment-orders/{paymentOrderId}:
+    servers:
+      - url: http://localhost:8083
+        description: payment-service
+    get:
+      summary: Get a payment order
+      description: >
+        Supports FR-07. Orders are raised and charged from registration-requested; there is no
+        "pay" endpoint. The card token is never echoed back.
+      operationId: getPaymentOrder
+      tags: [Payment]
+      parameters:
+        - $ref: '#/components/parameters/PaymentOrderId'
+      responses:
+        '200':
+          description: The payment order and its attempts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentOrderResponse'
+        '404':
+          description: PAYMENT_ORDER_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/registrations/{registrationId}/payment-order:
+    servers:
+      - url: http://localhost:8083
+        description: payment-service
+    get:
+      summary: Get the payment order for a registration
+      description: Supports FR-07. At most one order exists per registration.
+      operationId: getPaymentOrderForRegistration
+      tags: [Payment]
+      parameters:
+        - $ref: '#/components/parameters/RegistrationId'
+      responses:
+        '200':
+          description: The registration's payment order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentOrderResponse'
+        '404':
+          description: PAYMENT_ORDER_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/refund-policy/quote:
+    servers:
+      - url: http://localhost:8083
+        description: payment-service
+    get:
+      summary: Quote what the refund policy would return
+      description: >
+        Supports FR-11 and FR-18. Applies the policy (100% at 30 or more days before the
+        registration's first session, 50% at 7 to 29 days, nothing under 7 days, 100% if the
+        event is cancelled) without changing anything. The support agent reads this before it acts.
+      operationId: quoteRefund
+      tags: [Payment]
+      parameters:
+        - name: registrationId
+          in: query
+          required: true
+          description: The registration whose order is quoted. Blank counts as missing.
+          schema:
+            type: string
+            example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+      responses:
+        '200':
+          description: The quote
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundQuoteResponse'
+        '400':
+          description: VALIDATION_FAILED — registrationId missing or blank
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                missing:
+                  value:
+                    code: VALIDATION_FAILED
+                    message: registrationId must be supplied
+        '404':
+          description: PAYMENT_ORDER_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: NOT_PAID or ALREADY_REFUNDED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/payment-orders/{paymentOrderId}/refunds:
+    servers:
+      - url: http://localhost:8083
+        description: payment-service
+    post:
+      summary: An organiser's refund decision
+      description: >
+        Supports FR-11 — how an escalated case is resolved. Overrides the policy: the organiser
+        names the percentage. Emits refund-issued, or refund-declined for 0%, which is recorded as
+        a DECLINED refund rather than a 0% refund.
+      operationId: issueOrganiserRefund
+      tags: [Payment]
+      parameters:
+        - $ref: '#/components/parameters/PaymentOrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueRefundRequest'
+            examples:
+              fullOverride:
+                value:
+                  refundPercent: 100
+                  reason: Flight cancelled by the airline; escalated by the support agent
+      responses:
+        '201':
+          description: The decision, recorded as a refund
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundResponse'
+        '400':
+          description: VALIDATION_FAILED — refundPercent outside 0 to 100, a blank reason, or a body that is unreadable or malformed (payment-service maps that to 400 VALIDATION_FAILED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: PAYMENT_ORDER_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: NOT_PAID or ALREADY_REFUNDED (also answered when a concurrent refund won the race)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  # ── ticketing-service ──────────────────────────────────────────────────────────────────────
+
+  /api/v1/tickets/{ticketCode}:
+    servers:
+      - url: http://localhost:8084
+        description: ticketing-service
+    get:
+      summary: Get a ticket by its code
+      description: Supports FR-08. Tickets are issued from registration-confirmed only; there is no issuing endpoint.
+      operationId: getTicket
+      tags: [Ticketing]
+      parameters:
+        - $ref: '#/components/parameters/TicketCode'
+      responses:
+        '200':
+          description: The ticket, with its check-ins and transfer history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '404':
+          description: TICKET_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/registrations/{registrationId}/tickets:
+    servers:
+      - url: http://localhost:8084
+        description: ticketing-service
+    get:
+      summary: Every ticket of a registration
+      description: >
+        Supports FR-08 (one ticket per confirmed session) and the FR-18 support agent. An
+        unknown registration answers an empty array, not 404.
+      operationId: listRegistrationTickets
+      tags: [Ticketing]
+      parameters:
+        - $ref: '#/components/parameters/RegistrationId'
+      responses:
+        '200':
+          description: The registration's tickets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TicketResponse'
+
+  /api/v1/tickets/{ticketCode}/transfer:
+    servers:
+      - url: http://localhost:8084
+        description: ticketing-service
+    post:
+      summary: Transfer a ticket to another person
+      description: >
+        Implements FR-12. Emits ticket-transferred. The previous holder is kept in an append-only
+        history. A void ticket, or one already checked in, cannot be transferred.
+      operationId: transferTicket
+      tags: [Ticketing]
+      parameters:
+        - $ref: '#/components/parameters/TicketCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferTicketRequest'
+            examples:
+              colleague:
+                value:
+                  toHolderName: Sam Patel
+                  toHolderEmail: sam@example.com
+      responses:
+        '200':
+          description: The same ticket with its new holder
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '400':
+          description: VALIDATION_FAILED or INVALID_REQUEST
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: TICKET_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: TICKET_VOID or ALREADY_CHECKED_IN
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/gates/{gateId}/check-ins:
+    servers:
+      - url: http://localhost:8084
+        description: ticketing-service
+    post:
+      summary: Check in at a gate
+      description: >
+        Implements FR-13. Emits attendee-checked-in keyed by sessionId and carrying both
+        queuedAt and checkedInAt, from which the FR-16 gate throughput stream derives every wait.
+      operationId: checkIn
+      tags: [Ticketing]
+      parameters:
+        - name: gateId
+          in: path
+          required: true
+          description: The gate scanning the ticket
+          schema:
+            type: string
+            example: north-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckInRequest'
+            examples:
+              scanned:
+                value:
+                  ticketCode: TKT-7Q4M2X9B
+                  queuedAt: '2026-11-23T08:50:00Z'
+      responses:
+        '201':
+          description: Admitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInResponse'
+        '400':
+          description: VALIDATION_FAILED, or INVALID_REQUEST when queuedAt is later than the moment of admission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: TICKET_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: TICKET_VOID or ALREADY_CHECKED_IN
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                twice:
+                  value:
+                    code: ALREADY_CHECKED_IN
+                    message: 'cannot check in ticket TKT-7Q4M2X9B: it has already been checked in'
+
+  # ── analytics-service ──────────────────────────────────────────────────────────────────────
+
+  /api/v1/analytics/sessions/{sessionId}/fill-rate:
+    servers:
+      - url: http://localhost:8085
+        description: analytics-service
+    get:
+      summary: Live fill rate of one session
+      description: >
+        Implements FR-14. Kafka Streams left-joins session-capacity-changed with the summed
+        seats-reserved and seats-released deltas; answered by interactive query.
+      operationId: getSessionFillRate
+      tags: [Analytics]
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: The session's fill rate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FillRateResponse'
+        '404':
+          description: SESSION_NOT_TRACKED — no capacity on record for this session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: STORE_REBUILDING — the state store is restoring; retry shortly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/analytics/sessions/at-risk:
+    servers:
+      - url: http://localhost:8085
+        description: analytics-service
+    get:
+      summary: Sessions at or above a fill-rate threshold
+      description: >
+        Implements FR-15's read side; the alert itself is the session-capacity-alert topic,
+        written once per session. Fullest first.
+      operationId: listSessionsAtRisk
+      tags: [Analytics]
+      parameters:
+        - name: threshold
+          in: query
+          required: false
+          description: A fill rate of zero or more; defaults to conference.analytics.capacity-alert-threshold (0.9)
+          schema:
+            type: number
+            format: double
+            minimum: 0
+            example: 0.9
+      responses:
+        '200':
+          description: The sessions at or above the threshold
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FillRateResponse'
+        '400':
+          description: INVALID_REQUEST — a threshold that is not a number of zero or more
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: STORE_REBUILDING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/analytics/gates/{gateId}/throughput:
+    servers:
+      - url: http://localhost:8085
+        description: analytics-service
+    get:
+      summary: A gate's most recent one-minute window
+      description: >
+        Implements FR-16. attendee-checked-in re-keyed from sessionId to gateId and aggregated in
+        one-minute tumbling windows. congested is true while the window's average wait exceeds
+        conference.analytics.gate-congestion-threshold (PT2M by default).
+      operationId: getGateThroughput
+      tags: [Analytics]
+      parameters:
+        - name: gateId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: north-1
+      responses:
+        '200':
+          description: The gate's latest window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GateThroughputResponse'
+        '404':
+          description: GATE_NOT_TRACKED — no check-in has been seen at this gate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: STORE_REBUILDING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/analytics/gates/congested:
+    servers:
+      - url: http://localhost:8085
+        description: analytics-service
+    get:
+      summary: Gates whose latest window is congested
+      description: Implements FR-16. Longest average wait first.
+      operationId: listCongestedGates
+      tags: [Analytics]
+      responses:
+        '200':
+          description: The congested gates; every element has congested true
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GateThroughputResponse'
+        '503':
+          description: STORE_REBUILDING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/analytics/funnel:
+    servers:
+      - url: http://localhost:8085
+        description: analytics-service
+    get:
+      summary: Registration conversion and abandonment
+      description: >
+        Supporting projection (design section 7.3). Cumulative counts of registration-requested,
+        payment-succeeded, payment-failed and registration-expired since the topics began. Paid
+        registrations only — a free registration never emits registration-requested.
+      operationId: getRegistrationFunnel
+      tags: [Analytics]
+      responses:
+        '200':
+          description: The funnel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FunnelResponse'
+        '503':
+          description: STORE_REBUILDING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  # ── concierge-service ──────────────────────────────────────────────────────────────────────
+
+  /api/v1/concierge/agenda:
+    servers:
+      - url: http://localhost:8086
+        description: concierge-service
+    post:
+      summary: Build a personal agenda from natural language
+      description: >
+        Implements FR-17. A LangChain4j agent over Gemini searches the catalogue and checks
+        availability through REST tools; the service re-runs clash detection on whatever the
+        model proposes, so the returned agenda never contains two overlapping sessions. Anything
+        it declined to pass on is reported in notes.
+      operationId: buildAgenda
+      tags: [Concierge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgendaRequest'
+            examples:
+              mlInfrastructure:
+                value:
+                  attendeeId: att-1042
+                  interests: I work on ML infrastructure. I really want the streams deep dive and the observability talk, and anything by Dr Chen. Keep my late afternoon free if you can.
+      responses:
+        '200':
+          description: A clash-free agenda
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgendaResponse'
+        '400':
+          description: VALIDATION_FAILED (blank field, interests over 2000 characters) or INVALID_REQUEST (body not valid JSON)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: LLM_RATE_LIMITED — the model provider's quota is exhausted (the free Gemini tier allows five requests a minute)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '502':
+          description: LLM_UNAVAILABLE (no API key configured, or the model failed) or LLM_LOOP_LIMIT (the agent ran past its tool-calling ceiling)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                noKey:
+                  value:
+                    code: LLM_UNAVAILABLE
+                    message: No language model is configured. Set GEMINI_API_KEY in .env to enable the concierge agents.
+        '504':
+          description: LLM_TIMEOUT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/concierge/support:
+    servers:
+      - url: http://localhost:8086
+        description: concierge-service
+    post:
+      summary: Raise a support request handled by an agent
+      description: >
+        Implements FR-18. A LangChain4j agent looks up the attendee's registrations and tickets,
+        obtains a refund-policy quote, and either requests the refund itself (only within the
+        configured limit, enforced inside the tool) or escalates to an organiser. The attendee is
+        taken from the request, never from the model. outcome is derived from what the tools did.
+        If the model fails after a tool has acted, the answer is still 200 with the true outcome.
+      operationId: handleSupportRequest
+      tags: [Concierge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportRequest'
+            examples:
+              hospitalised:
+                value:
+                  attendeeId: att-1042
+                  message: I've been hospitalised and can't attend. Can I get my money back for registration 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a?
+      responses:
+        '200':
+          description: The conversation's outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportResponse'
+        '400':
+          description: VALIDATION_FAILED (blank field, message over 2000 characters) or INVALID_REQUEST (body not valid JSON)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: LLM_RATE_LIMITED — only when no tool had acted yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '502':
+          description: LLM_UNAVAILABLE or LLM_LOOP_LIMIT — only when no tool had acted yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '504':
+          description: LLM_TIMEOUT — only when no tool had acted yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/concierge/escalations:
+    servers:
+      - url: http://localhost:8086
+        description: concierge-service
+    get:
+      summary: The organisers' escalation queue
+      description: >
+        Supports FR-18. Every case the support agent handed to a human, newest first, with the
+        attendee's own words. Held in memory: the concierge owns no database, so the queue is
+        empty after a restart. Unauthenticated, like every endpoint (design section 16).
+      operationId: listEscalations
+      tags: [Concierge]
+      responses:
+        '200':
+          description: The escalations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EscalationResponse'
+
 components:
+
+  parameters:
+    EventId:
+      name: id
+      in: path
+      required: true
+      description: Event identifier returned by createDraftEvent
+      schema:
+        type: string
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: Session identifier issued by the catalogue
+      schema:
+        type: string
+    RegistrationId:
+      name: registrationId
+      in: path
+      required: true
+      description: Registration identifier returned by createRegistration
+      schema:
+        type: string
+    PaymentOrderId:
+      name: paymentOrderId
+      in: path
+      required: true
+      description: Payment order identifier
+      schema:
+        type: string
+    TicketCode:
+      name: ticketCode
+      in: path
+      required: true
+      description: The ticket's code, as printed on the ticket
+      schema:
+        type: string
+        example: TKT-7Q4M2X9B
+
   schemas:
-    Venue:
+
+    # ── common ──
+
+    ApiError:
       type: object
+      description: >
+        The common error body of every documented error response across all six services. The
+        code list is the union of every service's GlobalExceptionHandler.
+      x-java-record: GlobalExceptionHandler.ApiError
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_FAILED
+            - INVALID_REQUEST
+            - EVENT_NOT_FOUND
+            - SESSION_NOT_FOUND
+            - SPEAKER_NOT_FOUND
+            - EVENT_ALREADY_PUBLISHED
+            - EVENT_HAS_NO_SESSIONS
+            - SPEAKER_DOUBLE_BOOKED
+            - REGISTRATION_NOT_FOUND
+            - SESSION_FULL
+            - SESSION_NOT_FULL
+            - ALREADY_WAITLISTED
+            - REGISTRATION_NOT_CONFIRMED
+            - REFUND_ALREADY_REQUESTED
+            - NOTHING_TO_REFUND
+            - CONCURRENT_UPDATE
+            - PAYMENT_ORDER_NOT_FOUND
+            - NOT_PAID
+            - ALREADY_REFUNDED
+            - TICKET_NOT_FOUND
+            - TICKET_VOID
+            - ALREADY_CHECKED_IN
+            - SESSION_NOT_TRACKED
+            - GATE_NOT_TRACKED
+            - STORE_REBUILDING
+            - LLM_UNAVAILABLE
+            - LLM_RATE_LIMITED
+            - LLM_TIMEOUT
+            - LLM_LOOP_LIMIT
+          example: EVENT_NOT_FOUND
+        message:
+          type: string
+          example: no event with id no-such-event
+
+    # ── event-catalog-service ──
+
+    VenueRequest:
+      type: object
+      x-java-record: CreateEventRequest.VenuePayload
       required: [name, addressLine, city]
       properties:
         name:
           type: string
+          minLength: 1
           example: Innovation Campus
         addressLine:
           type: string
+          minLength: 1
           example: Squires Way
         city:
           type: string
+          minLength: 1
           example: North Wollongong
     CreateEventRequest:
       type: object
+      x-java-record: CreateEventRequest
       required: [name, venue, startDate, endDate]
       properties:
         name:
@@ -119,46 +1450,988 @@ components:
           nullable: true
           example: Three days of practice
         venue:
-          $ref: '#/components/schemas/Venue'
+          $ref: '#/components/schemas/VenueRequest'
         startDate:
           type: string
           format: date
-          example: '2026-09-14'
+          example: '2026-11-23'
         endDate:
           type: string
           format: date
           description: Must not precede startDate
-          example: '2026-09-16'
+          example: '2026-11-25'
+    Venue:
+      type: object
+      x-java-record: EventResponse.VenuePayload
+      required: [name, addressLine, city]
+      properties:
+        name:
+          type: string
+          example: Innovation Campus
+        addressLine:
+          type: string
+          example: Squires Way
+        city:
+          type: string
+          example: North Wollongong
     EventResponse:
       type: object
-      required: [id, name, status, venue, startDate, endDate]
+      x-java-record: EventResponse
+      required: [id, name, status, venue, startDate, endDate, sessions]
       properties:
         id:
           type: string
-          format: uuid
+          example: 4f1c2a7e-0d55-4e8e-9a51-6f0c3b9d2e11
         name:
           type: string
+          example: SoftEng Summit
         description:
           type: string
           nullable: true
+          example: Three days of practice
         status:
           type: string
           enum: [DRAFT, PUBLISHED, CANCELLED]
+          example: DRAFT
         venue:
           $ref: '#/components/schemas/Venue'
         startDate:
           type: string
           format: date
+          example: '2026-11-23'
         endDate:
           type: string
           format: date
-    ApiError:
+          example: '2026-11-25'
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionResponse'
+    CreateSessionRequest:
       type: object
-      description: Common error body used by every non-2xx response across all six services.
-      required: [code, message]
+      x-java-record: CreateSessionRequest
+      required: [title, track, startsAt, endsAt, speakerId, seatCapacity, priceAmount]
       properties:
-        code:
+        title:
           type: string
-          enum: [EVENT_NOT_FOUND, INVALID_REQUEST, VALIDATION_FAILED]
+          minLength: 1
+          example: Observability in practice
+        track:
+          type: string
+          minLength: 1
+          example: ML Infrastructure
+        startsAt:
+          type: string
+          description: Local wall-clock time with no zone (ISO-8601 LocalDateTime); must fall inside the event's dates
+          example: '2026-11-23T09:00'
+        endsAt:
+          type: string
+          description: Local wall-clock time with no zone; after startsAt
+          example: '2026-11-23T10:30'
+        speakerId:
+          type: string
+          minLength: 1
+          example: 9b2d7c1e-3f4a-4b5c-8d6e-7f8091a2b3c4
+        seatCapacity:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 120
+        priceAmount:
+          type: number
+          minimum: 0
+          description: AUD. 0.00 makes the session free. A JSON string such as "49.50" is also accepted.
+          example: 49.50
+    SessionResponse:
+      type: object
+      x-java-record: SessionResponse
+      required: [id, eventId, title, track, startsAt, endsAt, speakerId, seatCapacity, priceAmount, priceCurrency]
+      properties:
+        id:
+          type: string
+          example: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+        eventId:
+          type: string
+          example: 4f1c2a7e-0d55-4e8e-9a51-6f0c3b9d2e11
+        title:
+          type: string
+          example: Observability in practice
+        track:
+          type: string
+          example: ML Infrastructure
+        startsAt:
+          type: string
+          description: Local wall-clock time with no zone
+          example: '2026-11-23T09:00:00'
+        endsAt:
+          type: string
+          description: Local wall-clock time with no zone
+          example: '2026-11-23T10:30:00'
+        speakerId:
+          type: string
+          example: 9b2d7c1e-3f4a-4b5c-8d6e-7f8091a2b3c4
+        seatCapacity:
+          type: integer
+          format: int32
+          example: 120
+        priceAmount:
+          type: number
+          example: 49.50
+        priceCurrency:
+          type: string
+          example: AUD
+    UpdateCapacityRequest:
+      type: object
+      x-java-record: UpdateCapacityRequest
+      required: [seatCapacity]
+      properties:
+        seatCapacity:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 200
+    CreateSpeakerRequest:
+      type: object
+      x-java-record: CreateSpeakerRequest
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: Dr Chen
+        bio:
+          type: string
+          nullable: true
+          example: Works on observability
+        organisation:
+          type: string
+          nullable: true
+          example: University of Wollongong
+    SpeakerResponse:
+      type: object
+      x-java-record: SpeakerResponse
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          example: 9b2d7c1e-3f4a-4b5c-8d6e-7f8091a2b3c4
+        name:
+          type: string
+          example: Dr Chen
+        bio:
+          type: string
+          nullable: true
+          example: Works on observability
+        organisation:
+          type: string
+          nullable: true
+          example: University of Wollongong
+
+    # ── registration-service ──
+
+    SessionLine:
+      type: object
+      x-java-record: CreateRegistrationRequest.SessionLine
+      required: [sessionId, quantity]
+      properties:
+        sessionId:
+          type: string
+          minLength: 1
+          example: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 1
+    CreateRegistrationRequest:
+      type: object
+      x-java-record: CreateRegistrationRequest
+      required: [attendeeId, attendeeName, attendeeEmail, eventId, sessions]
+      properties:
+        attendeeId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          example: att-1042
+        attendeeName:
+          type: string
+          minLength: 1
+          example: Dana Okafor
+        attendeeEmail:
+          type: string
+          format: email
+          example: dana@example.com
+        eventId:
+          type: string
+          minLength: 1
+          example: 4f1c2a7e-0d55-4e8e-9a51-6f0c3b9d2e11
+        sessions:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SessionLine'
+        cardToken:
+          type: string
+          nullable: true
+          description: >
+            Opaque token for the simulated gateway: TOK_OK succeeds, TOK_TIMEOUT times out, any
+            other token is declined. Required when the registration costs money; travels on
+            registration-requested and is never stored by registration-service.
+          example: TOK_OK
+    SeatHoldResponse:
+      type: object
+      x-java-record: RegistrationResponse.SeatHoldResponse
+      required: [id, sessionId, quantity, status]
+      properties:
+        id:
+          type: string
+          example: 0e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b
+        sessionId:
+          type: string
+          example: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+        quantity:
+          type: integer
+          format: int32
+          example: 1
+        status:
+          type: string
+          enum: [HELD, CONFIRMED, RELEASED]
+          example: HELD
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-10-09T03:12:44.512Z'
+    RegistrationResponse:
+      type: object
+      x-java-record: RegistrationResponse
+      required: [id, attendeeId, attendeeName, attendeeEmail, eventId, status, totalAmount, currency, createdAt, seatHolds, refundRequested]
+      properties:
+        id:
+          type: string
+          example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+        attendeeId:
+          type: string
+          example: att-1042
+        attendeeName:
+          type: string
+          example: Dana Okafor
+        attendeeEmail:
+          type: string
+          example: dana@example.com
+        eventId:
+          type: string
+          example: 4f1c2a7e-0d55-4e8e-9a51-6f0c3b9d2e11
+        status:
+          type: string
+          enum: [PENDING_PAYMENT, CONFIRMED, CANCELLED, EXPIRED, REFUNDED]
+          example: PENDING_PAYMENT
+        totalAmount:
+          type: number
+          example: 124.50
+        currency:
+          type: string
+          example: AUD
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:10:44.512Z'
+        seatHolds:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeatHoldResponse'
+        refundRequested:
+          type: boolean
+          description: True while a refund request is with payment-service awaiting a decision
+          example: false
+    RefundRequest:
+      type: object
+      x-java-record: RefundRequest
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          example: I have been hospitalised and cannot attend
+        requestedBy:
+          type: string
+          nullable: true
+          enum: [ATTENDEE, AGENT, null]
+          description: Case-sensitive. Absent or null is accepted and treated as ATTENDEE. SYSTEM is reserved for the late-payment reversal and is refused here.
+          example: ATTENDEE
+    RefundRequestResponse:
+      type: object
+      x-java-record: RefundRequestResponse
+      required: [registrationId, status, requestedAt]
+      properties:
+        registrationId:
+          type: string
+          example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+        status:
+          type: string
+          enum: [REFUND_REQUESTED]
+          example: REFUND_REQUESTED
+        requestedAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:20:01.004Z'
+    SessionAvailabilityResponse:
+      type: object
+      x-java-record: SessionAvailabilityResponse
+      required: [sessionId, eventId, title, capacity, reservedSeats, availableSeats]
+      properties:
+        sessionId:
+          type: string
+          example: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+        eventId:
+          type: string
+          example: 4f1c2a7e-0d55-4e8e-9a51-6f0c3b9d2e11
+        title:
+          type: string
+          example: Observability in practice
+        capacity:
+          type: integer
+          format: int32
+          example: 120
+        reservedSeats:
+          type: integer
+          format: int32
+          description: Held plus confirmed seats. May exceed capacity after a capacity cut (grandfathered).
+          example: 3
+        availableSeats:
+          type: integer
+          format: int32
+          example: 117
+    JoinWaitlistRequest:
+      type: object
+      x-java-record: JoinWaitlistRequest
+      required: [attendeeId]
+      properties:
+        attendeeId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          example: att-2000
+    WaitlistEntryResponse:
+      type: object
+      x-java-record: WaitlistEntryResponse
+      required: [waitlistEntryId, sessionId, attendeeId, status, joinedAt]
+      properties:
+        waitlistEntryId:
+          type: string
+          example: 3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f
+        sessionId:
+          type: string
+          example: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+        attendeeId:
+          type: string
+          example: att-2000
+        position:
+          type: integer
+          format: int32
+          nullable: true
+          description: 1-based among WAITING entries; null once the entry is no longer waiting
+          example: 1
+        status:
+          type: string
+          enum: [WAITING, PROMOTED, WITHDRAWN]
+          example: WAITING
+        joinedAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:15:12.330Z'
+
+    # ── payment-service ──
+
+    PaymentAttemptResponse:
+      type: object
+      x-java-record: PaymentOrderResponse.AttemptResponse
+      required: [id, outcome, occurredAt]
+      properties:
+        id:
+          type: string
+          example: 6a7b8c9d-0e1f-4a2b-9c3d-4e5f6a7b8c9d
+        outcome:
+          type: string
+          enum: [SUCCEEDED, DECLINED, TIMED_OUT]
+          example: SUCCEEDED
+        failureReason:
+          type: string
+          nullable: true
+          description: CARD_DECLINED or GATEWAY_TIMEOUT when the attempt failed
+          example: null
+        gatewayReference:
+          type: string
+          nullable: true
+          example: SIM-1a2b3c4d
+        occurredAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:10:45.101Z'
+    PaymentOrderResponse:
+      type: object
+      x-java-record: PaymentOrderResponse
+      required: [id, registrationId, amount, currency, status, createdAt, attempts]
+      properties:
+        id:
+          type: string
+          example: 8f9e0d1c-2b3a-4c5d-9e6f-7a8b9c0d1e2f
+        registrationId:
+          type: string
+          example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+        amount:
+          type: number
+          example: 124.50
+        currency:
+          type: string
+          example: AUD
+        holdExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: The registration's hold deadline; past it the order fails as HOLD_EXPIRED without calling the gateway
+          example: '2026-10-09T03:12:44.512Z'
+        status:
+          type: string
+          enum: [PENDING, PAID, FAILED, REFUNDED]
+          example: PAID
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:10:45.050Z'
+        attempts:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentAttemptResponse'
+    RefundQuoteResponse:
+      type: object
+      x-java-record: RefundQuoteResponse
+      required: [registrationId, paymentOrderId, paidAmount, currency, refundPercent, refundAmount, rule, eligible]
+      properties:
+        registrationId:
+          type: string
+          example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+        paymentOrderId:
+          type: string
+          example: 8f9e0d1c-2b3a-4c5d-9e6f-7a8b9c0d1e2f
+        paidAmount:
+          type: number
+          example: 149.00
+        currency:
+          type: string
+          example: AUD
+        daysUntilEvent:
+          type: integer
+          format: int32
+          nullable: true
+          description: Whole days to the registration's first session, in conference time; null when the rule is EVENT_DATE_UNKNOWN
+          example: 45
+        refundPercent:
+          type: integer
+          format: int32
+          enum: [0, 50, 100]
+          example: 100
+        refundAmount:
+          type: number
+          example: 149.00
+        rule:
+          type: string
+          enum: [EVENT_CANCELLED, FULL_30_DAYS_OR_MORE, HALF_7_TO_29_DAYS, NONE_UNDER_7_DAYS, EVENT_DATE_UNKNOWN]
+          example: FULL_30_DAYS_OR_MORE
+        eligible:
+          type: boolean
+          example: true
+    IssueRefundRequest:
+      type: object
+      x-java-record: IssueRefundRequest
+      required: [refundPercent, reason]
+      properties:
+        refundPercent:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 100
+          description: 0 records a DECLINED refund and moves no money
+          example: 100
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          example: Flight cancelled by the airline; escalated by the support agent
+    RefundResponse:
+      type: object
+      x-java-record: RefundResponse
+      required: [refundId, paymentOrderId, registrationId, amount, currency, refundPercent, status, decidedBy, decidedAt]
+      properties:
+        refundId:
+          type: string
+          example: 1d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a
+        paymentOrderId:
+          type: string
+          example: 8f9e0d1c-2b3a-4c5d-9e6f-7a8b9c0d1e2f
+        registrationId:
+          type: string
+          example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+        amount:
+          type: number
+          example: 40.00
+        currency:
+          type: string
+          example: AUD
+        refundPercent:
+          type: integer
+          format: int32
+          example: 100
+        status:
+          type: string
+          enum: [ISSUED, DECLINED]
+          example: ISSUED
+        decidedBy:
+          type: string
+          enum: [POLICY, AGENT, ORGANISER]
+          description: Always ORGANISER on this endpoint
+          example: ORGANISER
+        decidedAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:31:09.877Z'
+
+    # ── ticketing-service ──
+
+    CheckInSummary:
+      type: object
+      x-java-record: TicketResponse.CheckInSummary
+      required: [id, gateId, queuedAt, checkedInAt, waitMillis]
+      properties:
+        id:
+          type: string
+          example: 4b5c6d7e-8f9a-4b0c-9d1e-2f3a4b5c6d7e
+        gateId:
+          type: string
+          example: north-1
+        queuedAt:
+          type: string
+          format: date-time
+          example: '2026-11-23T08:50:00Z'
+        checkedInAt:
+          type: string
+          format: date-time
+          example: '2026-11-23T08:52:13.004Z'
+        waitMillis:
+          type: integer
+          format: int64
+          example: 133004
+    TransferSummary:
+      type: object
+      x-java-record: TicketResponse.TransferSummary
+      required: [fromHolderName, fromHolderEmail, toHolderName, toHolderEmail, transferredAt]
+      properties:
+        fromHolderName:
+          type: string
+          example: Dana Okafor
+        fromHolderEmail:
+          type: string
+          example: dana@example.com
+        toHolderName:
+          type: string
+          example: Sam Patel
+        toHolderEmail:
+          type: string
+          example: sam@example.com
+        transferredAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:40:00.120Z'
+    TicketResponse:
+      type: object
+      x-java-record: TicketResponse
+      required: [id, ticketCode, registrationId, sessionId, attendeeId, holderName, holderEmail, status, issuedAt, checkIns, transfers]
+      properties:
+        id:
+          type: string
+          example: 9c0d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f
+        ticketCode:
+          type: string
+          example: TKT-7Q4M2X9B
+        registrationId:
+          type: string
+          example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+        sessionId:
+          type: string
+          example: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+        attendeeId:
+          type: string
+          description: The attendee who registered; unchanged by a transfer
+          example: att-1042
+        holderName:
+          type: string
+          example: Dana Okafor
+        holderEmail:
+          type: string
+          example: dana@example.com
+        status:
+          type: string
+          enum: [ISSUED, TRANSFERRED, VOID, USED]
+          example: ISSUED
+        issuedAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:10:46.300Z'
+        checkIns:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckInSummary'
+        transfers:
+          type: array
+          description: Append-only history, oldest first
+          items:
+            $ref: '#/components/schemas/TransferSummary'
+    TransferTicketRequest:
+      type: object
+      x-java-record: TransferTicketRequest
+      required: [toHolderName, toHolderEmail]
+      properties:
+        toHolderName:
+          type: string
+          minLength: 1
+          example: Sam Patel
+        toHolderEmail:
+          type: string
+          format: email
+          example: sam@example.com
+    CheckInRequest:
+      type: object
+      x-java-record: CheckInRequest
+      required: [ticketCode, queuedAt]
+      properties:
+        ticketCode:
+          type: string
+          minLength: 1
+          example: TKT-7Q4M2X9B
+        queuedAt:
+          type: string
+          format: date-time
+          description: When the attendee joined the queue. Required — FR-16 derives every wait from it.
+          example: '2026-11-23T08:50:00Z'
+    CheckInResponse:
+      type: object
+      x-java-record: CheckInResponse
+      required: [checkInId, ticketCode, sessionId, gateId, queuedAt, checkedInAt, waitMillis]
+      properties:
+        checkInId:
+          type: string
+          example: 4b5c6d7e-8f9a-4b0c-9d1e-2f3a4b5c6d7e
+        ticketCode:
+          type: string
+          example: TKT-7Q4M2X9B
+        sessionId:
+          type: string
+          example: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+        gateId:
+          type: string
+          example: north-1
+        queuedAt:
+          type: string
+          format: date-time
+          example: '2026-11-23T08:50:00Z'
+        checkedInAt:
+          type: string
+          format: date-time
+          example: '2026-11-23T08:52:13.004Z'
+        waitMillis:
+          type: integer
+          format: int64
+          description: checkedInAt minus queuedAt
+          example: 133004
+
+    # ── analytics-service ──
+
+    FillRateResponse:
+      type: object
+      x-java-record: FillRateResponse
+      required: [sessionId, reservedSeats, seatCapacity, fillRate]
+      properties:
+        sessionId:
+          type: string
+          example: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+        reservedSeats:
+          type: integer
+          format: int32
+          description: Seats reserved minus seats released, shown clamped at zero
+          example: 9
+        seatCapacity:
+          type: integer
+          format: int32
+          example: 10
+        fillRate:
+          type: number
+          format: double
+          description: reservedSeats / seatCapacity; may exceed 1.0 for a session over capacity
+          example: 0.9
+    GateThroughputResponse:
+      type: object
+      x-java-record: GateThroughputResponse
+      required: [gateId, windowStart, windowEnd, checkInsPerMinute, averageWaitMillis, maxWaitMillis, congested]
+      properties:
+        gateId:
+          type: string
+          example: north-1
+        windowStart:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:52:00Z'
+        windowEnd:
+          type: string
+          format: date-time
+          example: '2026-10-09T03:53:00Z'
+        checkInsPerMinute:
+          type: integer
+          format: int64
+          description: The window's count; the window is one minute long
+          example: 9
+        averageWaitMillis:
+          type: integer
+          format: int64
+          example: 300412
+        maxWaitMillis:
+          type: integer
+          format: int64
+          example: 301250
+        congested:
+          type: boolean
+          description: averageWaitMillis exceeds conference.analytics.gate-congestion-threshold
+          example: true
+    FunnelResponse:
+      type: object
+      x-java-record: FunnelResponse
+      required: [requested, paid, paymentFailed, expired, conversionRate, abandonmentRate, paymentFailureRate]
+      properties:
+        requested:
+          type: integer
+          format: int64
+          example: 20
+        paid:
+          type: integer
+          format: int64
+          example: 17
+        paymentFailed:
+          type: integer
+          format: int64
+          example: 2
+        expired:
+          type: integer
+          format: int64
+          example: 1
+        conversionRate:
+          type: number
+          format: double
+          example: 0.85
+        abandonmentRate:
+          type: number
+          format: double
+          example: 0.05
+        paymentFailureRate:
+          type: number
+          format: double
+          example: 0.1
+
+    # ── concierge-service ──
+
+    AgendaRequest:
+      type: object
+      x-java-record: AgendaRequest
+      required: [attendeeId, interests]
+      properties:
+        attendeeId:
+          type: string
+          minLength: 1
+          example: att-1042
+        interests:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          example: I work on ML infrastructure and observability. Keep my late afternoon free.
+    AgendaItem:
+      type: object
+      x-java-record: AgendaResponse.Item
+      required: [sessionId, title, track, startsAt, endsAt, speakerId, priceAmount, priceCurrency]
+      properties:
+        sessionId:
+          type: string
+          example: 2a6b9c4d-5e7f-4a1b-8c2d-3e4f5a6b7c8d
+        title:
+          type: string
+          example: Observability in practice
+        track:
+          type: string
+          example: ML Infrastructure
+        startsAt:
+          type: string
+          description: Local wall-clock time with no zone, from the catalogue
+          example: '2026-11-23T09:00:00'
+        endsAt:
+          type: string
+          description: Local wall-clock time with no zone, from the catalogue
+          example: '2026-11-23T10:30:00'
+        speakerId:
+          type: string
+          example: 9b2d7c1e-3f4a-4b5c-8d6e-7f8091a2b3c4
+        priceAmount:
+          type: number
+          example: 49.50
+        priceCurrency:
+          type: string
+          example: AUD
+        rationale:
+          type: string
+          nullable: true
+          description: The model's reason for including the session; everything else came from the catalogue
+          example: Matches your interest in observability
+    AgendaResponse:
+      type: object
+      x-java-record: AgendaResponse
+      required: [attendeeId, items, notes]
+      properties:
+        attendeeId:
+          type: string
+          example: att-1042
+        summary:
+          type: string
+          nullable: true
+          example: Three sessions on ML infrastructure, with your late afternoon kept free.
+        items:
+          type: array
+          description: No two items overlap in time — re-checked in code after the model answers
+          items:
+            $ref: '#/components/schemas/AgendaItem'
+        notes:
+          type: array
+          description: Every recommendation the service declined to pass on, and why
+          items:
+            type: string
+          example: ["Dropped 'Streams deep dive': it clashes with 'Observability in practice'."]
+    SupportRequest:
+      type: object
+      x-java-record: SupportRequest
+      required: [attendeeId, message]
+      properties:
+        attendeeId:
+          type: string
+          minLength: 1
+          example: att-1042
         message:
           type: string
+          minLength: 1
+          maxLength: 2000
+          example: I've been hospitalised and can't attend next week. Can I get my money back?
+    SupportRefund:
+      type: object
+      x-java-record: SupportResponse.Refund
+      required: [registrationId, refundAmount, refundPercent, currency, rule, requestedAt]
+      properties:
+        registrationId:
+          type: string
+          example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+        refundAmount:
+          type: number
+          description: Payment-service's quote, not the model's figure
+          example: 149.00
+        refundPercent:
+          type: integer
+          format: int32
+          example: 100
+        currency:
+          type: string
+          example: AUD
+        rule:
+          type: string
+          enum: [EVENT_CANCELLED, FULL_30_DAYS_OR_MORE, HALF_7_TO_29_DAYS, NONE_UNDER_7_DAYS, EVENT_DATE_UNKNOWN]
+          example: FULL_30_DAYS_OR_MORE
+        requestedAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T04:02:11.420Z'
+    EscalationReference:
+      type: object
+      x-java-record: SupportResponse.EscalationReference
+      required: [escalationId, reason]
+      properties:
+        escalationId:
+          type: string
+          example: esc-7f3a9c21
+        registrationId:
+          type: string
+          nullable: true
+          description: Null when the case concerns no registration, or the one named could not be verified as the attendee's
+          example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+        reason:
+          type: string
+          example: Refund of 447.00 AUD is above the automatic limit
+    SupportResponse:
+      type: object
+      x-java-record: SupportResponse
+      required: [attendeeId, outcome, reply, refunds, escalations, notes]
+      properties:
+        attendeeId:
+          type: string
+          example: att-1042
+        outcome:
+          type: string
+          enum: [RESOLVED, REFUND_REQUESTED, ESCALATED]
+          description: Derived from what the tools did, never from the model's text. ESCALATED outranks REFUND_REQUESTED.
+          example: REFUND_REQUESTED
+        reply:
+          type: string
+          description: The answer to the attendee; replaced by a code-written reply when the model claimed an action the tools did not take
+          example: I'm sorry to hear that. I've requested a full refund of 149.00 AUD for your registration.
+        refunds:
+          type: array
+          description: Refund requests registration-service accepted in this conversation
+          items:
+            $ref: '#/components/schemas/SupportRefund'
+        escalations:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationReference'
+        notes:
+          type: array
+          description: Every time a guardrail said no
+          items:
+            type: string
+    EscalationResponse:
+      type: object
+      x-java-record: EscalationResponse
+      required: [escalationId, attendeeId, reason, summary, attendeeMessage, raisedBy, createdAt]
+      properties:
+        escalationId:
+          type: string
+          example: esc-7f3a9c21
+        attendeeId:
+          type: string
+          example: att-1042
+        registrationId:
+          type: string
+          nullable: true
+          example: 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a
+        reason:
+          type: string
+          maxLength: 300
+          example: Refund of 447.00 AUD is above the automatic limit
+        summary:
+          type: string
+          maxLength: 1000
+          example: Attendee's employer cancelled their travel; asks for a full refund of three seats.
+        attendeeMessage:
+          type: string
+          description: The attendee's own words, captured by code
+          example: My employer has cancelled my travel. Please refund registration 5c135842-1f2e-4d3c-9b8a-7f6e5d4c3b2a in full.
+        raisedBy:
+          type: string
+          enum: [SYSTEM, ASSISTANT]
+          description: Set by code, never by the model. SYSTEM is a case the code escalated itself (a refund whose outcome is unknown); ASSISTANT is one the support agent chose to raise
+          example: SYSTEM
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-09T04:03:40.016Z'

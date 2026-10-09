@@ -1,0 +1,118 @@
+@startuml activity-fr-08
+' Report §2.1 — FR-08 Confirm the registration and issue tickets on payment.
+' Source: PaymentEventConsumers.paymentSucceeded, RegistrationApplicationService.settlePayment,
+' Registration.confirm/requestLatePaymentReversal, RegistrationEventConsumers.registrationConfirmed (ticketing),
+' TicketApplicationService.issue, Ticket.issue, TicketCode.generate, TicketController.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-08 — Confirm the registration and issue tickets
+
+|registration-service|
+start
+:payment-succeeded<
+:PaymentEventConsumers.paymentSucceeded;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:record eventId in processed_events;
+:RegistrationApplicationService.settlePayment(registrationId);
+if (registration found?) then (no)
+  :log a warning and drop;
+  stop
+else (yes)
+endif
+if (status?) then (EXPIRED or CANCELLED)
+  :Registration.requestLatePaymentReversal():
+  record RefundRequested(kind LATE_PAYMENT_REVERSAL,
+  requestedBy SYSTEM) — the charge landed after
+  the seats were released, so it goes back (FR-11);
+  :after commit, StreamBridge sends;
+  |Kafka|
+  $EVT:refund-requested
+  key: registrationId>
+  stop
+elseif (CONFIRMED or REFUNDED?) then (yes)
+  |registration-service|
+  :already settled — a replay, ignored;
+  stop
+else (PENDING_PAYMENT)
+  |registration-service|
+endif
+:Registration.confirm()
+every SeatHold HELD → CONFIRMED,
+status → CONFIRMED,
+record RegistrationConfirmed (sessionIds,
+attendeeId, attendeeName, attendeeEmail);
+:save → regdb.registrations, seat_holds;
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:registration-confirmed
+key: registrationId>
+
+|ticketing-service|
+:registration-confirmed<
+:RegistrationEventConsumers.registrationConfirmed;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:record eventId in processed_events;
+:TicketApplicationService.issue(IssueTicketsCommand);
+if (holder name or email blank,
+or no sessionIds?) then (yes)
+  :log a warning and drop;
+  stop
+else (no)
+endif
+repeat
+  :next sessionId;
+  if (ticket already exists for
+  (registrationId, sessionId)?) then (yes)
+    :skip it;
+  else (no)
+    :Ticket.issue(new UUID, TicketCode.generate() "TKT-…",
+    registrationId, sessionId, attendeeId, Holder)
+    → status ISSUED, record TicketIssued;
+    :save → ticketdb.tickets;
+  endif
+repeat while (more sessions?) is (yes) not (no)
+:after commit, StreamBridge sends one event per new ticket;
+
+|Kafka|
+$EVT:ticket-issued ×N
+key: ticketCode>
+note right
+  No service consumes it;
+  it is visible in Kafka UI.
+end note
+stop
+
+|Attendee|
+start
+:GET /api/v1/registrations/{registrationId}/tickets
+or GET /api/v1/tickets/{ticketCode};
+|ticketing-service|
+if (GET by code and code unknown?) then (yes)
+  $ERR:404 TICKET_NOT_FOUND;
+  stop
+else (no)
+endif
+$OK:200 OK TicketResponse(s)
+one per confirmed session;
+|Attendee|
+:presents a ticket code at the gate (FR-13);
+stop
+
+note right
+  A <b>free</b> registration skips payment:
+  POST /registrations emits
+  registration-confirmed directly (FR-06),
+  and ticketing issues its tickets the
+  same way from that point.
+end note
+@enduml

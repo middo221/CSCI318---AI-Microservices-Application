@@ -1,0 +1,81 @@
+@startuml activity-fr-11
+' Report §2.1 — FR-11 Request a refund, part 1 of 4: the attendee's request to registration-service.
+' Parts 2-4: activity-fr-11-decision, -settlement and -override.
+' Source: RegistrationController.requestRefund, RefundRequest, Registration.requestRefund/refund,
+' RegistrationApplicationService.requestRefund/applyRefundIssued/applyRefundDeclined,
+' RegistrationEventConsumers.refundRequested (payment), RefundApplicationService.decide/quote/
+' issueByOrganiser, RefundPolicyService, PaymentOrder.requireRefundable/markRefunded, Refund,
+' PaymentEventConsumers (registration and ticketing), TicketApplicationService.voidTicketsFor,
+' RefundController, both GlobalExceptionHandlers.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-11 — Request a refund: the attendee's request (decision, settlement and override continue in\nactivity-fr-11-decision, -settlement and -override)
+
+|Attendee|
+start
+:POST /api/v1/registrations/{id}/refund-requests
+{reason, requestedBy?: ATTENDEE | AGENT};
+
+|registration-service|
+if (reason blank or over 500 characters,
+requestedBy not exactly ATTENDEE or AGENT,
+or body unreadable?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:RegistrationApplicationService.requestRefund;
+if (registration found?) then (no)
+  $ERR:404 REGISTRATION_NOT_FOUND;
+  stop
+else (yes)
+endif
+if (status CONFIRMED?) then (no)
+  $ERR:409 REGISTRATION_NOT_CONFIRMED;
+  stop
+else (yes)
+endif
+if (totalAmount zero (a free registration)?) then (yes)
+  $ERR:409 NOTHING_TO_REFUND;
+  stop
+else (no)
+endif
+if (a refund already requested
+and not yet answered?) then (yes)
+  $ERR:409 REFUND_ALREADY_REQUESTED;
+  stop
+else (no)
+endif
+:Registration.requestRefund:
+refundRequestedAt = now,
+record RefundRequested(kind ATTENDEE_REQUEST,
+requestedBy ATTENDEE or AGENT);
+:save → regdb.registrations (refund_requested_at);
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:refund-requested
+key: registrationId>
+
+|registration-service|
+$OK:202 Accepted RefundRequestResponse
+{registrationId, status REFUND_REQUESTED,
+requestedAt};
+stop
+
+note right
+  <b>Any issued refund ends the registration:</b>
+  at 50% or 100% the registration is REFUNDED,
+  its seats go back on sale and its tickets are
+  voided. Keeping half the money and the seat
+  is not on offer.
+  <b>Late-payment reversal:</b> a payment-succeeded
+  for an EXPIRED or CANCELLED registration makes
+  registration emit refund-requested with kind
+  LATE_PAYMENT_REVERSAL and requestedBy SYSTEM
+  (see FR-08); billing returns it in full.
+  event-cancelled has no producer, so the
+  EVENT_CANCELLED rule is never reached.
+end note
+@enduml
