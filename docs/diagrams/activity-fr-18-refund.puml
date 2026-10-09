@@ -1,0 +1,47 @@
+@startuml activity-fr-18-refund
+' Report §2.1 — FR-18, the requestRefund tool (detail of activity-fr-18-tools.puml).
+' Source: SupportTools.requestRefund, RefundGuard.evaluate, RequestedRefund, RestPaymentClient,
+' RestRegistrationClient, UpstreamResults.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-18 — The requestRefund tool
+
+|concierge-service|
+start
+:the model calls requestRefund(registrationId, reason);
+:ownership guard as above;
+if (already requested in this conversation,
+or an earlier refund's outcome unknown?) then (yes)
+  :refused;
+else (no)
+  :fetch a fresh quote — payment-service:
+  GET /api/v1/refund-policy/quote;
+  :RefundGuard.evaluate(quote, already requested);
+  if (ineligible, zero, more than
+  paid, another currency, or the
+  conversation total above 200.00 AUD
+  (refund-auto-approve-threshold)?) then (yes)
+    :refused: "call escalateToOrganiser";
+  else (no)
+    :registration-service:
+    POST /api/v1/registrations/{id}/
+    refund-requests {reason,
+    requestedBy AGENT} (FR-11);
+    if (answer?) then (202)
+      :record RequestedRefund;
+    elseif (4xx) then (yes)
+      :explain the refusal (e.g. 409 not confirmed);
+    else (no answer)
+      :outcome UNKNOWN — do not retry;
+    endif
+  endif
+endif
+:the result is returned to the model;
+stop
+note right
+  The refund limit is code, not prompt:
+  requestRefund fetches its own quote and
+  RefundGuard judges the conversation's total.
+end note
+@enduml

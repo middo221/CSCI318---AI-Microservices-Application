@@ -1,0 +1,112 @@
+' Operational insight bounded context — analytics-service, package ...analytics.domain
+' Shared by domain-insight.puml (full detail) and domain-model.puml (overview).
+' Read models only: every class is an immutable record, an enum or a port. Nothing is persisted
+' in a database; the values live in Kafka Streams state stores.
+
+package "Operational insight  (analytics-service)" as insight {
+
+  class FillRate <<ReadModel>> {
+    sessionId : String
+    reservedSeats : int  {>= 0}
+    seatCapacity : int  {> 0}
+    fillRate : double  {may exceed 1.0}
+    --
+    {static} of(sessionId, reservedSeatTotal, seatCapacity) : FillRate
+    isAtOrAbove(threshold) : boolean
+  }
+
+  class GateStats <<ValueObject>> {
+    checkIns : long
+    totalWaitMillis : long
+    maxWaitMillis : long
+    --
+    {static} empty() : GateStats
+    record(waitMillis) : GateStats
+    averageWaitMillis() : long
+  }
+
+  class GateThroughput <<ReadModel>> {
+    gateId : String
+    windowStart : Instant
+    windowEnd : Instant
+    checkIns : long
+    averageWaitMillis : long
+    maxWaitMillis : long
+    --
+    {static} of(gateId, windowStart, windowEnd, GateStats) : GateThroughput
+    isCongested(Duration threshold) : boolean
+  }
+
+  class RegistrationFunnel <<ReadModel>> {
+    requested : long
+    paid : long
+    paymentFailed : long
+    expired : long
+    --
+    conversionRate() : double
+    abandonmentRate() : double
+    paymentFailureRate() : double
+  }
+
+  enum FunnelStage {
+    REQUESTED
+    PAID
+    PAYMENT_FAILED
+    EXPIRED
+  }
+
+  class AlertThresholds <<ValueObject>> {
+    capacityAlertRate : double  {0.9}
+    gateCongestionWait : Duration  {PT2M}
+  }
+
+  class SessionCapacityAlert <<DomainEvent>> {
+    .. key: sessionId ..
+    eventId : String  {"session-capacity-alert:" + sessionId}
+    occurredAt : Instant
+    sessionId : String
+    reservedSeats : int
+    seatCapacity : int
+    fillRate : double
+    threshold : double
+  }
+
+  class GateCongestionAlert <<DomainEvent>> {
+    .. key: gateId ..
+    eventId : String  {"gate-congestion-alert:" + gateId + ":" + windowStart}
+    occurredAt : Instant
+    gateId : String
+    windowStart : Instant
+    windowEnd : Instant
+    checkIns : long
+    averageWaitMillis : long
+    maxWaitMillis : long
+    thresholdMillis : long
+  }
+
+  interface SessionFillRates <<Port>> {
+    + find(sessionId) : Optional<FillRate>
+    + all() : List<FillRate>
+  }
+
+  interface GateThroughputs <<Port>> {
+    + latest(gateId) : Optional<GateThroughput>
+    + latestForEveryGate() : List<GateThroughput>
+  }
+
+  interface RegistrationFunnelCounts <<Port>> {
+    + current() : RegistrationFunnel
+  }
+
+  ' Smetana fails (IllegalStateException in mincross) laying out the left-to-right overview with
+  ' these links, so domain-model.puml sets $overview and shows this package without them.
+  !if (%not(%variable_exists("$overview")))
+  GateThroughput ..> GateStats : of(...)
+  RegistrationFunnel ..> FunnelStage : counts per stage
+  SessionCapacityAlert ..> FillRate : raise(rate, threshold, at)
+  GateCongestionAlert ..> GateThroughput : raise(throughput, threshold, at)
+  SessionFillRates ..> FillRate
+  GateThroughputs ..> GateThroughput
+  RegistrationFunnelCounts ..> RegistrationFunnel
+  !endif
+}

@@ -3,7 +3,8 @@
 ' Source: RegistrationController.register, CreateRegistrationRequest, RequestRegistrationCommand,
 ' RegistrationApplicationService.request, SeatAllocationService, RegistrationPricingService,
 ' Registration.request, SessionView.reserve.
-' Second pass (FR-10): a full session falls through to the waitlist instead of refusing all.
+' A full session still refuses the whole registration; joining its waitlist is a second,
+' explicit call (activity-fr-10.puml).
 !include include/style.iuml
 !include include/activity.iuml
 
@@ -32,8 +33,8 @@ endif
 :RegistrationApplicationService.request;
 :load the SessionView of every requested session
 from the local replica (no call to the catalogue);
-if (every session replicated
-(session-added received)?) then (no)
+if (every session replicated (session-added
+and its capacity both received)?) then (no)
   $ERR:404 SESSION_NOT_FOUND;
   stop
 else (yes)
@@ -43,7 +44,8 @@ checks every session before holding any;
 if (reservedSeats + quantity <= capacity
 for every session?) then (no)
   $ERR:409 SESSION_FULL
-  (the whole registration is refused);
+  (the whole registration is refused —
+  the attendee may join the waitlist, FR-10);
   stop
 else (yes)
 endif
@@ -66,7 +68,9 @@ else (no: paid)
   :status PENDING_PAYMENT,
   record RegistrationRequested
   (total, currency, holdExpiresAt =
-  earliest hold expiry, cardToken),
+  earliest hold expiry, cardToken,
+  firstSessionStartsAt = earliest session
+  start in conference.registration.time-zone),
   record SeatsReserved per hold;
 endif
 :save → regdb.registrations, seat_holds,

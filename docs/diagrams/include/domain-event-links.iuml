@@ -2,8 +2,10 @@
 ' "publishes" = the aggregate records the event and the application layer sends it after commit.
 ' "reacts to" = a consumer in that service turns the event into a change to this class.
 ' A per-context detail diagram sets !$only = "<context>" before including this file, to get only
-' its own links; the overview leaves it unset and gets all of them.
+' its own links; the overview (domain-model.puml) sets $overview and draws none of them: sixty-odd dashed
+' lines across the contexts cannot be read on one page. The per-context figures carry the events.
 
+!if (%not(%variable_exists("$overview")))
 !$only ?= "all"
 
 !if ($only == "all") || ($only == "programme")
@@ -19,22 +21,45 @@ Registration ..> SeatsReleased : <<publishes>>
 Registration ..> RegistrationConfirmed : <<publishes>>
 Registration ..> RegistrationCancelled : <<publishes>>
 Registration ..> RegistrationExpired : <<publishes>>
+Registration ..> RefundRequested : <<publishes>>
+Waitlist ..> WaitlistJoined : <<publishes>>
+Waitlist ..> WaitlistPromoted : <<publishes>>
 SessionView ..> SessionAdded : <<reacts to>>
 SessionView ..> SessionCapacityChanged : <<reacts to>>
-Registration ..> PaymentSucceeded : <<reacts to>>\nconfirm()
+Registration ..> PaymentSucceeded : <<reacts to>>\nconfirm(), or requestLatePaymentReversal()
 Registration ..> PaymentFailed : <<reacts to>>\ncancel()
+Registration ..> RefundIssued : <<reacts to>>\nrefund()
+Registration ..> RefundDeclined : <<reacts to>>\nclearRefundRequest()
+Waitlist ..> SeatsReleased : <<reacts to>>\npromote()
 !endif
 
 !if ($only == "all") || ($only == "billing")
 PaymentOrder ..> PaymentSucceeded : <<publishes>>
 PaymentOrder ..> PaymentFailed : <<publishes>>
+Refund ..> RefundIssued : <<publishes>>
+Refund ..> RefundDeclined : <<publishes>>
 PaymentOrder ..> RegistrationRequested : <<reacts to>>\nraise() + pay()
+PaymentOrder ..> RefundRequested : <<reacts to>>\nmarkRefunded() if issued
+Refund ..> RefundRequested : <<reacts to>>\nissue() or decline()
 !endif
 
 !if ($only == "all") || ($only == "access")
 Ticket ..> TicketIssued : <<publishes>>
 Ticket ..> TicketTransferred : <<publishes>>
 Ticket ..> AttendeeCheckedIn : <<publishes>>
-Ticket ..> TicketVoided : <<publishes>>\n(no caller on main)
+Ticket ..> TicketVoided : <<publishes>>
 Ticket ..> RegistrationConfirmed : <<reacts to>>\nissue(), one per session
+Ticket ..> RefundIssued : <<reacts to>>\nvoidTicket("REFUNDED")
+!endif
+
+!if ($only == "all") || ($only == "insight")
+FillRate ..> SessionCapacityChanged : <<reacts to>>\nRT1 capacity table
+FillRate ..> SeatsReserved : <<reacts to>>\n+quantity
+FillRate ..> SeatsReleased : <<reacts to>>\n−quantity
+GateStats ..> AttendeeCheckedIn : <<reacts to>>\nRT2, per gate per minute
+RegistrationFunnel ..> RegistrationRequested : <<reacts to>>\ncounted by topic
+RegistrationFunnel ..> PaymentSucceeded : <<reacts to>>\ncounted by topic
+RegistrationFunnel ..> PaymentFailed : <<reacts to>>\ncounted by topic
+RegistrationFunnel ..> RegistrationExpired : <<reacts to>>\ncounted by topic
+!endif
 !endif

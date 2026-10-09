@@ -24,6 +24,15 @@ note top of PaymentOrder
   · charged only while PENDING
   · past holdExpiresAt: FAILED with reason
     HOLD_EXPIRED, gateway never called
+  · PAID → REFUNDED at most once
+    (requireRefundable, @Version)
+end note
+
+note bottom of Refund
+  One decision about one order. issue() needs
+  1–100% and records RefundIssued; decline()
+  stores amount 0 and records RefundDeclined.
+  A 0% outcome is always a decline.
 end note
 
 note bottom of PaymentGateway
@@ -38,7 +47,7 @@ legend right
   Value objects are Java records; Money and CardToken
   are JPA @Embeddable. Money is duplicated from the
   Registration context on purpose.
-  PaymentStatus.REFUNDED exists, but no use case on
-  main sets it (FR-11).
+  RefundPolicyService is pure Java with an injected
+  Clock; days count to the first session.
 endlegend
 @enduml

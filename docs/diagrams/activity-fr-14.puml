@@ -1,0 +1,83 @@
+@startuml activity-fr-14
+' Report §2.1 — FR-14 View live per-session fill rate (RT1, first half).
+' Source: SessionFillRateTopology.build/fillRate, StreamsTopologyConfiguration.sessionFillRate,
+' FillRate, SessionFillRateStore, InteractiveQueryStateStoreLookup, StoreReads,
+' AnalyticsQueryService.fillRate, AnalyticsController.fillRate, GlobalExceptionHandler.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-14 — View live per-session fill rate
+
+|analytics-service|
+start
+fork
+  :session-capacity-changed<
+  :KTable: the latest seatCapacity
+  per sessionId (emitted on session
+  creation and on every FR-04 change);
+fork again
+  fork
+    :seats-reserved<
+    :mapValues(+quantity);
+  fork again
+    :seats-released<
+    :mapValues(−quantity);
+  end fork
+  :merge → groupByKey → reduce(sum)
+  → <b>reserved-seats</b> store;
+end fork
+:capacity.leftJoin(reservedSeats)
+— re-evaluated whenever either side changes;
+if (sessionId blank, or
+seatCapacity zero or less?) then (yes)
+  :the row is deleted: the session
+  is not tracked (no exception, so the
+  stream thread keeps running);
+  stop
+else (no)
+endif
+:FillRate.of(sessionId, max(0, reserved), seatCapacity)
+fillRate = reserved ÷ capacity
+(above 1.0 after a capacity cut);
+:materialised as <b>session-fill-rates</b>
+(in memory, changelogged — no database);
+note right
+  Every input is keyed by sessionId, so the
+  merge, the reduce and the join are
+  co-partitioned: <b>no repartition topic</b>.
+  A left join from capacity tracks a session
+  from 0.0; reservations that arrived before
+  its capacity are still counted.
+  FR-15 continues from this table.
+end note
+stop
+
+|Organiser|
+start
+:GET /api/v1/analytics/sessions/{sessionId}/fill-rate;
+
+|analytics-service|
+:AnalyticsQueryService.fillRate(sessionId)
+→ SessionFillRateStore.find
+by interactive query;
+if (session-fill-rates queryable
+(streams RUNNING)?) then (no)
+  $ERR:503 STORE_REBUILDING;
+  stop
+else (yes)
+endif
+if (a row for this sessionId?) then (no)
+  $ERR:404 SESSION_NOT_TRACKED
+  (no capacity on record);
+  stop
+else (yes)
+endif
+$OK:200 OK FillRateResponse
+{sessionId, reservedSeats,
+seatCapacity, fillRate};
+
+|Organiser|
+:sees the session filling as
+seats are held and released;
+stop
+@enduml

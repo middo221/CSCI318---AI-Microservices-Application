@@ -19,8 +19,13 @@ SeatsReleased ..|> DomainEvent
 RegistrationConfirmed ..|> DomainEvent
 RegistrationCancelled ..|> DomainEvent
 RegistrationExpired ..|> DomainEvent
+RefundRequested ..|> DomainEvent
+WaitlistJoined ..|> DomainEvent
+WaitlistPromoted ..|> DomainEvent
 PaymentSucceeded ..|> DomainEvent
 PaymentFailed ..|> DomainEvent
+RefundIssued ..|> DomainEvent
+RefundDeclined ..|> DomainEvent
 TicketIssued ..|> DomainEvent
 TicketTransferred ..|> DomainEvent
 TicketVoided ..|> DomainEvent
@@ -36,7 +41,7 @@ end note
 
 legend right
   The key choice is deliberate: the seat topics and
-  session-capacity-changed share sessionId so the M3
+  session-capacity-changed share sessionId so the RT1
   fill-rate join needs no repartition; the saga topics
   share registrationId so one registration's messages
   stay in order; the ticket topics use ticketCode.

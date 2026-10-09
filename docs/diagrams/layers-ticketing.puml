@@ -1,6 +1,5 @@
 @startuml layers-ticketing
-' Report §3.2 — ticketing-service layers, from the classes on main.
-' Second pass (FR-11): add the refund-issued / event-cancelled consumers that call voidTicketsFor.
+' Report §3.2 — ticketing-service layers, from the classes on main (FR-08, FR-11, FR-12, FR-13).
 !pragma layout smetana
 !include include/style.iuml
 set separator ::
@@ -47,6 +46,7 @@ package "domain  (domain layer)" as domain <<domain>> {
 package "infrastructure  (infrastructure layer)" as infrastructure <<infrastructure>> {
   package "infrastructure.messaging" as inf_msg {
     class RegistrationEventConsumers <<@Configuration>>
+    class PaymentEventConsumers <<@Configuration>>
     class ProcessedEventStore <<@Component>>
     class ProcessedEvent <<@Entity>>
     interface ProcessedEventJpaRepository <<Spring Data>>
@@ -86,6 +86,8 @@ ProcessedEventJpaRepository ..> ProcessedEvent
 ' inbound adapter calls the application layer
 TicketApplicationService <.. RegistrationEventConsumers : registration-confirmed →\nissue(IssueTicketsCommand)
 RegistrationEventConsumers --> ProcessedEventStore : markProcessed(eventId)
+TicketApplicationService <.. PaymentEventConsumers : refund-issued →\nvoidTicketsFor(registrationId, "REFUNDED")
+PaymentEventConsumers --> ProcessedEventStore : markProcessed(eventId)
 
 note bottom of StreamBridgeDomainEventPublisher
   AFTER_COMMIT send.
@@ -98,8 +100,8 @@ note bottom of dom_model
   Domain exceptions: TicketNotFoundException (404),
   TicketVoidException (409 TICKET_VOID),
   AlreadyCheckedInException (409 ALREADY_CHECKED_IN).
-  TicketApplicationService.voidTicketsFor(...) exists
-  but nothing on main calls it yet.
+  voidTicketsFor(...) is called on refund-issued (FR-11);
+  a USED ticket is left as it is.
 end note
 
 legend right

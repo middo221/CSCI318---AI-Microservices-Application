@@ -3,7 +3,6 @@
 ' (@Table, @Column, @AttributeOverride, @JoinColumn, @OrderColumn, @Version).
 ' Hibernate generates the DDL at start-up (ddl-auto: create-drop). Types are the logical SQL
 ' types the mappings imply; enums are stored by name (EnumType.STRING).
-' Second pass: waitlists / waitlist_entries in regdb (FR-10), refunds in paydb (FR-11).
 !pragma layout smetana
 !include include/style.iuml
 hide circle
@@ -66,6 +65,7 @@ package "regdb  ·  registration-service" as regdb <<Database>> {
     total_amount : NUMERIC(12,2)
     total_currency : VARCHAR(3)
     * created_at : TIMESTAMP WITH TIME ZONE
+    refund_requested_at : TIMESTAMP WITH TIME ZONE
   }
   entity "seat_holds" as seat_holds {
     * id : VARCHAR(64) <<PK>>
@@ -84,11 +84,26 @@ package "regdb  ·  registration-service" as regdb <<Database>> {
     title : VARCHAR(255)
     starts_at : TIMESTAMP
     ends_at : TIMESTAMP
-    * capacity : INTEGER
+    capacity : INTEGER  (null until session-capacity-changed)
     * reserved_seats : INTEGER
-    * version : BIGINT <<@Version>>
+    version : BIGINT <<@Version>>
     price_amount : NUMERIC(12,2)
     price_currency : VARCHAR(3)
+  }
+  entity "waitlists" as waitlists {
+    * session_id : VARCHAR(64) <<PK>>
+    --
+    version : BIGINT <<@Version>>
+  }
+  entity "waitlist_entries" as waitlist_entries {
+    * id : VARCHAR(64) <<PK>>
+    --
+    * waitlist_session_id : VARCHAR(64) <<FK>>
+    entry_index : INTEGER <<order column>>
+    * attendee_id : VARCHAR(64)
+    * joined_at : TIMESTAMP WITH TIME ZONE
+    * status : VARCHAR(16) <<enum WaitlistStatus>>
+    promoted_at : TIMESTAMP WITH TIME ZONE
   }
   entity "processed_events" as reg_processed {
     * event_id : VARCHAR(64) <<PK>>
@@ -108,6 +123,22 @@ package "paydb  ·  payment-service" as paydb <<Database>> {
     * hold_expires_at : TIMESTAMP WITH TIME ZONE
     * status : VARCHAR(16) <<enum PaymentStatus>>
     * created_at : TIMESTAMP WITH TIME ZONE
+    first_session_starts_at : TIMESTAMP WITH TIME ZONE
+    version : BIGINT <<@Version>>
+  }
+  entity "refunds" as refunds {
+    * id : VARCHAR(64) <<PK>>
+    --
+    * payment_order_id : VARCHAR(64)
+    * registration_id : VARCHAR(64)
+    * amount : NUMERIC(12,2)
+    * currency : VARCHAR(3)
+    * refund_percent : INTEGER
+    * status : VARCHAR(16) <<enum RefundStatus>>
+    reason : VARCHAR(500)
+    * decision_code : VARCHAR(32)
+    * decided_by : VARCHAR(16) <<enum DecisionMaker>>
+    * decided_at : TIMESTAMP WITH TIME ZONE
   }
   entity "payment_attempts" as payment_attempts {
     * id : VARCHAR(64) <<PK>>
@@ -172,6 +203,7 @@ package "ticketdb  ·  ticketing-service" as ticketdb <<Database>> {
 ' ---- Foreign keys inside one schema (aggregate composition) --------------------------------
 events ||--o{ sessions : event_id
 registrations ||--|{ seat_holds : registration_id
+waitlists ||--o{ waitlist_entries : waitlist_session_id
 payment_orders ||--o{ payment_attempts : payment_order_id
 tickets ||--o| check_ins : ticket_id
 tickets ||--o{ transfer_records : ticket_id
@@ -179,6 +211,8 @@ tickets ||--o{ transfer_records : ticket_id
 ' ---- References by id with no FK constraint ------------------------------------------------
 sessions }o..|| speakers : speaker_id\n(separate aggregate,\nno FK)
 seat_holds }o..|| session_views : session_id\n(no FK)
+waitlists |o..|| session_views : session_id\n(one per session,\nno FK)
+refunds }o..|| payment_orders : payment_order_id\n(separate aggregate,\nno FK)
 
 ' ---- Cross-database: values copied by Kafka events, never joined ----------------------------
 session_views .[#8A6FB0].> sessions : <color:#6A4C93>replica of, via session-added\n<color:#6A4C93>and session-capacity-changed
@@ -186,13 +220,16 @@ payment_orders .[#8A6FB0].> registrations : <color:#6A4C93>registration_id,\n<co
 tickets .[#8A6FB0].> registrations : <color:#6A4C93>registration_id, session_id,\n<color:#6A4C93>via registration-confirmed
 
 note as stateless
-  <b>analytics-service</b> owns no database. On main it is a skeleton;
-  from M3 its state lives in Kafka Streams state stores, rebuilt by
-  replaying topics and served by interactive queries.
+  <b>analytics-service</b> owns no database. Its state lives in Kafka
+  Streams state stores (reserved-seats, session-fill-rates,
+  capacity-alerts-sent, gate-throughput, gate-alerts-sent,
+  registration-funnel): in memory, changelogged to Kafka, rebuilt by
+  replaying the topics on start and served by interactive queries.
 
-  <b>concierge-service</b> owns no database and holds no state between
-  requests: each agenda request builds a throw-away AgendaTools
-  "dossier" in memory from REST responses.
+  <b>concierge-service</b> owns no database. Each request builds a
+  throw-away AgendaTools or SupportTools object in memory from REST
+  responses; the organisers' escalation queue is an in-memory list,
+  lost on restart.
 end note
 
 legend right
@@ -202,7 +239,8 @@ legend right
   purple dotted  value copied between schemas by a Kafka event; no cross-database join exists
   processed_events: one row per consumed event id; a consumer skips an id it has
   already recorded, which makes at-least-once delivery safe.
-  @Version optimistic locking exists only on session_views.version.
+  @Version optimistic locking: session_views, waitlists, payment_orders
+  (payment_orders.version makes one refund per order hold under a race).
   <<order column>>: list position written by @OrderColumn.
 endlegend
 @enduml

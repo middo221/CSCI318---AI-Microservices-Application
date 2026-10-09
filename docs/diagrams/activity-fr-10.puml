@@ -1,0 +1,135 @@
+@startuml activity-fr-10
+' Report §2.1 — FR-10 Join a waitlist for a full session, and promotion from it.
+' Source: WaitlistController.join/list, JoinWaitlistRequest, WaitlistApplicationService.join,
+' promoteFor and placesFor, SessionAvailabilityService, SessionView.isFull, Waitlist.join/promote,
+' WaitlistEntry, WaitlistEventConsumers.seatsReleased, ConflictRetry, GlobalExceptionHandler.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-10 — Join a waitlist for a full session, and be promoted from it
+
+|Attendee|
+start
+:POST /api/v1/registrations was refused
+409 SESSION_FULL (FR-06);
+:POST /api/v1/sessions/{sessionId}/waitlist
+{attendeeId};
+
+|registration-service|
+if (attendeeId blank,
+or body unreadable?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+:WaitlistApplicationService.join(sessionId, attendeeId);
+:SessionAvailabilityService.availabilityOf(sessionId)
+reads the local SessionView replica;
+if (replicated and complete
+(session-added and its capacity
+both received)?) then (no)
+  $ERR:404 SESSION_NOT_FOUND;
+  stop
+else (yes)
+endif
+if (SessionView full
+(no seats available)?) then (no)
+  $ERR:409 SESSION_NOT_FULL
+  (register instead);
+  stop
+else (yes)
+endif
+:load this session's Waitlist,
+or Waitlist.forSession(sessionId);
+:Waitlist.join(entryId, attendeeId, now);
+if (attendee already WAITING
+on this waitlist?) then (yes)
+  $ERR:409 ALREADY_WAITLISTED;
+  stop
+else (no)
+endif
+:append WaitlistEntry, status WAITING,
+position = 1 + WAITING entries ahead,
+record WaitlistJoined(position);
+:save → regdb.waitlists (@Version),
+waitlist_entries;
+if (a concurrent writer won
+(optimistic lock or duplicate key)?) then (yes)
+  $ERR:409 CONCURRENT_UPDATE
+  (retry the request);
+  stop
+else (no)
+endif
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:waitlist-joined
+key: sessionId>
+
+|registration-service|
+$OK:201 Created WaitlistEntryResponse
+{waitlistEntryId, sessionId, attendeeId,
+position, status WAITING, joinedAt};
+
+|Attendee|
+:waits — GET /api/v1/sessions/{sessionId}/waitlist
+lists every entry in joining order;
+stop
+
+|registration-service|
+start
+:seats-released<
+note right
+  Released by a payment failure or a hold
+  expiry (FR-09), or by a refund (FR-11).
+  Registration consumes its <b>own</b> topic:
+  no REST call anywhere in this flow.
+end note
+:WaitlistEventConsumers.seatsReleased;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:record eventId in processed_events
+(its own transaction, REQUIRES_NEW);
+:ConflictRetry → WaitlistApplicationService
+.promoteFor(sessionId, quantity)
+(REQUIRES_NEW transaction);
+if (a Waitlist exists for this session?) then (no)
+  :nothing to promote;
+  stop
+else (yes)
+endif
+:seats = min(quantity released,
+SessionView.availableSeats now);
+:Waitlist.promote(seats, now):
+the first <i>seats</i> WAITING entries
+→ PROMOTED, promotedAt = now,
+record WaitlistPromoted per entry;
+if (anyone promoted?) then (no)
+  :nobody: e.g. the session is still
+  over-subscribed after a capacity cut;
+  stop
+else (yes)
+endif
+:save → regdb.waitlist_entries;
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:waitlist-promoted ×N
+key: sessionId>
+stop
+
+note right
+  <b>Promotion is an offer, not a hold.</b>
+  No seat is reserved for a promoted
+  attendee: they register in the ordinary
+  way (FR-06) and may rejoin if the session
+  fills again. Delivering the offer is out
+  of scope (design §16): waitlist-promoted
+  has no consumer.
+  A promoted entry's position is null;
+  WITHDRAWN exists, but no endpoint sets it.
+end note
+@enduml
