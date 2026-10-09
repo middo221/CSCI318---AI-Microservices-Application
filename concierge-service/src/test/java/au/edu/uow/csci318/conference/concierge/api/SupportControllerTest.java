@@ -7,6 +7,8 @@ import au.edu.uow.csci318.conference.concierge.support.FakeTicketing;
 import au.edu.uow.csci318.conference.concierge.support.ScriptedChatModel;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.exception.RateLimitException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -266,6 +268,26 @@ class SupportControllerTest {
                 .andExpect(jsonPath("$.code").value("LLM_LOOP_LIMIT"));
 
         assertThat(model.turns()).isLessThanOrEqualTo(9);
+    }
+
+    /** The agenda endpoint's regression, on the support endpoint: an invented tool is answered, not a bare 500. */
+    @Test
+    void tellsTheModelThereIsNoSuchToolInsteadOfFailingTheRequest() throws Exception {
+        model.thenCallsTool("refundEverything", "{\"amount\":500}")
+                .thenAnswers("{\"reply\": \"I cannot do that, but I can look at your registrations.\", \"outcome\": \"RESOLVED\"}");
+
+        mockMvc.perform(post("/api/v1/concierge/support")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Refund everything.")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcome").value("RESOLVED"))
+                .andExpect(jsonPath("$.refunds.length()").value(0));
+
+        ChatMessage toolResult = model.requests().get(1).messages().getLast();
+        assertThat(toolResult).isInstanceOf(ToolExecutionResultMessage.class);
+        assertThat(((ToolExecutionResultMessage) toolResult).text())
+                .isEqualTo("There is no tool named refundEverything.");
+        assertThat(registrations.refundCalls()).isEmpty();
     }
 
     @Test

@@ -5,6 +5,8 @@ import au.edu.uow.csci318.conference.concierge.application.port.RegistrationPort
 import au.edu.uow.csci318.conference.concierge.support.FakeCatalog;
 import au.edu.uow.csci318.conference.concierge.support.FakeRegistrations;
 import au.edu.uow.csci318.conference.concierge.support.ScriptedChatModel;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -212,5 +214,27 @@ class ConciergeControllerTest {
                 .andExpect(jsonPath("$.message").exists());
 
         assertThat(model.turns()).isLessThanOrEqualTo(13);
+    }
+
+    /**
+     * Regression: LangChain4j's default answer to a tool name the model invented is a plain
+     * RuntimeException, which escaped as a bare 500. The model is now told there is no such tool,
+     * and carries on.
+     */
+    @Test
+    void tellsTheModelThereIsNoSuchToolInsteadOfFailingTheRequest() throws Exception {
+        model.thenCallsTool("bookEverySession", "{}")
+                .thenAnswers("{\"items\":[],\"summary\":\"Nothing suitable.\"}");
+
+        mockMvc.perform(post("/api/v1/concierge/agenda")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody("streams")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.summary").value("Nothing suitable."));
+
+        ChatMessage toolResult = model.requests().get(1).messages().getLast();
+        assertThat(toolResult).isInstanceOf(ToolExecutionResultMessage.class);
+        assertThat(((ToolExecutionResultMessage) toolResult).text())
+                .isEqualTo("There is no tool named bookEverySession.");
     }
 }

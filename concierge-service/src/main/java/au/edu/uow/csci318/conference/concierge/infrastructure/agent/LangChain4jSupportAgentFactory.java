@@ -33,6 +33,7 @@ public class LangChain4jSupportAgentFactory implements SupportAgentFactory {
         SupportAgent agent = AiServices.builder(SupportAgent.class)
                 .chatModel(chatModel.require())
                 .tools(tools)
+                .hallucinatedToolNameStrategy(UnknownTool::answer)
                 .maxToolCallingRoundTrips(MAX_TOOL_CALLING_ROUND_TRIPS)
                 .build();
         return message -> LoopLimit.enforce(MAX_TOOL_CALLING_ROUND_TRIPS, () -> agent.handle(message));

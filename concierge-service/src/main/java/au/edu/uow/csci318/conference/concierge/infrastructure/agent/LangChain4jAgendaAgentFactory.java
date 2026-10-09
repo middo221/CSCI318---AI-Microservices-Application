@@ -10,7 +10,8 @@ import org.springframework.stereotype.Component;
  * Builds the LangChain4j proxy that is the Agenda Builder agent.
  *
  * <p>Whether there is a model at all is {@link ConfiguredChatModel}'s decision; what a runaway
- * loop looks like to the caller is {@link LoopLimit}'s. A new proxy per request, bound to that
+ * loop looks like to the caller is {@link LoopLimit}'s, and what an invented tool name gets back
+ * is {@link UnknownTool}'s. A new proxy per request, bound to that
  * request's tools; see {@code AgendaToolsFactory} for why the tools cannot be shared.
  */
 @Component
@@ -37,6 +38,7 @@ public class LangChain4jAgendaAgentFactory implements AgendaAgentFactory {
         AgendaBuilder agent = AiServices.builder(AgendaBuilder.class)
                 .chatModel(chatModel.require())
                 .tools(tools)
+                .hallucinatedToolNameStrategy(UnknownTool::answer)
                 .maxToolCallingRoundTrips(MAX_TOOL_CALLING_ROUND_TRIPS)
                 .build();
         return (attendeeId, interests) -> LoopLimit.enforce(MAX_TOOL_CALLING_ROUND_TRIPS,
