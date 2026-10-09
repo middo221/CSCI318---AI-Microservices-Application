@@ -64,8 +64,26 @@ def service_ports(conf):
 
 
 def strip_comments(java):
-    java = re.sub(r"/\*.*?\*/", "", java, flags=re.S)
-    return "\n".join(l for l in java.splitlines() if not l.lstrip().startswith("//"))
+    """Drop /* */ and // comments (also after code on a line), leaving string literals alone."""
+    out, i, n = [], 0, len(java)
+    while i < n:
+        c = java[i]
+        if c in "\"'":
+            j = i + 1
+            while j < n and java[j] != c and java[j] != "\n":
+                j += 2 if java[j] == "\\" else 1
+            out.append(java[i:j + 1])
+            i = j + 1
+        elif java.startswith("//", i):
+            while i < n and java[i] != "\n":
+                i += 1
+        elif java.startswith("/*", i):
+            end = java.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
 
 
 CLASS_MAPPING = re.compile(r'@RequestMapping\(\s*(?:(?:value|path)\s*=\s*)?"([^"]*)"')
@@ -80,6 +98,35 @@ def controller_endpoints(java, port, origin):
     base = CLASS_MAPPING.search(head)
     base = base.group(1) if base else ""
     return {key(m.group(1), port, base + (m.group(2) or "")): origin for m in METHOD_MAPPING.finditer(body)}
+
+
+ANY_MAPPING = re.compile(r"@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b")
+
+
+def guard_problem(java, parsed, name):
+    """None when every method-level mapping annotation in the file became an endpoint, else a FAILED line.
+
+    A class-level @RequestMapping (before the class declaration) is not an endpoint and is not counted."""
+    java = strip_comments(java)
+    split = re.search(r"\bclass\s+\w+", java)
+    body = java[split.start():] if split else java
+    annotations = len(ANY_MAPPING.findall(body))
+    if annotations != parsed:
+        return f"FAILED: {name}: {annotations} mapping annotation(s) but {parsed} endpoint(s) parsed"
+    return None
+
+
+def guard_problems(root=ROOT):
+    """Scan every java file under src/main, not only *Controller.java, for mappings the parser dropped."""
+    problems = []
+    for module, port in service_ports(root / "scripts" / "services.conf").items():
+        for java in sorted((root / module / "src" / "main" / "java").rglob("*.java")):
+            text = java.read_text(encoding="utf-8")
+            parsed = len(controller_endpoints(text, port, "")) if java.name.endswith("Controller.java") else 0
+            problem = guard_problem(text, parsed, f"{module}/{java.name}")
+            if problem:
+                problems.append(problem)
+    return problems
 
 
 def code_endpoints(root=ROOT):
@@ -297,9 +344,18 @@ def load(path, how):
 def main(argv):
     if argv[:1] == ["--self-test"]:
         return self_test()
-    if not argv or argv[0] not in ("inventory", "postman", "openapi", "readme"):
+    needs = {"inventory": 0, "postman": 2, "openapi": 1, "readme": 1}
+    if not argv or argv[0] not in needs:
         print(__doc__)
+        print("FAILED: expected one of inventory, postman, openapi, readme or --self-test")
         return 2
+    if len(argv) - 1 != needs[argv[0]]:
+        print(f"FAILED: {argv[0]} takes {needs[argv[0]]} argument(s), got {len(argv) - 1}")
+        return 2
+    guard = guard_problems()
+    if guard:
+        print("\n".join(guard))
+        return 1
     code = code_endpoints()
     spec = spec_endpoints((ROOT / "specs" / "4-api-endpoints.md").read_text(encoding="utf-8"))
     if not code:
@@ -315,7 +371,11 @@ def main(argv):
         environment = load(argv[2], json.loads)
         artefact = postman_endpoints(collection, environment)
     elif argv[0] == "openapi":
-        import yaml  # PyYAML; only this mode needs it
+        try:
+            import yaml  # PyYAML; only this mode needs it
+        except ImportError:
+            print("FAILED: the openapi check needs PyYAML (pip install pyyaml)")
+            return 1
         document = load(argv[1], yaml.safe_load)
         artefact = openapi_endpoints(document)
         extra = schema_problems(document, api_records())
@@ -442,6 +502,23 @@ curl -s http://localhost:8080/ui   # Kafka UI is not a service
     expect("coverage passes a complete artefact", (ok, lines), (True, ["OK  2 endpoints covered"]))
     ok, lines = coverage(inventory, dict(inventory), ["SCHEMA   X: no record Y"])
     expect("coverage fails on a schema problem alone", ok, False)
+
+    normal = '@RestController\n@RequestMapping("/a")\nclass XController {\n  @GetMapping("/x") void x() {}\n  @PostMapping void y() {}\n}'
+    expect("guard passes the normal case (class-level mapping not counted)",
+           guard_problem(normal, len(controller_endpoints(normal, 8081, "")), "X.java"), None)
+    unreadable = 'class XController {\n  @RequestMapping(value = "/x", method = RequestMethod.GET) void x() {}\n}'
+    expect("guard fails a mapping annotation the parser cannot read",
+           guard_problem(unreadable, len(controller_endpoints(unreadable, 8081, "")), "X.java"),
+           "FAILED: X.java: 1 mapping annotation(s) but 0 endpoint(s) parsed")
+    trailing = ('class XController {\n  @GetMapping("/x") void x() {} // @PostMapping("/ghost")\n'
+                '  String u = "http://h/y"; /* @GetMapping("/g") */\n}')
+    expect("a trailing // comment mapping is neither counted nor parsed",
+           (guard_problem(trailing, len(controller_endpoints(trailing, 8081, "")), "X.java"),
+            sorted(controller_endpoints(trailing, 8081, ""))), (None, ["GET 8081 /x"]))
+    elsewhere = 'class Helper {\n  @GetMapping("/x") void x() {}\n}'
+    expect("guard fails a mapping in a file that is not a *Controller.java",
+           guard_problem(elsewhere, 0, "Helper.java"),
+           "FAILED: Helper.java: 1 mapping annotation(s) but 0 endpoint(s) parsed")
 
     with tempfile.TemporaryDirectory() as scratch:
         conf = Path(scratch) / "services.conf"
