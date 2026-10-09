@@ -38,6 +38,8 @@ legend right
   @Embeddable. CheckIn and TransferRecord are
   entities inside the Ticket aggregate (cascade ALL,
   orphanRemoval). checkedInAt - queuedAt is the
-  gate wait that FR-16 will aggregate.
+  gate wait that FR-16 aggregates. voidTicket()
+  is called for every ticket of a registration
+  when refund-issued arrives (FR-11).
 endlegend
 @enduml

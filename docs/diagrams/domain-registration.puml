@@ -26,6 +26,10 @@ note top of Registration
     never emits registration-requested
   · confirm / cancel / expire only from
     PENDING_PAYMENT
+  · a refund may be requested only when
+    CONFIRMED, paid for, and not already
+    requested; refund() releases every
+    hold and ends in REFUNDED
 end note
 
 note bottom of SessionView
@@ -34,16 +38,27 @@ note bottom of SessionView
   so seat allocation never calls the catalogue.
   reservedSeats is maintained here. @Version
   serialises concurrent reservations.
-  isComplete() is false until session-added
-  has arrived (capacity may arrive first).
+  isComplete() is false until both session-added
+  and session-capacity-changed have arrived: a
+  half-replicated session is unknown (404), never
+  full.
 end note
 
 note bottom of SeatAllocationService
   Checks every requested session before
   creating any hold: one full session
   refuses the whole registration (409
-  SESSION_FULL). Holds expire at
-  now + HoldWindow (PT2M demo default).
+  SESSION_FULL); the attendee may then join
+  that session's Waitlist (FR-10). Holds
+  expire at now + HoldWindow (PT2M demo
+  default).
+end note
+
+note bottom of Waitlist
+  One per session. Promotion offers seats
+  in joining order, min(released, free);
+  nothing is held for the promoted
+  attendee, who registers normally.
 end note
 
 legend right
@@ -51,7 +66,7 @@ legend right
   and TimeSlot are JPA @Embeddable. HoldWindow is
   configuration (conference.registration.hold-window).
   Money is duplicated in Billing on purpose.
-  RegistrationStatus.REFUNDED exists, but no use
-  case on main sets it (FR-11).
+  REFUNDED is reached through refund() when
+  billing issues a refund (FR-11).
 endlegend
 @enduml

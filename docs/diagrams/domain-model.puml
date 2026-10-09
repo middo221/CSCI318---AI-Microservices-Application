@@ -3,8 +3,8 @@
 ' plus common-events as the Published Language. Attributes and operations are in the
 ' per-context diagrams (domain-programme, -registration, -billing, -access, -assistance,
 ' -published-language), which include exactly the same source fragments as this one.
-' Second pass: new classes go in the include/domain-*.iuml fragments and new event links in
-' include/domain-event-links.iuml; this file needs no change.
+' New classes go in the include/domain-*.iuml fragments and new event links in
+' include/domain-event-links.iuml.
 !pragma layout smetana
 !include include/style.iuml
 hide members
@@ -13,11 +13,13 @@ hide empty members
 
 title Converge — domain model overview (bounded contexts and Published Language)
 
+!$overview = "true"
 !include include/domain-programme.iuml
 !include include/domain-registration.iuml
 !include include/domain-billing.iuml
 !include include/domain-access.iuml
 !include include/domain-assistance.iuml
+!include include/domain-insight.iuml
 !include include/domain-published-language.iuml
 !include include/domain-event-links.iuml
 
@@ -39,7 +41,8 @@ legend right
           into a change to this class
   - - > labelled "by id only": a reference across aggregates
   Attendee assistance has no events: it reads other contexts
-  over REST. Nothing crosses a context boundary except the
-  Published Language records.
+  over REST. Operational insight only reacts, and its two
+  alerts stay inside analytics-service. Nothing crosses a
+  context boundary except the Published Language records.
 endlegend
 @enduml
