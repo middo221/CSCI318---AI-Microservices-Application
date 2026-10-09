@@ -8,7 +8,7 @@
 #
 # Every claim is CHECKED against the service that owns the state, not merely read off the response
 # of the call that caused it: registration status and refundRequested on 8082, the payment order on
-# 8083, the tickets on 8084 and the waitlist entry on 8082. Asynchronous outcomes are polled with a
+# 8083, the tickets on 8084 (ISSUED, then VOID after a refund) and the waitlist entry on 8082. Asynchronous outcomes are polled with a
 # bounded wait; a timeout stops the run with a FAILED line. The script exits non-zero on the first
 # failed check, so a green run is evidence.
 #
@@ -18,7 +18,7 @@
 #   ./mvnw spring-boot:run -pl event-catalog-service      (terminal A)
 #   ./mvnw spring-boot:run -pl registration-service       (terminal B)
 #   ./mvnw spring-boot:run -pl payment-service            (terminal C)
-#   ./mvnw spring-boot:run -pl ticketing-service          (terminal D, optional: ticket voiding)
+#   ./mvnw spring-boot:run -pl ticketing-service          (terminal D, REQUIRED: FR-11 voids tickets)
 #
 # Dates are computed from today with GNU date (Git Bash, Linux), so the three refund-policy bands
 # hold whenever the script is run: a session 45 days out (100%), 10 days out (50%), 3 days out (0%).
@@ -109,7 +109,7 @@ except SystemExit:
 except Exception:
     sys.exit(1)
 '
-pyj()     { python -I -c "$PYJ" "$@" 2>/dev/null | tr -d '\r'; return "${PIPESTATUS[0]}"; }
+pyj()     { python -X utf8 -I -c "$PYJ" "$@" 2>/dev/null | tr -d '\r'; return "${PIPESTATUS[0]}"; }
 jget()    { printf '%s' "$1" | pyj get "$2"; }            # jget <json> <path>
 compact() { printf '%s' "$1" | pyj compact; }
 day()     { date -d "+$1 days" +%F; }
@@ -155,6 +155,16 @@ expect_field() {  # expect_field <label> <json> <path> <expected>
   if [ "$v" = "$4" ]; then ok "ok: $1 ($3 = $v)"; return 0; fi
   fail "$1: expected $3 = $4, got $v"; return 1
 }
+expect_num() {   # expect_num <label> <json> <path> <expected>: numeric, so 30, 30.0 and 30.00 agree
+  local v; v=$(jget "$2" "$3") || { fail "$1: no usable '$3' in: $(compact "$2")"; return 1; }
+  if awk -v a="$v" -v b="$4" 'BEGIN { exit !(a ~ /^-?[0-9]+([.][0-9]+)?$/ && a + 0 == b + 0) }'; then
+    ok "ok: $1 ($3 = $v)"; return 0; fi
+  fail "$1: expected $3 = $4, got $v"; return 1
+}
+expect_call_result() {   # expect_call_result <label> <code> <body>: what call() left in CODE and BODY
+  if [ "$CODE" = "$2" ] && [ "$BODY" = "$3" ]; then ok "ok: $1 (CODE=$CODE)"; return 0; fi
+  fail "$1: expected CODE=$2 BODY='$3', got CODE=$CODE BODY='$BODY'"; return 1
+}
 expect_present() {  # expect_present <label> <json> <path>   - returns the value via PRESENT
   PRESENT=$(jget "$2" "$3") || { fail "$1: no '$3' in: $(compact "$2")"; return 1; }
   [ -n "$PRESENT" ] || { fail "$1: '$3' is empty"; return 1; }
@@ -185,10 +195,19 @@ wait_until() {
   return 1
 }
 
+# preflight_probe <name> <url>: any HTTP answer means up; 000 or nothing means down.
+preflight_probe() {
+  local code; code=$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "$2" 2>/dev/null)
+  if is_down "$code"; then fail "$1 is not answering ($2). Start it, then run this again."; return 1; fi
+  ok "$1 is up (HTTP $code)"
+}
+
 CHECKS_RUN=0
 ck() { CHECKS_RUN=$((CHECKS_RUN + 1)); "$@" || { printf '\n%s   run aborted at check %d%s\n' "$red" "$CHECKS_RUN" "$off"; exit 1; }; }
 
 # ──────────────────────────────────────────────────────────────────────────────
+command -v python >/dev/null 2>&1 || { fail "python is required for JSON handling"; exit 1; }
+
 # --self-test: offline, no services. Every checker is shown to pass on a good fixture and to FAIL,
 # with the text "FAILED:", on each bad one - an error body, a wrong value, a missing field, junk,
 # an empty list, a timeout, a dead service. A bad case only counts if its output contains FAILED:.
@@ -219,6 +238,32 @@ if [ "$SELF_TEST" = "1" ]; then
   # The offline stand-in for the services: the URL picks the canned body, FIX_SERVE overrides it.
   fetch() { printf '%s' "${FIX_SERVE:-}"; }
 
+  # A throwaway loopback stub for the wiring cases: /empty -> 204, /json -> 201 with a body, else 200.
+  STUBF=$(mktemp)
+  python -X utf8 -I -c '
+import sys, http.server
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def reply(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n: self.rfile.read(n)
+        if self.path == "/empty":
+            self.send_response(204); self.end_headers()
+        else:
+            b = b"{\"id\":\"x-1\"}"
+            self.send_response(201 if self.path == "/json" else 200)
+            self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+    do_GET = do_POST = reply
+srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(srv.server_port))
+srv.serve_forever()
+' "$STUBF" >/dev/null 2>&1 &
+  STUB_PID=$!
+  trap 'kill $STUB_PID 2>/dev/null; rm -f "$STUBF" "${POLLFILE:-}"' EXIT
+  for _ in $(seq 1 50); do [ -s "$STUBF" ] && break; sleep 0.1; done
+  STUB_PORT=$(cat "$STUBF")
+  [ -n "$STUB_PORT" ] || { fail "could not start the self-test stub"; exit 1; }
+
   printf '%sself-test: offline, no services%s\n' "$bold" "$off"
   printf '\nHTTP status checks\n'
   t_pass "expect_code 201 = 201"                       expect_code "join" 201 201
@@ -247,6 +292,14 @@ if [ "$SELF_TEST" = "1" ]; then
   t_fail "id empty string"                             expect_present "registration" '{"id":""}' id
   t_fail "not json"                                    expect_present "registration" 'Internal Server Error' id
 
+  printf '\nNumeric amounts\n'
+  t_pass "30.0 equals 30"                              expect_num "quote" '{"refundAmount":30.0}' refundAmount 30
+  t_pass "30.00 (string) equals 30"                    expect_num "quote" '{"refundAmount":"30.00"}' refundAmount 30
+  t_pass "0 equals 0"                                  expect_num "quote" '{"refundAmount":0}' refundAmount 0
+  t_fail "60 is not 30"                                expect_num "quote" '{"refundAmount":60}' refundAmount 30
+  t_fail "amount absent (error body)"                  expect_num "quote" "$FIX_ERR" refundAmount 30
+  t_fail "non-numeric amount"                          expect_num "quote" '{"refundAmount":"abc"}' refundAmount 0
+
   printf '\nTickets (ticketing-service owns them)\n'
   t_pass "every ticket VOID"                           expect_tickets "tickets" "$FIX_TICKETS_VOID" VOID
   t_fail "one ticket still ISSUED"                     expect_tickets "tickets" "$FIX_TICKETS_MIXED" VOID
@@ -272,7 +325,7 @@ if [ "$SELF_TEST" = "1" ]; then
   FIX_SERVE=$FIX_AVAIL_ZERO;  t_fail "wait_until: availableSeats = 0"  wait_until "seats replicated" 3 "u" pred_gt availableSeats 0
   FIX_SERVE=$FIX_ERR;         t_fail "wait_until: 404 body is not seats" wait_until "seats replicated" 3 "u" pred_gt availableSeats 0
   # a poll that becomes true part-way through (counted in a file: fetch runs in a subshell)
-  POLLFILE=$(mktemp); trap 'rm -f "$POLLFILE"' EXIT
+  POLLFILE=$(mktemp)
   fetch() { local n; n=$(( $(cat "$POLLFILE" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$POLLFILE"
             if [ "$n" -ge 3 ]; then printf '%s' "$FIX_REG_OK"; else printf '%s' "$FIX_REG_PENDING"; fi; }
   echo 0 >"$POLLFILE"; t_pass "wait_until: succeeds once the state arrives (poll 3)" wait_until "registration CONFIRMED" 5 "u" pred_field status CONFIRMED
@@ -288,6 +341,28 @@ if [ "$SELF_TEST" = "1" ]; then
   dead=$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:9/" 2>/dev/null)
   t_true  "curl to a dead port classifies as down ($dead)" is_down "$dead"
 
+  t_pass "preflight_probe passes on a live answer"     preflight_probe "stub" "http://127.0.0.1:$STUB_PORT/ok"
+  t_fail "preflight_probe FAILED on a dead port"       preflight_probe "stub" "http://127.0.0.1:9/"
+
+  printf '\nThe ck wrapper aborts the run\n'
+  ck_stops() {   # ck must exit before the next line; reaching it is the failure
+    local out; out=$( { ck expect_code "x" 500 200; echo REACHED; } 2>&1 )
+    case $out in *REACHED*) fail "ck did not stop the run"; return 1 ;; esac
+    grep -q 'FAILED:' <<<"$out" || { fail "ck stopped without a FAILED line"; return 1; }
+    ok "ck stopped the run after the failing check"
+  }
+  t_pass "ck lets a passing check through"             ck expect_code "x" 200 200
+  t_fail "ck exits non-zero on a failing check"        ck expect_code "x" 500 200
+  t_pass "ck stops before the next line runs"          ck_stops
+
+  printf '\nHow call() splits CODE and BODY\n'
+  call_check() { local want_code=$1 want_body=$2; shift 2; call "$@" >/dev/null; expect_call_result "call" "$want_code" "$want_body"; }
+  t_pass "empty body (204)"                            call_check 204 "" GET "http://127.0.0.1:$STUB_PORT/empty"
+  t_pass "json body (201)"                             call_check 201 '{"id":"x-1"}' POST "http://127.0.0.1:$STUB_PORT/json" '{"a":1}'
+  t_pass "service down gives 000 and no body"          call_check 000 "" GET "http://127.0.0.1:9/"
+  t_fail "wrong code is reported"                      call_check 200 "" GET "http://127.0.0.1:$STUB_PORT/empty"
+  t_fail "a down service is not a 204"                 call_check 204 "" GET "http://127.0.0.1:9/"
+
   printf '\nDates\n'
   t_true "day 45 is an ISO date ($(day 45))"           bash -c "[[ '$(day 45)' =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\$ ]]"
   t_true "day 3 sorts before day 10 before day 45"     bash -c "[[ '$(day 3)' < '$(day 10)' && '$(day 10)' < '$(day 45)' ]]"
@@ -299,7 +374,6 @@ fi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Live run.
-command -v python >/dev/null 2>&1 || { fail "python is required for JSON handling"; exit 1; }
 
 RUN=$(date +%H%M%S)      # keeps attendee ids unique across repeated runs against the same services
 
@@ -330,39 +404,30 @@ order_of() {   # order_of <registrationId> -> ORDER_ID from payment-service
   local body; body=$(fetch "$PAYMENT/registrations/$1/payment-order")
   ck expect_present "payment order of $1" "$body" id; ORDER_ID=$PRESENT
 }
-quote() {      # quote <label> <registrationId> <percent> <rule> <eligible>
-  run "GET $PAYMENT/refund-policy/quote?registrationId=$2"
-  local body; body=$(fetch "$PAYMENT/refund-policy/quote?registrationId=$2")
-  show_res 200 "$body"
-  ck expect_field "$1 quote" "$body" refundPercent "$3"
-  ck expect_field "$1 quote" "$body" rule "$4"
-  ck expect_field "$1 quote" "$body" eligible "$5"
+quote() {      # quote <label> <registrationId> <percent> <rule> <eligible> <refundAmount>
+  call GET "$PAYMENT/refund-policy/quote?registrationId=$2"
+  ck expect_code "$1 quote" "$CODE" 200
+  ck expect_field "$1 quote" "$BODY" refundPercent "$3"
+  ck expect_field "$1 quote" "$BODY" rule "$4"
+  ck expect_field "$1 quote" "$BODY" eligible "$5"
+  ck expect_num "$1 quote" "$BODY" refundAmount "$6"
 }
 settled_refunded() {   # settled_refunded <label> <registrationId>: registration, payment order, tickets
   ck wait_until "$1: registration REFUNDED (registration-service)" "$WAIT_SECONDS" \
       "$REGISTRATION/registrations/$2" pred_field status REFUNDED
   ck wait_until "$1: payment order REFUNDED (payment-service)" "$WAIT_SECONDS" \
       "$PAYMENT/registrations/$2/payment-order" pred_field status REFUNDED
-  if [ "$TICKETING_UP" = "1" ]; then
-    ck wait_until "$1: tickets VOID (ticketing-service)" "$WAIT_SECONDS" \
-        "$TICKETING/registrations/$2/tickets" pred_tickets VOID
-  else
-    warn "ticketing-service is down: ticket voiding for $1 not checked"
-  fi
+  ck wait_until "$1: tickets VOID (ticketing-service)" "$WAIT_SECONDS" \
+      "$TICKETING/registrations/$2/tickets" pred_tickets VOID
 }
 
 step "0. Preflight"
 for pair in "event-catalog-service:$CATALOG/events/none" \
             "registration-service:$REGISTRATION/sessions/none/availability" \
-            "payment-service:$PAYMENT/payment-orders/none"; do
-  name=${pair%%:*}; url=${pair#*:}
-  code=$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "$url" 2>/dev/null)
-  if is_down "$code"; then fail "$name is not answering ($url). Start it, then run this again."; exit 1; fi
-  ok "$name is up (HTTP $code)"
+            "payment-service:$PAYMENT/payment-orders/none" \
+            "ticketing-service:$TICKETING/registrations/none/tickets"; do
+  ck preflight_probe "${pair%%:*}" "${pair#*:}"
 done
-code=$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "$TICKETING/registrations/none/tickets" 2>/dev/null)
-if is_down "$code"; then TICKETING_UP=0; warn "ticketing-service is not answering: ticket voiding will not be checked"
-else TICKETING_UP=1; ok "ticketing-service is up (HTTP $code)"; fi
 pause "preflight done"
 
 step "1. Seed a programme 45, 10 and 3 days out  (FR-01 .. FR-03)"
@@ -394,10 +459,8 @@ step "2. The keynote sells out, and Sam joins its waitlist  (FR-10)"
 register_confirmed "Dana" "att-1042-$RUN" "Dana Okafor" dana@example.com "$FAR"; DANA=$REG_ID
 ck wait_until "Dana's payment order PAID (payment-service)" "$WAIT_SECONDS" \
     "$PAYMENT/registrations/$DANA/payment-order" pred_field status PAID
-if [ "$TICKETING_UP" = "1" ]; then
-  ck wait_until "Dana's tickets ISSUED (ticketing-service)" "$WAIT_SECONDS" \
-      "$TICKETING/registrations/$DANA/tickets" pred_tickets ISSUED
-fi
+ck wait_until "Dana's tickets ISSUED (ticketing-service)" "$WAIT_SECONDS" \
+    "$TICKETING/registrations/$DANA/tickets" pred_tickets ISSUED
 register "att-2000-$RUN" "Sam Reyes" sam@example.com "$FAR"
 ck expect_code "Sam is refused a seat" "$CODE" 409
 ck expect_field "Sam is refused a seat" "$BODY" code SESSION_FULL
@@ -410,7 +473,7 @@ ck wait_until "Sam is WAITING at position 1 (registration-service)" 1 \
 pause "201, position 1. waitlist-joined is on the broker, keyed by session."
 
 step "3. Dana asks what she would get back  (FR-11, the support agent's quote)"
-quote "Dana" "$DANA" 100 FULL_30_DAYS_OR_MORE true
+quote "Dana" "$DANA" 100 FULL_30_DAYS_OR_MORE true 120
 pause "This is the read the FR-18 agent makes before it acts."
 
 step "4. Dana asks for a refund, and Sam is promoted with no REST call  (FR-11, FR-10)"
@@ -429,7 +492,7 @@ pause "Registration consumed its own seats-released. Nobody called anybody."
 
 step "5. Ten days out the policy returns half  (FR-11)"
 register_confirmed "Ali" "att-3000-$RUN" "Ali Haddad" ali@example.com "$MID"; ALI=$REG_ID
-quote "Ali" "$ALI" 50 HALF_7_TO_29_DAYS true
+quote "Ali" "$ALI" 50 HALF_7_TO_29_DAYS true 30
 call POST "$REGISTRATION/registrations/$ALI/refund-requests" '{"reason":"Clash with another commitment"}'
 ck expect_code "refund request accepted" "$CODE" 202
 settled_refunded "Ali" "$ALI"
@@ -438,16 +501,14 @@ pause "50% of \$60.00 is \$30.00, and Ali is REFUNDED all the same."
 
 step "6. Three days out the policy says no  (FR-11)"
 register_confirmed "Lee" "att-4000-$RUN" "Lee Park" lee@example.com "$NEAR"; LEE=$REG_ID
-quote "Lee" "$LEE" 0 NONE_UNDER_7_DAYS false
+quote "Lee" "$LEE" 0 NONE_UNDER_7_DAYS false 0
 call POST "$REGISTRATION/registrations/$LEE/refund-requests" '{"reason":"Flight cancelled"}'
 ck expect_code "refund request accepted" "$CODE" 202
 ck wait_until "Lee's request settled: refundRequested false (refund-declined consumed)" "$WAIT_SECONDS" \
     "$REGISTRATION/registrations/$LEE" pred_field refundRequested false
 ck wait_until "Lee is still CONFIRMED" 1 "$REGISTRATION/registrations/$LEE" pred_field status CONFIRMED
 ck wait_until "Lee's payment order is still PAID" 1 "$PAYMENT/registrations/$LEE/payment-order" pred_field status PAID
-if [ "$TICKETING_UP" = "1" ]; then
-  ck wait_until "Lee's tickets are still ISSUED" 1 "$TICKETING/registrations/$LEE/tickets" pred_tickets ISSUED
-fi
+ck wait_until "Lee's tickets are still ISSUED" 1 "$TICKETING/registrations/$LEE/tickets" pred_tickets ISSUED
 pause "The agent would escalate here rather than promise money."
 
 step "7. An organiser overrides the policy  (FR-11, how an escalation is resolved)"
