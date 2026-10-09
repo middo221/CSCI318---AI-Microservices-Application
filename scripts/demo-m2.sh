@@ -57,6 +57,36 @@ expiry_verdict() {
   return 1
 }
 
+# hold_expired_verdict <order-json> <payment-failed-lines> <registration-id>: payment refused a
+# charge for an expired hold. The order is FAILED with no gateway attempt, and the reason
+# HOLD_EXPIRED travels on payment-failed, keyed by the registration. The order's REST body has no
+# reason field (only an attempt carries one, and this order has none), so the reason is read from
+# the topic. Prints the FAILED: line and returns 1 when any part is missing.
+hold_expired_verdict() {
+  ORDER="$1" LINES="$2" REG="$3" python -c '
+import json, os, sys
+try:
+    order = json.loads(os.environ["ORDER"])
+except Exception:
+    print("FAILED: the payment order is not JSON"); sys.exit(1)
+if not isinstance(order, dict) or order.get("status") != "FAILED":
+    print("FAILED: the order is %r, not FAILED" % (order.get("status") if isinstance(order, dict) else order)); sys.exit(1)
+if order.get("attempts"):
+    print("FAILED: the order has a gateway attempt, so the card was tried"); sys.exit(1)
+reg = os.environ["REG"]
+for line in os.environ["LINES"].splitlines():
+    key, sep, value = line.partition(" :: ")
+    if sep and key.strip() == reg:
+        try:
+            event = json.loads(value)
+        except Exception:
+            continue
+        if event.get("reason") == "HOLD_EXPIRED":
+            sys.exit(0)
+print("FAILED: no payment-failed message keyed by %s with reason HOLD_EXPIRED" % reg); sys.exit(1)
+'
+}
+
 PAUSE_MODE=0; EXIT_CODE=0
 case "${1:-}" in --pause|-p) PAUSE_MODE=1 ;; esac
 
@@ -69,7 +99,20 @@ if [ "${1:-}" = "--self-test" ]; then
   { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: CONFIRMED was accepted"; bad=1; }
   out=$(expiry_verdict "" 20); rc=$?
   { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: an empty status was accepted"; bad=1; }
-  [ $bad = 0 ] && echo "demo-m2 self-test: the expiry assertion passes EXPIRED and fails the other three" && exit 0
+  GOOD='{"status":"FAILED","attempts":[]}'
+  MSG='reg-3 :: {"registrationId":"reg-3","reason":"HOLD_EXPIRED"}'
+  hold_expired_verdict "$GOOD" "$MSG" reg-3 >/dev/null || { echo "FAILED: a refused expired hold was not recognised"; bad=1; }
+  out=$(hold_expired_verdict '{"status":"PAID","attempts":[{"outcome":"SUCCEEDED"}]}' "$MSG" reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: a PAID order passed"; bad=1; }
+  out=$(hold_expired_verdict '{"status":"FAILED","attempts":[{"outcome":"DECLINED"}]}' "$MSG" reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'gateway attempt'; } || { echo "FAILED: an order with an attempt passed"; bad=1; }
+  out=$(hold_expired_verdict "$GOOD" 'reg-3 :: {"reason":"CARD_DECLINED"}' reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'HOLD_EXPIRED'; } || { echo "FAILED: a CARD_DECLINED message passed"; bad=1; }
+  out=$(hold_expired_verdict "$GOOD" 'reg-9 :: {"reason":"HOLD_EXPIRED"}' reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: another registration's message passed"; bad=1; }
+  out=$(hold_expired_verdict '{"code":"PAYMENT_ORDER_NOT_FOUND"}' "$MSG" reg-3); rc=$?
+  { [ $rc = 1 ] && printf '%s' "$out" | grep -q 'FAILED:'; } || { echo "FAILED: a missing order passed"; bad=1; }
+  [ $bad = 0 ] && echo "demo-m2 self-test: the expiry and HOLD_EXPIRED assertions pass the right answers and fail the wrong ones" && exit 0
   exit 1
 fi
 
@@ -215,10 +258,14 @@ else
       note "it picked up the registration-requested it missed while it was down"
       run "GET $PAYMENT/registrations/$REG_3_ID/payment-order"
       paymentOrder "$REG_3_ID" | pretty
-      if paymentOrder "$REG_3_ID" | grep -q HOLD_EXPIRED; then
+      run "kafka-console-consumer.sh --topic payment-failed   (key :: value, this registration)"
+      FAILED_MSGS=$(MSYS_NO_PATHCONV=1 docker exec converge-kafka         /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092         --topic payment-failed --from-beginning --timeout-ms 10000         --property print.key=true --property key.separator=" :: " 2>/dev/null | grep -v deprecated)
+      printf '%s
+' "$FAILED_MSGS" | grep -F "$REG_3_ID :: "
+      if verdict=$(hold_expired_verdict "$(paymentOrder "$REG_3_ID")" "$FAILED_MSGS" "$REG_3_ID"); then
         ok "FAILED, reason HOLD_EXPIRED, and NO attempt — the gateway was never called"
       else
-        fail "FAILED: payment-service's order for $REG_3_ID does not carry HOLD_EXPIRED"; EXIT_CODE=1
+        fail "$verdict"; EXIT_CODE=1
       fi
       note "registration is still $(statusOf "$REG_3_ID"). Nobody paid for seats they no longer hold."
     else

@@ -537,10 +537,10 @@ note "service logs copied to $OUT/services (API keys redacted)"
   echo
   summary_table "$OUT/results.txt"
   echo
-  echo "Exit 0 means a script ran to its end. demo-m2 (its expiry checks), demo-m3 (every check),"
-  echo "demo-m3-analytics, demo-m4 (a non-200 answer, a clash) and demo-m4-support also exit 1 when a"
-  echo "check fails; demo-m1 and demo-ticketing only fail their preflight, so read each transcript for"
-  echo "what was actually observed."
+  echo "Exit 0 means a script ran to its end. demo-m2 (its expiry checks), demo-ticketing, demo-m3 (every"
+  echo "check), demo-m3-analytics, demo-m4 (a non-200 answer, a clash) and demo-m4-support also exit 1"
+  echo "when a check fails; demo-m1 only fails its preflight, so read its transcript for what was"
+  echo "actually observed."
   echo
   echo "## Topic end offsets"
   echo

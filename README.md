@@ -610,8 +610,8 @@ stops after each step so you can show the messages landing in Kafka UI.
 | :--- | :--- | :--- | :--- |
 | `scripts/demo-m1.sh` | FR-01–FR-05, and a capacity change on 8081 read back from the replica on 8082 | catalog, registration | `--pause` |
 | `scripts/demo-m2.sh` | FR-06, FR-07, FR-09: one paid and confirmed registration, one declined and compensated, one whose hold expires while payment is stopped | catalog, registration (`CONFERENCE_REGISTRATION_HOLD_WINDOW=PT20S`), payment | `--pause`; `SKIP_EXPIRY=1` leaves out the expiry steps |
-| `scripts/demo-ticketing.sh` | FR-08, FR-12, FR-13: two tickets for one registration, a transfer, a gate check-in, the invariants | catalog, registration, payment, ticketing | `--pause` |
-| `scripts/demo-m3.sh` | FR-10, FR-11: a full session's waitlist promoted by `seats-released` alone; refunds at 100%, 50% and 0%; an organiser override | catalog, registration, payment, ticketing | `--pause` |
+| `scripts/demo-ticketing.sh` | FR-08, FR-12, FR-13: two tickets for one registration, a transfer, a gate check-in, the invariants | catalog, registration, payment, ticketing | `--pause`, `--self-test` |
+| `scripts/demo-m3.sh` | FR-10, FR-11: a full session's waitlist promoted by `seats-released` alone; refunds at 100%, 50% and 0%; an organiser override | catalog, registration, payment, ticketing | `--pause`, `--self-test` |
 | `scripts/demo-m3-analytics.sh` | FR-14, FR-15, FR-16: a session filled past 90% (one alert), a gate flooded past the congestion threshold, every analytics endpoint and both alert topics | all but concierge | `--pause`, `--self-test` |
 | `scripts/demo-m4.sh` | FR-17: an agenda from a programme containing a deliberate clash | catalog, registration, concierge with key | `--pause` |
 | `scripts/demo-m4-support.sh` | FR-18: four support conversations — under the limit, over it, a prompt injection, an ineligible refund — each checked against the registration service | all but analytics, concierge with key | `--pause`, `--self-test`; `COOLDOWN=<s>` between conversations (default 65) |
