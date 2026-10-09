@@ -24,8 +24,10 @@ import java.util.Optional;
  * <p>Three rules, all about the gap between what a model says and what it did:
  * <ol>
  *   <li><strong>The outcome is the tools' record</strong> (plan refinement 3). The model's own
- *       claim is checked against it, and a reply claiming a refund or escalation that did not
- *       happen is withheld and replaced by one written from the record.</li>
+ *       claim is checked against it: a reply whose stated outcome the record does not bear out, or
+ *       that states none, is withheld and replaced by one written from the record, and so is any
+ *       reply after a guardrail refused something and nothing was done. The wording of a reply
+ *       whose outcome is borne out is not inspected.</li>
  *   <li><strong>What was done survives a model failure</strong> (plan refinement 4). If the model
  *       fails after a tool has acted, the attendee gets {@code 200} with the true outcome rather
  *       than an error inviting them to try again.</li>
@@ -105,6 +107,8 @@ public class SupportApplicationService {
             reply = factualReply(outcome, refunds, escalations, unknownEscalation);
         } else if (unknownEscalation != null) {
             // While money is uncertain the model's prose is not trusted: it cannot know the outcome.
+            notes.add("The assistant's reply was withheld: a refund's outcome is unknown, so the reply is written "
+                    + "from the record. The outcome above is what was actually done.");
             reply = factualReply(outcome, refunds, escalations, unknownEscalation);
         } else {
             Optional<SupportOutcome> claimed = SupportOutcome.parse(answer.outcome());
@@ -120,6 +124,14 @@ public class SupportApplicationService {
                         attendeeId, claimed.get(), outcome);
                 notes.add(("The assistant's reply was withheld: it described the case as %s, but the record "
                         + "shows %s. The outcome above is what was actually done.").formatted(claimed.get(), outcome));
+                reply = factualReply(outcome, refunds, escalations, unknownEscalation);
+            } else if (outcome == SupportOutcome.RESOLVED && !tools.refusals().isEmpty()) {
+                // "Nothing was done" is borne out, but the words around it are not checked. Once a guardrail
+                // has refused something - the mark of a model asked for what it may not do - they are not risked.
+                log.warn("support conversation for {}: reply after {} refusal(s) with nothing done; reply withheld",
+                        attendeeId, tools.refusals().size());
+                notes.add("The assistant's reply was withheld: part of the request was refused and nothing was "
+                        + "done, so the reply is written from the record. The outcome above is what was actually done.");
                 reply = factualReply(outcome, refunds, escalations, unknownEscalation);
             } else if (answer.reply() == null || answer.reply().isBlank()) {
                 reply = factualReply(outcome, refunds, escalations, unknownEscalation);
@@ -143,6 +155,13 @@ public class SupportApplicationService {
                     reply.append(("We could not confirm whether the refund for registration %s was received, so it "
                             + "has been passed to an organiser to check, reference %s. Please do not request it again.")
                             .formatted(unknownEscalation.registrationId(), unknownEscalation.escalationId()));
+                    // The model's prose is gone, so every other case an organiser now holds is named here.
+                    for (Escalation other : escalations) {
+                        if (!other.escalationId().equals(unknownEscalation.escalationId())) {
+                            reply.append(" Your other request has been passed to an organiser, reference %s."
+                                    .formatted(other.escalationId()));
+                        }
+                    }
                 } else {
                     reply.append("Your request has been passed to an organiser, reference %s. They will be in touch."
                             .formatted(escalations.getFirst().escalationId()));

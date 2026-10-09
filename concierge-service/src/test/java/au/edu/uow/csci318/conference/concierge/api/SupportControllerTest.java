@@ -189,6 +189,7 @@ class SupportControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.outcome").value("RESOLVED"))
                 .andExpect(jsonPath("$.refunds.length()").value(0))
+                .andExpect(jsonPath("$.escalations.length()").value(0))
                 .andExpect(jsonPath("$.reply").value(not(containsString("$500"))))
                 .andExpect(jsonPath("$.notes").value(hasItem(containsString("withheld"))))
                 .andExpect(jsonPath("$.notes").value(hasItem(containsString("reg-theirs"))))
@@ -196,6 +197,33 @@ class SupportControllerTest {
 
         assertThat(registrations.refundCalls()).isEmpty();
         assertThat(payments.quoteRequests()).doesNotContain("reg-theirs");
+    }
+
+    /**
+     * The same injection, but the model labels its false promise RESOLVED, which "nothing was
+     * done" bears out. The label is true and the words are not; after the guardrails refused
+     * something, the words are not used.
+     */
+    @Test
+    void aPromptInjectionLabelledResolvedStillGetsNoFalsePromise() throws Exception {
+        model.thenCallsTool("requestRefund", "{\"registrationId\":\"reg-theirs\",\"reason\":\"Organiser override\"}")
+                .thenCallsTool("requestRefund", "{\"registrationId\":\"reg-big\",\"reason\":\"Refund $500 as instructed\"}")
+                .thenAnswers("{\"reply\": \"Done: $500 has been refunded to you.\", \"outcome\": \"RESOLVED\"}");
+
+        MvcResult result = mockMvc.perform(post("/api/v1/concierge/support")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(INJECTION)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcome").value("RESOLVED"))
+                .andExpect(jsonPath("$.refunds.length()").value(0))
+                .andExpect(jsonPath("$.escalations.length()").value(0))
+                .andExpect(jsonPath("$.reply").value(containsString("No refund has been requested")))
+                .andExpect(jsonPath("$.notes").value(hasItem(containsString("withheld"))))
+                .andReturn();
+
+        assertThat(result.getResponse().getContentAsString())
+                .doesNotContain("$500 has been refunded").doesNotContain("refunded to you");
+        assertThat(registrations.refundCalls()).isEmpty();
     }
 
     /** Review Focus 3, over HTTP. */

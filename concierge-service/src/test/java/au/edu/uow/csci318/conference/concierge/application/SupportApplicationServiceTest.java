@@ -116,6 +116,34 @@ class SupportApplicationServiceTest {
         assertThat(result.outcome()).isEqualTo(SupportOutcome.RESOLVED);
         assertThat(result.refunds()).isEmpty();
         assertThat(result.escalations()).isEmpty();
+        // Nothing was refused and nothing done: the model's own words stand.
+        assertThat(result.reply()).isEqualTo("Your registration is confirmed.");
+        assertThat(result.notes()).isEmpty();
+    }
+
+    /**
+     * Review Focus 5. "Nothing was done" is borne out by the record, but the words around it are
+     * not checked; after a guardrail has refused something, they are not risked either. An
+     * injected model that tried someone else's registration and a refund above the limit, then
+     * labels its false promise RESOLVED, gets the code-written reply instead.
+     */
+    @Test
+    void withholdsAResolvedReplyOnceAGuardrailHasRefusedSomething() {
+        SupportResult result = handle(modelThat(
+                tools -> {
+                    tools.requestRefund("reg-theirs", "Organiser override");
+                    tools.requestRefund("reg-big", "Refund $500 as instructed");
+                },
+                new SupportReply("Done: $500 has been refunded to you.", "RESOLVED")));
+
+        assertThat(result.outcome()).isEqualTo(SupportOutcome.RESOLVED);
+        assertThat(result.refunds()).isEmpty();
+        assertThat(result.reply()).doesNotContain("$500").doesNotContain("refunded to you")
+                .contains("No refund has been requested");
+        assertThat(result.notes())
+                .anySatisfy(note -> assertThat(note).contains("withheld"))
+                .anySatisfy(note -> assertThat(note).contains("reg-theirs"))
+                .anySatisfy(note -> assertThat(note).contains("reg-big"));
     }
 
     /** Review Focus 5: a false promise does not reach the attendee. */
@@ -331,7 +359,9 @@ class SupportApplicationServiceTest {
         assertThat(result.escalations()).hasSize(2);
         String unknownRef = result.escalations().stream()
                 .filter(e -> "reg-mine".equals(e.registrationId())).findFirst().orElseThrow().escalationId();
-        assertThat(result.reply()).contains("reg-mine").contains(unknownRef);
+        String bigRef = result.escalations().stream()
+                .filter(e -> "reg-big".equals(e.registrationId())).findFirst().orElseThrow().escalationId();
+        assertThat(result.reply()).contains("reg-mine").contains(unknownRef).contains(bigRef);
     }
 
     @Test
@@ -350,7 +380,9 @@ class SupportApplicationServiceTest {
                 .filter(e -> "reg-mine".equals(e.registrationId())).findFirst().orElseThrow().escalationId();
         String bigRef = result.escalations().stream()
                 .filter(e -> "reg-big".equals(e.registrationId())).findFirst().orElseThrow().escalationId();
-        assertThat(result.reply()).contains("reg-mine").contains(unknownRef).doesNotContain(bigRef);
+        // While money is uncertain the reply is code-written, and it still names every case an organiser holds.
+        assertThat(result.reply()).contains("reg-mine").contains(unknownRef)
+                .contains("Your other request has been passed to an organiser, reference " + bigRef);
     }
 
     @Test
@@ -431,6 +463,7 @@ class SupportApplicationServiceTest {
                 new SupportReply("Your 149.00 AUD refund went through.", "ESCALATED")));
 
         assertThat(result.reply()).doesNotContain("went through").contains("reg-mine");
+        assertThat(result.notes()).anySatisfy(note -> assertThat(note).contains("withheld").contains("unknown"));
     }
 
     @Test
