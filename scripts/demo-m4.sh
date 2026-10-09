@@ -56,11 +56,14 @@ step "0. Preflight"
 
 for pair in "catalog:$CATALOG/events" "registration:$REGISTRATION/sessions/none/availability" "concierge:$CONCIERGE"; do
   name="${pair%%:*}"; url="${pair#*:}"
-  code=$(curl -s -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || echo 000)
-  if [ "$code" = "000" ]; then
-    fail "$name is not answering. Start it before running this script."
-    exit 1
-  fi
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)
+  # curl prints 000 itself when nothing answers. Do not append "|| echo 000": that makes 000000,
+  # which equals nothing, and the check passes a service that is down.
+  case "$code" in
+    000*|"")
+      fail "$name is not answering. Start it before running this script."
+      exit 1 ;;
+  esac
   ok "$name is up (HTTP $code)"
 done
 
