@@ -22,8 +22,8 @@ against Gemini and the live services, and its output pasted below.
 
 ## Method
 
-1. `env -u GEMINI_API_KEY ./mvnw -o clean test` from the repository root, Docker stopped
-   (`docker ps` failed: the Docker Desktop engine was not running).
+1. `env -u GEMINI_API_KEY ./mvnw clean test` from the repository root at commit 076f570, Docker
+   stopped (`docker ps` failed: the Docker Desktop engine was not running).
 2. Domain purity checked by grep.
 3. Test counts read from the surefire XML reports.
 4. `scripts/demo-m4-support.sh --self-test`, then the same with one check deliberately broken.
@@ -33,7 +33,7 @@ against Gemini and the live services, and its output pasted below.
 | Check | Result |
 | :--- | :--- |
 | Full reactor green, offline, no API key | `BUILD SUCCESS`, all 8 reactor projects `SUCCESS` |
-| Tests per module | common-events 63, event-catalog-service 117, registration-service 132, payment-service 51, ticketing-service 97, analytics-service 1, concierge-service 227 (688 in all) |
+| Tests per module (measured: the `tests=` attributes of each module's surefire XML, summed after the run) | common-events 63, event-catalog-service 117, registration-service 132, payment-service 51, ticketing-service 97, analytics-service 1, concierge-service 227; 688 in all, 0 failures, 0 errors, 0 skipped |
 | Domain imports no framework | `grep -rlE "springframework\|langchain4j" .../concierge/domain/` printed nothing (grep exit 1) |
 | No tool takes an attendee id | `SupportAgentLoopTest.givesTheModelNoParameterInWhichToNameAnAttendee` |
 | Someone else's registration is refused by every tool | `SupportToolsTest.refusesEveryToolOnSomeoneElsesRegistration` |
@@ -60,14 +60,14 @@ against Gemini and the live services, and its output pasted below.
 ```
 [INFO] Reactor Summary for Converge Conference and Event Registration Platform 0.1.0-SNAPSHOT:
 [INFO]
-[INFO] Converge Conference and Event Registration Platform  SUCCESS [  0.249 s]
-[INFO] Converge Published Language ........................ SUCCESS [  1.880 s]
-[INFO] Converge Event Catalog Service ..................... SUCCESS [  8.877 s]
-[INFO] Converge Registration Service ...................... SUCCESS [ 16.029 s]
-[INFO] Converge Payment Service ........................... SUCCESS [  8.722 s]
-[INFO] Converge Ticketing Service ......................... SUCCESS [  8.730 s]
-[INFO] Converge Analytics Service ......................... SUCCESS [  2.299 s]
-[INFO] Converge Concierge Service ......................... SUCCESS [  5.471 s]
+[INFO] Converge Conference and Event Registration Platform  SUCCESS [  0.242 s]
+[INFO] Converge Published Language ........................ SUCCESS [  2.033 s]
+[INFO] Converge Event Catalog Service ..................... SUCCESS [  9.190 s]
+[INFO] Converge Registration Service ...................... SUCCESS [ 16.976 s]
+[INFO] Converge Payment Service ........................... SUCCESS [  8.780 s]
+[INFO] Converge Ticketing Service ......................... SUCCESS [  8.982 s]
+[INFO] Converge Analytics Service ......................... SUCCESS [  2.251 s]
+[INFO] Converge Concierge Service ......................... SUCCESS [  5.495 s]
 [INFO] BUILD SUCCESS
 ```
 
