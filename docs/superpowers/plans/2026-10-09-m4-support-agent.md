@@ -6283,8 +6283,11 @@ Needs `GEMINI_API_KEY`, Docker, and the FR-11 endpoints merged.
 
 Spec text this plan makes stale but was not authorised to change:
 
-1. `specs/4-api-endpoints.md` §6 still marks FR-17 `(M4)` though it is delivered, and its error
-   line lacks `429 LLM_RATE_LIMITED`, which Agent 1 has returned since its first live run.
+1. **Done on this branch, by controller ruling (Task 10).** `specs/4-api-endpoints.md` §6 marked
+   FR-17 `(M4)` though it is delivered, and its error line lacked `429 LLM_RATE_LIMITED`, which
+   Agent 1 has returned since its first live run. The marker is gone and the error line now reads
+   `400` (`VALIDATION_FAILED`, `INVALID_REQUEST`), `429` (`LLM_RATE_LIMITED`), `502`
+   (`LLM_UNAVAILABLE`, `LLM_LOOP_LIMIT`), `504` (`LLM_TIMEOUT`).
 2. `specs/6-agentic-ai.md` §3's tool table (`lookupRegistration(attendeeId, …)`, `lookupTicket`)
    and its `SupportResponse { outcome, message }` describe the design refinements 1, 3 and 6
    replaced. The report should quote the plan, not that table.
@@ -6293,11 +6296,11 @@ Spec text this plan makes stale but was not authorised to change:
 
 Found while planning, outside this branch's scope:
 
-4. **`scripts/demo-m4.sh`'s preflight cannot fail.** `code=$(curl … -w '%{http_code}' … || echo 000)`
-   produces `000000` when a service is down — curl prints `000` itself, then the `echo` appends
-   another — which never equals `000`, so it prints "catalog is up (HTTP 000000)". The same class
-   as the verification note's defect 3. The new script avoids it (Task 9 comment); a one-line fix
-   to `demo-m4.sh` is yours to schedule.
+4. **Done on this branch, by controller ruling (Task 9).** `scripts/demo-m4.sh`'s preflight could
+   not fail: `code=$(curl … -w '%{http_code}' … || echo 000)` produced `000000` when a service was
+   down — curl prints `000` itself, then the `echo` appended another — which never equalled `000`,
+   so it printed "catalog is up (HTTP 000000)". The same class as the verification note's defect 3.
+   The `|| echo 000` is gone and `000*` or an empty code is now treated as down, as in the new script.
 5. `README.md`'s scripts row lists neither `demo-m4.sh` nor `demo-m4-support.sh`.
 
 Things to settle with the FR-11 track before the live run:

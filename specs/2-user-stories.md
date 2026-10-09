@@ -296,8 +296,10 @@ crosses a service boundary is delivered when it has been observed crossing it.
 - **Refinement — the limit bounds a conversation.** `refund-auto-approve-threshold` caps the total
   one conversation may request automatically, so it cannot be beaten by asking twice.
 - **Refinement — the outcome is what the tools did.** `outcome` is derived from accepted refund
-  requests and recorded escalations, never from the model's text; a reply claiming an action the
-  tools did not take is withheld and replaced.
+  requests and recorded escalations, never from the model's text. A reply whose stated outcome the
+  tools' record does not bear out is withheld, and whenever a guardrail refused something and
+  nothing was done the reply is code-written; the wording of a reply whose outcome is borne out is
+  not inspected.
 - **As an** Attendee, **I want to** describe my problem in plain English and have it resolved
   or escalated, **so that** I do not wait on a volunteer reading a policy document.
 - **Sample input:** *"I've been hospitalised and can't attend next week. Can I get my money
