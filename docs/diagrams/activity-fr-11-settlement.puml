@@ -1,0 +1,72 @@
+@startuml activity-fr-11-settlement
+' Report §2.1 — FR-11 Request a refund, part 3 of 4: how registration and ticketing apply refund-issued
+' and refund-declined (continues activity-fr-11-decision.puml).
+' Source: PaymentEventConsumers (registration and ticketing), RegistrationApplicationService.
+' applyRefundIssued/applyRefundDeclined, Registration.refund, SessionView.release, ConflictRetry,
+' TicketApplicationService.voidTicketsFor.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-11 — Settling a refund: registration and ticketing react to the decision
+
+|registration-service|
+start
+:refund-issued or refund-declined<
+:PaymentEventConsumers.refundIssued
+or .refundDeclined;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+if (refund-issued?) then (yes)
+  :applyRefundIssued (ConflictRetry);
+  if (registration CONFIRMED?) then (no)
+    :no change: a reversed late payment
+    (EXPIRED or CANCELLED), or already REFUNDED;
+    stop
+  else (yes)
+  endif
+  :Registration.refund(): every CONFIRMED SeatHold
+  → RELEASED, record SeatsReleased per hold,
+  status → REFUNDED, request cleared;
+  :save, and SessionView.release(quantity)
+  per session → regdb.session_views;
+  :after commit, StreamBridge sends;
+  |Kafka|
+  $EVT:seats-released ×N
+  key: sessionId>
+  note right: promotes that session's waitlist (FR-10)
+  stop
+else (no: refund-declined)
+  |registration-service|
+  :applyRefundDeclined;
+  if (a request is open?) then (yes)
+    :clear it — the registration stays
+    CONFIRMED and may ask again;
+  else (no)
+    :nothing to settle;
+  endif
+  stop
+endif
+
+|ticketing-service|
+start
+:refund-issued<
+:PaymentEventConsumers.refundIssued;
+if (eventId already in processed_events?) then (yes)
+  :ignore the redelivery;
+  stop
+else (no)
+endif
+:TicketApplicationService.voidTicketsFor
+(registrationId, "REFUNDED");
+:each ticket not already VOID or USED
+→ VOID, record TicketVoided;
+:after commit, StreamBridge sends;
+
+|Kafka|
+$EVT:ticket-voided ×N
+key: ticketCode>
+stop
+@enduml

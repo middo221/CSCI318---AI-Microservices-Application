@@ -1,0 +1,56 @@
+@startuml activity-fr-11-override
+' Report §2.1 — FR-11 Request a refund, part 4 of 4: the quote and the organiser's override.
+' Source: RefundController, RefundApplicationService.quote/issueByOrganiser, both GlobalExceptionHandlers.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-11 — The refund quote and the organiser's override
+
+|Organiser|
+start
+:GET /api/v1/refund-policy/quote?registrationId=
+(the support agent's read, FR-18), or
+POST /api/v1/payment-orders/{id}/refunds
+{refundPercent 0–100, reason} (the override);
+
+|payment-service|
+if (registrationId missing, or refundPercent
+outside 0–100, or reason blank / over 500?) then (yes)
+  $ERR:400 VALIDATION_FAILED;
+  stop
+else (no)
+endif
+if (payment order found?) then (no)
+  $ERR:404 PAYMENT_ORDER_NOT_FOUND;
+  stop
+else (yes)
+endif
+if (order REFUNDED?) then (yes)
+  $ERR:409 ALREADY_REFUNDED;
+  stop
+elseif (order not PAID?) then (yes)
+  $ERR:409 NOT_PAID;
+  stop
+else (PAID)
+endif
+if (quote?) then (yes)
+  $OK:200 OK RefundQuoteResponse
+  {paidAmount, daysUntilEvent (null if unknown),
+  refundPercent, refundAmount, rule, eligible};
+  stop
+else (override)
+  :refundPercent 0 → Refund DECLINED
+  (ORGANISER_DECLINED), otherwise
+  markRefunded + Refund ISSUED
+  (ORGANISER_OVERRIDE), decidedBy ORGANISER;
+  if (a concurrent decision won (@Version)?) then (yes)
+    $ERR:409 ALREADY_REFUNDED;
+    stop
+  else (no)
+  endif
+  $OK:201 Created RefundResponse
+  — and refund-issued or refund-declined
+  as above;
+  stop
+endif
+@enduml

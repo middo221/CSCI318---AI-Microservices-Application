@@ -1,0 +1,63 @@
+@startuml activity-fr-18-tools
+' Report §2.1 — FR-18, the six tools the support agent may call (detail of activity-fr-18.puml).
+' Source: SupportTools (six @Tool methods and the ownership guard), RefundGuard,
+' RestRegistrationClient, RestPaymentClient, RestTicketingClient, UpstreamResults,
+' InMemoryEscalationStore.
+!include include/style.iuml
+!include include/activity.iuml
+
+title FR-18 — The support agent's tools (one tool call)
+
+|concierge-service|
+start
+:the model requests one tool call
+(SupportTools bound to the attendee from the request);
+switch (tool requested)
+case (listMyRegistrations)
+  :registration-service:
+  GET /api/v1/attendees/{attendeeId}/registrations
+  (the request's attendee, never the model's);
+case (lookupRegistration\nlookupTickets\nevaluateRefundPolicy)
+  :ownership guard — registration-service:
+  GET /api/v1/registrations/{id};
+  if (held by this attendee?) then (no, or not found)
+    :the same "not held by you" answer
+    for a foreign id and a missing one;
+  elseif (registration unreachable?) then (yes)
+    :"service unavailable — offer escalation"
+    (fails closed);
+  else (yes)
+    :the registration's details, or
+    ticketing-service: GET
+    /api/v1/registrations/{id}/tickets, or
+    payment-service: GET
+    /api/v1/refund-policy/quote, and
+    whether requestRefund could approve it;
+  endif
+case (requestRefund)
+  :guarded by RefundGuard and the
+  200.00 AUD limit — see
+  activity-fr-18-refund.puml;
+case (escalateToOrganiser)
+  if (already escalated in this conversation?) then (yes)
+    :return the existing reference;
+  else (no)
+    :attach the registration only
+    if verified
+    as the attendee's —
+    InMemoryEscalationStore.open
+    with the model's summary <b>and</b> the
+    attendee's own words;
+  endif
+endswitch
+
+:the result is returned to the model;
+stop
+
+note right
+  <b>Every guarantee is code, not prompt.</b>
+  The attendee is bound from the HTTP request;
+  the refund limit is checked inside requestRefund
+  on a quote the tool fetched itself.
+end note
+@enduml

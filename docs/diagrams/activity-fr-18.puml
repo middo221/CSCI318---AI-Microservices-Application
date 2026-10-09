@@ -42,64 +42,10 @@ repeat
   or give the final answer;
   |concierge-service|
   if (tool calls requested?) then (yes)
-    repeat
-      switch (tool requested)
-      case (listMyRegistrations)
-        :registration-service:
-        GET /api/v1/attendees/{attendeeId}/registrations
-        (the request's attendee, never the model's);
-      case (lookupRegistration\nlookupTickets\nevaluateRefundPolicy)
-        :ownership guard — registration-service:
-        GET /api/v1/registrations/{id};
-        if (held by this attendee?) then (no, or not found)
-          :the same "not held by you" answer
-          for a foreign id and a missing one;
-        elseif (registration unreachable?) then (yes)
-          :"service unavailable — offer escalation"
-          (fails closed);
-        else (yes)
-          :the registration's details, or ticketing-service:
-          GET /api/v1/registrations/{id}/tickets, or payment-service:
-          GET /api/v1/refund-policy/quote?registrationId=
-          and whether requestRefund could approve it;
-        endif
-      case (requestRefund)
-        :ownership guard as above;
-        if (already requested in this conversation,
-        or an earlier refund's outcome unknown?) then (yes)
-          :refused;
-        else (no)
-          :fetch a fresh quote — payment-service:
-          GET /api/v1/refund-policy/quote;
-          :RefundGuard.evaluate(quote, already requested);
-          if (ineligible, zero, more than paid, another
-          currency, or the conversation's total above
-          refund-auto-approve-threshold (200.00 AUD)?) then (yes)
-            :refused: "call escalateToOrganiser";
-          else (no)
-            :registration-service:
-            POST /api/v1/registrations/{id}/refund-requests
-            {reason, requestedBy AGENT} (FR-11);
-            if (answer?) then (202)
-              :record RequestedRefund;
-            elseif (4xx) then (yes)
-              :explain the refusal (e.g. 409 not confirmed);
-            else (no answer)
-              :outcome UNKNOWN — do not retry;
-            endif
-          endif
-        endif
-      case (escalateToOrganiser)
-        if (already escalated in this conversation?) then (yes)
-          :return the existing reference;
-        else (no)
-          :attach the registration only if verified
-          as the attendee's — InMemoryEscalationStore.open
-          with the model's summary <b>and</b> the
-          attendee's own words;
-        endif
-      endswitch
-    repeat while (more tool calls this turn?) is (yes) not (no)
+    :execute the requested tools (SupportTools):
+    listMyRegistrations, lookupRegistration, lookupTickets,
+    evaluateRefundPolicy, requestRefund, escalateToOrganiser
+    — each one drawn in activity-fr-18-tools.puml;
     :return the tool results to the model;
   else (no)
   endif
