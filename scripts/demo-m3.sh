@@ -492,6 +492,8 @@ pause "Registration consumed its own seats-released. Nobody called anybody."
 
 step "5. Ten days out the policy returns half  (FR-11)"
 register_confirmed "Ali" "att-3000-$RUN" "Ali Haddad" ali@example.com "$MID"; ALI=$REG_ID
+ck wait_until "Ali's tickets ISSUED (ticketing-service)" "$WAIT_SECONDS" \
+    "$TICKETING/registrations/$ALI/tickets" pred_tickets ISSUED
 quote "Ali" "$ALI" 50 HALF_7_TO_29_DAYS true 30
 call POST "$REGISTRATION/registrations/$ALI/refund-requests" '{"reason":"Clash with another commitment"}'
 ck expect_code "refund request accepted" "$CODE" 202

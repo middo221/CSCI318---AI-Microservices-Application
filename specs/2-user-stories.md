@@ -174,7 +174,8 @@ crosses a service boundary is delivered when it has been observed crossing it.
 - **Refinement — never charge for seats that are no longer held.** `registration-requested` carries
   `holdExpiresAt`. Past it, payment records the order `FAILED` with reason `HOLD_EXPIRED` and never
   calls the gateway, so a payment-service that was down longer than the hold window cannot take
-  money for seats registration has already released. A charge that lands in the few seconds between the deadline and the sweeper's next run is now
+  money for seats registration has already released. A charge that lands in the few seconds
+  between the deadline and the sweeper's next run is now
   **reversed**: registration answers a `payment-succeeded` for an `EXPIRED` or `CANCELLED`
   registration with a `refund-requested` of kind `LATE_PAYMENT_REVERSAL`, and payment returns it in
   full without consulting the policy (FR-11). Tested offline; live run pending (M5).
