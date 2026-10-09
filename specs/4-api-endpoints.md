@@ -59,7 +59,7 @@ to the waitlist, which is FR-10 and arrives in M3.
 | **FR-11** | `GET` | `/refund-policy/quote` | *None* | `200 OK` (`RefundQuoteResponse`) | Query `registrationId`; used by the support agent |
 | **FR-11** | `POST` | `/payment-orders/{id}/refunds` | `IssueRefundRequest` | `201 Created` (`RefundResponse`) | emits `refund-issued` |
 
-**Error responses:** `400` (`VALIDATION_FAILED`), `404` (`PAYMENT_ORDER_NOT_FOUND`), `409`
+**Error responses:** `400` (`VALIDATION_FAILED`, `INVALID_REQUEST`), `404` (`PAYMENT_ORDER_NOT_FOUND`), `409`
 (`NOT_PAID`, `ALREADY_REFUNDED`).
 
 ---

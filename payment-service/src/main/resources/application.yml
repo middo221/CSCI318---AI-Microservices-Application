@@ -9,6 +9,10 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
+  jackson:
+    deserialization:
+      # 50.5 must be refused, not silently truncated to 50, in an integer field.
+      accept-float-as-int: false
   jpa:
     hibernate:
       ddl-auto: create-drop

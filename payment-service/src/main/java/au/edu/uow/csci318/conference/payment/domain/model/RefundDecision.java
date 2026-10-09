@@ -9,8 +9,9 @@ package au.edu.uow.csci318.conference.payment.domain.model;
  *
  * @param rule           which line of the policy applied
  * @param refundAmount   what would go back, to the cent; zero when the rule returns nothing
- * @param daysUntilEvent whole days from now until the first session, negative once it has begun;
- *                       {@code null} when the date is unknown
+ * @param daysUntilEvent whole days from now until the first session, truncated toward zero, so a
+ *                       session that began less than 24 hours ago shows {@code 0} and one that
+ *                       began earlier shows a negative number; {@code null} when the date is unknown
  */
 public record RefundDecision(RefundRule rule, Money refundAmount, Integer daysUntilEvent) {
 

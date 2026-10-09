@@ -6,6 +6,7 @@ import au.edu.uow.csci318.conference.payment.domain.PaymentOrderNotFoundExceptio
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -67,6 +68,13 @@ public class GlobalExceptionHandler {
                 .map(error -> error.getField() + " " + error.getDefaultMessage())
                 .collect(Collectors.joining("; "));
         return ResponseEntity.badRequest().body(new ApiError("VALIDATION_FAILED", detail));
+    }
+
+    /** A missing, malformed or wrongly typed body; the generic message never echoes the raw input. */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        return ResponseEntity.badRequest()
+                .body(new ApiError("VALIDATION_FAILED", "the request body is missing or malformed"));
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)

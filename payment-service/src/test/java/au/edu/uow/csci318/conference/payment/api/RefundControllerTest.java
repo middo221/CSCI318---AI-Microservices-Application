@@ -238,6 +238,28 @@ class RefundControllerTest {
     }
 
     @Test
+    void refusesAMalformedOverrideBodyWithTheCommonErrorShape() throws Exception {
+        PaymentOrder order = givenAnOrder("TOK_OK", inDays(45));
+
+        override(order.getId(), "{ not json")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.message").value("the request body is missing or malformed"));
+    }
+
+    /** {@code 50.5} must not be silently truncated to 50 - an organiser's decision is exact. */
+    @Test
+    void refusesAFractionalRefundPercent() throws Exception {
+        PaymentOrder order = givenAnOrder("TOK_OK", inDays(45));
+
+        override(order.getId(), """
+                { "refundPercent": 50.5, "reason": "x" }
+                """)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
     void validatesTheOverride() throws Exception {
         PaymentOrder order = givenAnOrder("TOK_OK", inDays(45));
 

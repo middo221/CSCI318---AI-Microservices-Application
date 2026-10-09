@@ -15,9 +15,11 @@ import java.time.temporal.ChronoUnit;
  * from an injected {@link Clock} rather than the wall clock, so every boundary is unit-testable at
  * an exact instant — which is what the specification means by "a pure function".
  *
- * <p><strong>Days are whole 24-hour days, rounded down</strong>, from now until the registration's
- * first session. Twenty-nine days and twenty-three hours is twenty-nine days, and so half. Rounding
- * down never promises more than the policy allows.
+ * <p><strong>Days are whole 24-hour days, truncated toward zero</strong>, from now until the
+ * registration's first session. Twenty-nine days and twenty-three hours is twenty-nine days, and so
+ * half; a session that began less than 24 hours ago is {@code 0} days away, not negative. Before the
+ * session the truncation never promises more than the policy allows, and the rule outcomes depend
+ * only on the thresholds, not on the sign.
  *
  * <p>{@code eventCancelled} is honoured and tested, but nothing in the system produces an
  * {@code event-cancelled} yet, so every current caller passes {@code false}.
