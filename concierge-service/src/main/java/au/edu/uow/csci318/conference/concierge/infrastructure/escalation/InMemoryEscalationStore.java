@@ -30,9 +30,9 @@ public class InMemoryEscalationStore implements EscalationStore {
 
     @Override
     public Escalation open(String attendeeId, String registrationId, String reason, String summary,
-                           String attendeeMessage) {
+                           String attendeeMessage, Escalation.RaisedBy raisedBy) {
         Escalation escalation = new Escalation(UUID.randomUUID().toString(), attendeeId, registrationId,
-                reason, summary, attendeeMessage, clock.instant());
+                reason, summary, attendeeMessage, raisedBy, clock.instant());
         escalations.addFirst(escalation);
         return escalation;
     }

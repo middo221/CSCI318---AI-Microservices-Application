@@ -14,7 +14,7 @@ public interface EscalationStore {
 
     /** Record a new escalation and return it with its id and creation time. */
     Escalation open(String attendeeId, String registrationId, String reason, String summary,
-                    String attendeeMessage);
+                    String attendeeMessage, Escalation.RaisedBy raisedBy);
 
     /** Every escalation held, newest first. */
     List<Escalation> all();

@@ -16,19 +16,20 @@ class InMemoryEscalationStoreTest {
     @Test
     void assignsAnIdAndTheClocksTime() {
         Escalation escalation = store.open("att-1042", "reg-1", "Above the limit", "Wants 447.00 back",
-                "Please refund me.");
+                "Please refund me.", Escalation.RaisedBy.ASSISTANT);
 
         assertThat(escalation.escalationId()).isNotBlank();
         assertThat(escalation.createdAt()).isEqualTo(Instant.parse("2026-10-09T02:00:00Z"));
         assertThat(escalation.attendeeId()).isEqualTo("att-1042");
         assertThat(escalation.registrationId()).isEqualTo("reg-1");
         assertThat(escalation.attendeeMessage()).isEqualTo("Please refund me.");
+        assertThat(escalation.raisedBy()).isEqualTo(Escalation.RaisedBy.ASSISTANT);
     }
 
     @Test
     void listsNewestFirst() {
-        Escalation first = store.open("att-1042", null, "first", "", "one");
-        Escalation second = store.open("att-2000", null, "second", "", "two");
+        Escalation first = store.open("att-1042", null, "first", "", "one", Escalation.RaisedBy.ASSISTANT);
+        Escalation second = store.open("att-2000", null, "second", "", "two", Escalation.RaisedBy.SYSTEM);
 
         assertThat(store.all()).containsExactly(second, first);
     }
@@ -36,7 +37,7 @@ class InMemoryEscalationStoreTest {
     @Test
     void handsOutASnapshotRatherThanItsOwnList() {
         List<Escalation> before = store.all();
-        store.open("att-1042", null, "later", "", "three");
+        store.open("att-1042", null, "later", "", "three", Escalation.RaisedBy.ASSISTANT);
 
         assertThat(before).isEmpty();
         assertThat(store.all()).hasSize(1);

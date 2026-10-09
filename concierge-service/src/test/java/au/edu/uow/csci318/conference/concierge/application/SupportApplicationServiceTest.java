@@ -5,6 +5,7 @@ import au.edu.uow.csci318.conference.concierge.application.agent.SupportReply;
 import au.edu.uow.csci318.conference.concierge.application.agent.SupportTools;
 import au.edu.uow.csci318.conference.concierge.application.agent.SupportToolsFactory;
 import au.edu.uow.csci318.conference.concierge.application.command.HandleSupportRequestCommand;
+import au.edu.uow.csci318.conference.concierge.domain.model.Escalation;
 import au.edu.uow.csci318.conference.concierge.domain.model.SupportOutcome;
 import au.edu.uow.csci318.conference.concierge.domain.service.RefundGuard;
 import au.edu.uow.csci318.conference.concierge.infrastructure.escalation.InMemoryEscalationStore;
@@ -304,6 +305,7 @@ class SupportApplicationServiceTest {
         assertThat(result.outcome()).isEqualTo(SupportOutcome.ESCALATED);
         assertThat(result.refunds()).isEmpty();
         assertThat(result.escalations()).singleElement().satisfies(escalation -> {
+            assertThat(escalation.raisedBy()).isEqualTo(Escalation.RaisedBy.SYSTEM);
             assertThat(escalation.registrationId()).isEqualTo("reg-mine");
             assertThat(escalation.summary()).contains("reg-mine").contains("not known");
         });
@@ -325,7 +327,8 @@ class SupportApplicationServiceTest {
                 new SupportReply("An organiser will check.", "ESCALATED")));
 
         assertThat(result.outcome()).isEqualTo(SupportOutcome.ESCALATED);
-        assertThat(result.escalations()).hasSize(2);
+        assertThat(result.escalations()).extracting(Escalation::raisedBy)
+                .containsExactlyInAnyOrder(Escalation.RaisedBy.ASSISTANT, Escalation.RaisedBy.SYSTEM);
         assertThat(store.all()).hasSize(2);
         assertThat(result.reply()).doesNotContain("An organiser will check.").contains("reg-mine");
     }
@@ -445,7 +448,7 @@ class SupportApplicationServiceTest {
                 new SupportReply("An organiser will check.", "ESCALATED")));
 
         var system = store.all().stream()
-                .filter(e -> e.summary().contains("not known whether")).toList();
+                .filter(e -> e.raisedBy() == Escalation.RaisedBy.SYSTEM).toList();
         assertThat(system).singleElement().satisfies(e -> assertThat(e.registrationId()).isEqualTo("reg-mine"));
         assertThat(result.reply()).contains(system.getFirst().escalationId());
         assertThat(result.reply()).doesNotContain("An organiser will check.");

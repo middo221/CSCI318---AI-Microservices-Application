@@ -154,7 +154,7 @@ public class SupportTools {
                         + "registration service did not answer, so it is not known whether it was accepted. "
                         + "Check the registration and the payment before anything else is done.")
                         .formatted(unknownRefundRegistrationId),
-                attendeeMessage);
+                attendeeMessage, Escalation.RaisedBy.SYSTEM);
         escalations.add(escalation);
         unknownRefundEscalation = escalation;
         log.warn("support conversation for {} escalated as {}: refund outcome unknown on {}",
@@ -351,7 +351,7 @@ public class SupportTools {
         }
 
         Escalation escalation = escalationStore.open(attendeeId, attached, reason,
-                prefix + (summary == null ? "" : summary), attendeeMessage);
+                prefix + (summary == null ? "" : summary), attendeeMessage, Escalation.RaisedBy.ASSISTANT);
         escalations.add(escalation);
         log.info("support conversation for {} escalated as {}", attendeeId, escalation.escalationId());
         return new EscalationAnswer(true, escalation.escalationId(),

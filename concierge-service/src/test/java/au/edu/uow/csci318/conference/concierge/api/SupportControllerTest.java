@@ -171,7 +171,8 @@ class SupportControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath(thisOne + ".attendeeId").value(contains(ME)))
                 .andExpect(jsonPath(thisOne + ".registrationId").value(contains("reg-big")))
-                .andExpect(jsonPath(thisOne + ".attendeeMessage").value(contains(message)));
+                .andExpect(jsonPath(thisOne + ".attendeeMessage").value(contains(message)))
+                .andExpect(jsonPath(thisOne + ".raisedBy").value(contains("ASSISTANT")));
 
         assertThat(registrations.refundCalls()).isEmpty();
     }

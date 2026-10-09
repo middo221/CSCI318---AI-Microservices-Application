@@ -90,7 +90,7 @@ class SupportDomainModelTest {
     @Test
     void anEscalationBoundsWhatTheModelWrote() {
         Escalation escalation = new Escalation("esc-1", "att-1042", null,
-                "r".repeat(1000), "s".repeat(5000), "my own words", Instant.EPOCH);
+                "r".repeat(1000), "s".repeat(5000), "my own words", Escalation.RaisedBy.ASSISTANT, Instant.EPOCH);
 
         assertThat(escalation.reason()).hasSize(Escalation.MAX_REASON);
         assertThat(escalation.summary()).hasSize(Escalation.MAX_SUMMARY);
@@ -99,7 +99,8 @@ class SupportDomainModelTest {
 
     @Test
     void anEscalationWithNoReasonSaysWhoRaisedIt() {
-        Escalation escalation = new Escalation("esc-1", "att-1042", null, "  ", null, null, Instant.EPOCH);
+        Escalation escalation = new Escalation("esc-1", "att-1042", null, "  ", null, null,
+                Escalation.RaisedBy.ASSISTANT, Instant.EPOCH);
 
         assertThat(escalation.reason()).isEqualTo("Escalated by the support assistant.");
         assertThat(escalation.summary()).isEmpty();
@@ -108,7 +109,17 @@ class SupportDomainModelTest {
 
     @Test
     void anEscalationNeedsAnAttendee() {
-        assertThatThrownBy(() -> new Escalation("esc-1", null, null, "r", "s", "m", Instant.EPOCH))
+        assertThatThrownBy(() -> new Escalation("esc-1", null, null, "r", "s", "m",
+                Escalation.RaisedBy.ASSISTANT, Instant.EPOCH))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** Set by code, never by the model, so an organiser can tell the two apart whatever the summary says. */
+    @Test
+    void anEscalationSaysWhetherTheSystemOrTheAssistantRaisedIt() {
+        assertThat(new Escalation("esc-1", "att-1042", null, "r", "s", "m", Escalation.RaisedBy.SYSTEM, Instant.EPOCH)
+                .raisedBy()).isEqualTo(Escalation.RaisedBy.SYSTEM);
+        assertThatThrownBy(() -> new Escalation("esc-1", "att-1042", null, "r", "s", "m", null, Instant.EPOCH))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

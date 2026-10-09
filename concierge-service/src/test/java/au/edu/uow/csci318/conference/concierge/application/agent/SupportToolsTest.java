@@ -580,6 +580,7 @@ class SupportToolsTest {
         assertThat(escalation.attendeeId()).isEqualTo(ME);
         assertThat(escalation.registrationId()).isEqualTo("reg-big");
         assertThat(escalation.attendeeMessage()).isEqualTo(MESSAGE);
+        assertThat(escalation.raisedBy()).isEqualTo(Escalation.RaisedBy.ASSISTANT);
         assertThat(tools.escalations()).containsExactly(escalation);
         assertThat(tools.hasActed()).isTrue();
     }

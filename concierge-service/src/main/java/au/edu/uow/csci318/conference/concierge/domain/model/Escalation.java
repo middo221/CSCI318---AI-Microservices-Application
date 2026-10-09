@@ -14,6 +14,9 @@ import java.time.Instant;
  *
  * <p>{@code registrationId} is null when the case concerns no registration, or when the one the
  * attendee named could not be verified as theirs.
+ *
+ * <p>{@code raisedBy} is set by code, never by the model, so an organiser can tell a case the
+ * system raised for itself from one the assistant chose to raise, whatever the summary says.
  */
 public record Escalation(String escalationId,
                          String attendeeId,
@@ -21,10 +24,19 @@ public record Escalation(String escalationId,
                          String reason,
                          String summary,
                          String attendeeMessage,
+                         RaisedBy raisedBy,
                          Instant createdAt) {
 
     public static final int MAX_REASON = 300;
     public static final int MAX_SUMMARY = 1000;
+
+    /** Who decided that a human was needed. */
+    public enum RaisedBy {
+        /** The service itself, for a reason it can establish in code, such as a refund with an unknown outcome. */
+        SYSTEM,
+        /** The language model, through its escalation tool. */
+        ASSISTANT
+    }
 
     public Escalation {
         if (escalationId == null || escalationId.isBlank()) {
@@ -32,6 +44,9 @@ public record Escalation(String escalationId,
         }
         if (attendeeId == null || attendeeId.isBlank()) {
             throw new IllegalArgumentException("an escalation requires an attendee id");
+        }
+        if (raisedBy == null) {
+            throw new IllegalArgumentException("an escalation must say who raised it");
         }
         if (createdAt == null) {
             throw new IllegalArgumentException("an escalation requires a creation time");
