@@ -154,6 +154,7 @@ explicit permission.**
 | `spring-cloud-stream-binder-kafka-streams` | How the stream-processing requirement is satisfied |
 | `spring-cloud-stream-test-binder` | Messaging tests without a live broker |
 | `spring-boot-starter-test` | Inherited from the Spring Boot parent |
+| `org.apache.kafka:kafka-streams-test-utils` | **Test scope only.** Supplies `TopologyTestDriver`, so the Kafka Streams topologies are tested offline against the exact bytes each producer writes. Version managed by the Spring Boot BOM (3.9.2, the same as the `kafka-streams` the binder brings). Approved by Hayden on 2026-10-09; to be disclosed to the coordinator. |
 | `langchain4j-google-ai-gemini` | The chosen LLM provider module |
 | `langchain4j-spring-boot-starter`, `langchain4j-google-ai-gemini-spring-boot-starter` | Spring integration for LangChain4j |
 
