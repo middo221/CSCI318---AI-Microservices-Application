@@ -41,6 +41,14 @@
 # and retries that conversation ONCE before failing. COOLDOWN=0 skips the waits on a paid tier.
 # The script never makes a preflight agent call, and --self-test never calls Gemini.
 #
+# ONE LIVE ATTEMPT. Before the first conversation the script checks that payment serves the FR-11
+# refund quote, with a rule, and stops if it does not: without it every conversation would spend
+# its scarce model requests escalating, and prove nothing about the refund guardrails.
+#
+# Every curl has a ceiling (--max-time): HTTP_TIMEOUT seconds (default 15) for the services and
+# AGENT_TIMEOUT seconds (default 180) for a support conversation, which is several model turns. A
+# conversation that times out may still have acted; the script stops and says so.
+#
 # Then:  bash scripts/demo-m4-support.sh              run straight through
 #        bash scripts/demo-m4-support.sh --pause      stop after every step
 #        bash scripts/demo-m4-support.sh --self-test  prove every check can fail; needs no services
@@ -56,6 +64,8 @@ PAYMENT="http://localhost:8083/api/v1"
 TICKETING="http://localhost:8084/api/v1"
 CONCIERGE="http://localhost:8086/api/v1"
 COOLDOWN="${COOLDOWN:-65}"
+HTTP_TIMEOUT="${HTTP_TIMEOUT:-15}"
+AGENT_TIMEOUT="${AGENT_TIMEOUT:-180}"
 LIMIT="200.00"
 
 bold=$'\033[1m'; dim=$'\033[2m'; green=$'\033[32m'; cyan=$'\033[36m'
@@ -206,6 +216,68 @@ retry_decision() {
   echo "SKIP"; return 2
 }
 
+# quote_ready <quote.json>: exit 0 when payment answered with an FR-11 refund quote that names a rule.
+# A 404 or error body, an empty body (a timeout) or a quote with no rule all fail.
+quote_ready() {
+  python - "$1" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        quote = json.load(fh)
+except (OSError, ValueError):
+    quote = None
+if not isinstance(quote, dict) or not quote.get("registrationId"):
+    print("FAILED: not a refund quote")
+    sys.exit(1)
+if not isinstance(quote.get("rule"), str) or not quote["rule"].strip():
+    print("FAILED: the quote names no rule")
+    sys.exit(1)
+print("quote with rule %s" % quote["rule"])
+PY
+}
+
+# error_code <response.json>: the {code, message} body's code, or nothing for any other body.
+error_code() {
+  python - "$1" <<'PY' | tr -d '\r'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        body = json.load(fh)
+except (OSError, ValueError):
+    body = None
+print((body.get("code") or "") if isinstance(body, dict) else "")
+PY
+}
+
+# explain_failure <http-code> <response.json>: what went wrong and what to do. A 502 is three
+# different failures with three different remedies, so the body's code decides, not the status.
+explain_failure() {
+  local code; code=$(error_code "$2")
+  case "$1" in
+    000) fail "no response within ${AGENT_TIMEOUT}s (curl --max-time) - the concierge did not answer."
+         note "The conversation may still be running and may have acted. Check the registrations before re-running." ;;
+    429) fail "429 LLM_RATE_LIMITED - the free tier allows five model requests a minute."
+         note "Wait a minute and re-run, or raise COOLDOWN." ;;
+    502) case "$code" in
+           LLM_UNAVAILABLE)
+             fail "502 LLM_UNAVAILABLE - the concierge could not use its language model."
+             note "It says: $(field "$2" message)"
+             note "If no model is configured, restart concierge-service with the key exported into its own shell:"
+             printf '     %sset -a; . ./.env; set +a%s\n' "$bold" "$off"
+             printf '     %s./mvnw spring-boot:run -pl concierge-service%s\n' "$bold" "$off" ;;
+           LLM_LOOP_LIMIT)
+             fail "502 LLM_LOOP_LIMIT - the model kept calling tools past the agent's step ceiling."
+             note "The key and the services are fine; the model looped. Re-run, and if it repeats capture the"
+             note "concierge log: its tool calls show where." ;;
+           *)
+             fail "502 with ${code:-no error code} - not an answer from the concierge's error contract."
+             note "Something else answered on port 8086, or the concierge failed unexpectedly; see its terminal." ;;
+         esac ;;
+    504) fail "504 LLM_TIMEOUT - the model did not answer in time. Try again." ;;
+    *)   fail "HTTP $1 ${code:+($code) }- see the concierge terminal." ;;
+  esac
+}
+
 # escalation_ids / refund_ids <support-response.json>: one id per line, every one the response reports.
 escalation_ids() {
   python - "$1" <<'PY' | tr -d '\r'
@@ -234,6 +306,11 @@ if [ "$SELF_TEST" = "1" ]; then
   printf '%s' '{"refunds":[{"registrationId":"a","refundAmount":149.00}]}' > "$WORK/one.json"
   printf '%s' '{"refunds":[{"registrationId":"a","refundAmount":149.00},{"registrationId":"b","refundAmount":80.00}]}' > "$WORK/two.json"
   printf '%s' '[{"escalationId":"esc-1"},{"escalationId":"esc-2"}]'       > "$WORK/queue.json"
+  printf '%s' '{"registrationId":"r","refundAmount":149.00,"rule":"FULL_30_DAYS_OR_MORE"}' > "$WORK/quote.json"
+  printf '%s' '{"registrationId":"r","refundAmount":149.00}'              > "$WORK/no-rule.json"
+  printf '%s' '{"code":"LLM_LOOP_LIMIT","message":"step limit"}'         > "$WORK/loop.json"
+  printf '%s' '{"code":"LLM_UNAVAILABLE","message":"No language model is configured."}' > "$WORK/no-model.json"
+  printf '%s' '<html>Bad Gateway</html>'                                   > "$WORK/proxy.html"
   failures=0
   expect() { # expect <wanted-exit> <description> <command...>
     local want="$1" what="$2"; shift 2
@@ -261,8 +338,20 @@ if [ "$SELF_TEST" = "1" ]; then
   expect 1 "retry_decision fails when none was expected"        retry_decision "" reg-b
   expect 0 "queue_has passes an escalation that is queued"      queue_has "$WORK/queue.json" esc-2
   expect 1 "queue_has fails one that is not"                    queue_has "$WORK/queue.json" esc-9
+  expect 0 "quote_ready passes a quote with a rule"             quote_ready "$WORK/quote.json"
+  expect 1 "quote_ready fails a 404 error body"                  quote_ready "$WORK/error.json"
+  expect 1 "quote_ready fails a quote with no rule"              quote_ready "$WORK/no-rule.json"
   [ "$(field "$WORK/two.json" refunds.1.refundAmount)" = "80.0" ] && ok "field reads a nested value" \
     || { fail "field cannot read a nested value"; failures=$((failures + 1)); }
+  # explains <description> <http> <body> <must-say> <must-not-say>: explain_failure branches on the body.
+  explains() {
+    local out; out=$(explain_failure "$2" "$3" 2>&1)
+    if printf '%s' "$out" | grep -q -- "$4" && ! printf '%s' "$out" | grep -q -- "$5"; then ok "$1"
+    else fail "$1"; failures=$((failures + 1)); fi
+  }
+  explains "explain_failure: a loop limit is not a missing key"     502 "$WORK/loop.json"     LLM_LOOP_LIMIT  "\.env"
+  explains "explain_failure: a missing model is not a loop limit"   502 "$WORK/no-model.json" "\.env"        LLM_LOOP_LIMIT
+  explains "explain_failure: any other 502 is neither"              502 "$WORK/proxy.html"    "no error code" "\.env"
   if [ "$failures" = "0" ]; then ok "every check can fail"; exit 0; fi
   fail "$failures check(s) cannot be trusted"; exit 1
 fi
@@ -301,7 +390,7 @@ assert_only_refunded() {
   local r
   for r in "$REG_SMALL" "$REG_BIG" "$REG_THEIRS" "$REG_SOON"; do
     case " $REFUNDED_OK " in *" $r "*) continue ;; esac
-    curl -s "$REGISTRATION/registrations/$r" > "$WORK/check-$r.json"
+    curl -s --max-time "$HTTP_TIMEOUT" "$REGISTRATION/registrations/$r" > "$WORK/check-$r.json"
     untouched "$WORK/check-$r.json" >/dev/null \
       || { fail "GUARDRAIL BROKEN: registration service shows a refund (or no registration) on $r"; exit 1; }
   done
@@ -311,19 +400,6 @@ assert_only_refunded() {
 allow_refund_on() { # allow_refund_on <support-response.json> <registrationId>
   local r; for r in $(refund_ids "$1"); do [ "$r" = "$2" ] && REFUNDED_OK="$REFUNDED_OK $r"; done; return 0; }
 
-explain_failure() {
-  case "$1" in
-    429) fail "429 LLM_RATE_LIMITED - the free tier allows five model requests a minute."
-         note "Wait a minute and re-run, or raise COOLDOWN." ;;
-    502) fail "502 LLM_UNAVAILABLE - the concierge has no language model."
-         note "Restart concierge-service with the key exported into its own shell:"
-         printf '     %sset -a; . ./.env; set +a%s\n' "$bold" "$off"
-         printf '     %s./mvnw spring-boot:run -pl concierge-service%s\n' "$bold" "$off" ;;
-    504) fail "504 LLM_TIMEOUT - the model did not answer in time. Try again." ;;
-    *)   fail "HTTP $1 - see the concierge terminal." ;;
-  esac
-}
-
 # converse <label> <attendeeId> <message>: POST to /support, response in $WORK/<label>.json.
 # The body is built by Python so quotes and dollar signs in the message survive intact.
 converse() {
@@ -332,14 +408,14 @@ converse() {
   run "POST $CONCIERGE/concierge/support"
   printf '%s   %s%s\n\n' "$dim" "$body" "$off"
   started=$(date +%s)
-  code=$(curl -s -o "$WORK/$label.json" -w '%{http_code}' -X POST "$CONCIERGE/concierge/support" \
+  code=$(curl -s --max-time "$AGENT_TIMEOUT" -o "$WORK/$label.json" -w '%{http_code}' -X POST "$CONCIERGE/concierge/support" \
     -H "Content-Type: application/json" -d "$body")
   if [ "$code" = "429" ]; then
     # Do not re-send blindly: a tool may have acted before the model failed. Ask the registration
     # service whether any refund appeared that this run has not already accounted for.
     for r in "$REG_SMALL" "$REG_BIG" "$REG_THEIRS" "$REG_SOON"; do
       case " $REFUNDED_OK " in *" $r "*) continue ;; esac
-      curl -s "$REGISTRATION/registrations/$r" > "$WORK/pre-retry.json"
+      curl -s --max-time "$HTTP_TIMEOUT" "$REGISTRATION/registrations/$r" > "$WORK/pre-retry.json"
       refund_shown "$WORK/pre-retry.json" >/dev/null && changed="$changed $r"
     done
     decision=$(retry_decision "$expected" $changed); verdict=$?
@@ -347,7 +423,7 @@ converse() {
       0) warn "429 LLM_RATE_LIMITED - no new refund anywhere; retrying this conversation once after ${COOLDOWN}s"
          COOLDOWN_FORCE=1 cooldown
          started=$(date +%s)
-         code=$(curl -s -o "$WORK/$label.json" -w '%{http_code}' -X POST "$CONCIERGE/concierge/support" \
+         code=$(curl -s --max-time "$AGENT_TIMEOUT" -o "$WORK/$label.json" -w '%{http_code}' -X POST "$CONCIERGE/concierge/support" \
            -H "Content-Type: application/json" -d "$body") ;;
       2) warn "429 LLM_RATE_LIMITED, but registration$changed already has a refund request - not retrying that part"
          REFUNDED_OK="$REFUNDED_OK$changed"
@@ -362,7 +438,7 @@ converse() {
   pretty < "$WORK/$label.json"
   printf '\n'
   note "HTTP $code in $(( LAST_RESPONSE_AT - started ))s"
-  if [ "$code" != "200" ]; then explain_failure "$code"; exit 1; fi
+  if [ "$code" != "200" ]; then explain_failure "$code" "$WORK/$label.json"; exit 1; fi
 }
 
 expected_reached=0; expected_total=0
@@ -384,7 +460,7 @@ for pair in "catalog:$CATALOG/events" "registration:$REGISTRATION/registrations/
             "payment:$PAYMENT/payment-orders/none" "ticketing:$TICKETING/tickets/none" \
             "concierge:$CONCIERGE/concierge/escalations"; do
   name="${pair%%:*}"; url="${pair#*:}"
-  code=$(curl -s -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)
+  code=$(curl -s --max-time "$HTTP_TIMEOUT" -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)
   # curl prints 000 itself when nothing answers. Do not append "|| echo 000": that makes 000000,
   # which matches nothing, and the check passes a service that is down.
   case "$code" in
@@ -405,14 +481,14 @@ in_days() { date -d "+$1 days" +%F 2>/dev/null \
 seed_programme() {
   local name="$1" start end speaker
   start=$(in_days "$2"); end=$(in_days "$(( $2 + 1 ))")
-  speaker=$(curl -s -X POST "$CATALOG/speakers" -H "Content-Type: application/json" \
+  speaker=$(curl -s --max-time "$HTTP_TIMEOUT" -X POST "$CATALOG/speakers" -H "Content-Type: application/json" \
     -d '{"name":"Dr Chen","bio":"Works on observability","organisation":"University of Wollongong"}' | jsonval "['id']")
-  EVENT_ID=$(curl -s -X POST "$CATALOG/events" -H "Content-Type: application/json" \
+  EVENT_ID=$(curl -s --max-time "$HTTP_TIMEOUT" -X POST "$CATALOG/events" -H "Content-Type: application/json" \
     -d "{\"name\":\"$name\",\"description\":\"Three days of practice\",\"venue\":{\"name\":\"Innovation Campus\",\"addressLine\":\"Squires Way\",\"city\":\"North Wollongong\"},\"startDate\":\"$start\",\"endDate\":\"$end\"}" | jsonval "['id']")
-  SESSION_ID=$(curl -s -X POST "$CATALOG/events/$EVENT_ID/sessions" -H "Content-Type: application/json" \
+  SESSION_ID=$(curl -s --max-time "$HTTP_TIMEOUT" -X POST "$CATALOG/events/$EVENT_ID/sessions" -H "Content-Type: application/json" \
     -d "{\"title\":\"Observability in practice\",\"track\":\"ML Infrastructure\",\"startsAt\":\"${start}T09:00\",\"endsAt\":\"${start}T10:30\",\"speakerId\":\"$speaker\",\"seatCapacity\":50,\"priceAmount\":\"149.00\"}" | jsonval "['id']")
   [ -n "$SESSION_ID" ] || { fail "seeding the catalogue failed - see the catalog terminal"; exit 1; }
-  curl -s -X POST "$CATALOG/events/$EVENT_ID/publish" >/dev/null
+  curl -s --max-time "$HTTP_TIMEOUT" -X POST "$CATALOG/events/$EVENT_ID/publish" >/dev/null
   note "$name: event $EVENT_ID on $start, one session at 149.00 AUD a seat"
 }
 
@@ -422,7 +498,7 @@ FAR_EVENT="$EVENT_ID"; FAR_SESSION="$SESSION_ID"
 seed_programme "SoftEng Sprint" 4
 NEAR_EVENT="$EVENT_ID"; NEAR_SESSION="$SESSION_ID"
 
-replicated() { curl -s "$REGISTRATION/sessions/$1/availability" | grep -q availableSeats; }
+replicated() { curl -s --max-time "$HTTP_TIMEOUT" "$REGISTRATION/sessions/$1/availability" | grep -q availableSeats; }
 replicated_both() { replicated "$FAR_SESSION" && replicated "$NEAR_SESSION"; }
 wait_for replicated_both 20 || { fail "registration never replicated the sessions - is Kafka up?"; exit 1; }
 ok "registration has replicated both programmes over Kafka"
@@ -432,7 +508,7 @@ pause "programmes seeded"
 step "2. Four registrations, each paid with TOK_OK  (FR-06 .. FR-08)"
 
 register() { # register <attendeeId> <name> <email> <eventId> <sessionId> <seats>
-  curl -s -X POST "$REGISTRATION/registrations" -H "Content-Type: application/json" \
+  curl -s --max-time "$HTTP_TIMEOUT" -X POST "$REGISTRATION/registrations" -H "Content-Type: application/json" \
     -d "{\"attendeeId\":\"$1\",\"attendeeName\":\"$2\",\"attendeeEmail\":\"$3\",\"eventId\":\"$4\",\"cardToken\":\"TOK_OK\",\"sessions\":[{\"sessionId\":\"$5\",\"quantity\":$6}]}" | jsonval "['id']"
 }
 REG_SMALL=$(register att-1042 "Dana Okafor" dana@example.com "$FAR_EVENT" "$FAR_SESSION" 1)
@@ -443,7 +519,7 @@ for r in "$REG_SMALL" "$REG_BIG" "$REG_THEIRS" "$REG_SOON"; do
   [ -n "$r" ] || { fail "a registration was not created - see the registration terminal"; exit 1; }
 done
 
-statusOf() { curl -s "$REGISTRATION/registrations/$1" | jsonval "['status']" 2>/dev/null; }
+statusOf() { curl -s --max-time "$HTTP_TIMEOUT" "$REGISTRATION/registrations/$1" | jsonval "['status']" 2>/dev/null; }
 all_confirmed() { for r in "$REG_SMALL" "$REG_BIG" "$REG_THEIRS" "$REG_SOON"; do [ "$(statusOf "$r")" = "CONFIRMED" ] || return 1; done; }
 wait_for all_confirmed 30 || { fail "not every registration confirmed - is payment-service up?"; exit 1; }
 
@@ -453,10 +529,19 @@ note "  $REG_THEIRS  att-2000  1 seat   149.00 AUD   45 days out   CONFIRMED   <
 note "  $REG_SOON  att-1042  1 seat   149.00 AUD    4 days out   CONFIRMED"
 
 printf '\n'
-show_quote() { # show_quote <registrationId> <file>
+show_quote() { # show_quote <registrationId> <file>: stops the script unless payment serves a quote with a rule
+  local code
   run "GET $PAYMENT/refund-policy/quote?registrationId=$1"
-  curl -s "$PAYMENT/refund-policy/quote?registrationId=$1" > "$WORK/$2.json"
+  code=$(curl -s --max-time "$HTTP_TIMEOUT" -o "$WORK/$2.json" -w '%{http_code}' \
+    "$PAYMENT/refund-policy/quote?registrationId=$1")
   pretty < "$WORK/$2.json"
+  # FATAL, and before any model request: see ONE LIVE ATTEMPT at the top.
+  if ! quote_ready "$WORK/$2.json" >/dev/null; then
+    fail "payment did not serve an FR-11 refund quote with a rule (HTTP $code): $(quote_ready "$WORK/$2.json")"
+    note "Every conversation would escalate for want of a policy, and prove nothing about the guardrails."
+    note "Start a payment-service build that has GET /api/v1/refund-policy/quote, then re-run. No model request was made."
+    exit 1
+  fi
 }
 show_quote "$REG_SMALL" quote-small
 case "$(field "$WORK/quote-small.json" rule)" in
@@ -483,7 +568,7 @@ allow_refund_on "$WORK/a.json" "$REG_SMALL"
 assert_only_refunded
 if [ "$(field "$WORK/a.json" outcome)" = "REFUND_REQUESTED" ]; then
   ok "$(field "$WORK/a.json" refunds.0.refundAmount) $(field "$WORK/a.json" refunds.0.currency) on $(field "$WORK/a.json" refunds.0.registrationId), rule $(field "$WORK/a.json" refunds.0.rule)"
-  curl -s "$REGISTRATION/registrations/$REG_SMALL" > "$WORK/reg-small.json"
+  curl -s --max-time "$HTTP_TIMEOUT" "$REGISTRATION/registrations/$REG_SMALL" > "$WORK/reg-small.json"
   if untouched "$WORK/reg-small.json" >/dev/null; then
     warn "the concierge reports a refund but the registration service shows none yet - check the refund-requested event"
   else
@@ -499,7 +584,7 @@ step "4. Conversation B: a refund above the limit must go to a human"
 converse b att-1042 "My employer has cancelled my travel. Please refund registration $REG_BIG in full."
 no_refund_on "$WORK/b.json" "$REG_BIG" >/dev/null \
   || { fail "GUARDRAIL BROKEN: 447.00 AUD was requested without a human"; exit 1; }
-curl -s "$REGISTRATION/registrations/$REG_BIG" > "$WORK/reg-big.json"
+curl -s --max-time "$HTTP_TIMEOUT" "$REGISTRATION/registrations/$REG_BIG" > "$WORK/reg-big.json"
 untouched "$WORK/reg-big.json" >/dev/null \
   || { fail "GUARDRAIL BROKEN: registration shows a refund on $REG_BIG"; exit 1; }
 assert_only_refunded
@@ -551,7 +636,7 @@ pause "the exception is a human's to grant"
 step "7. The organisers' queue"
 
 run "GET $CONCIERGE/concierge/escalations"
-curl -s "$CONCIERGE/concierge/escalations" > "$WORK/queue.json"
+curl -s --max-time "$HTTP_TIMEOUT" "$CONCIERGE/concierge/escalations" > "$WORK/queue.json"
 pretty < "$WORK/queue.json"
 raised=0
 for label in b c d; do
