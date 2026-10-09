@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
@@ -24,7 +25,7 @@ import java.util.List;
  * {@code 400 INVALID_REQUEST}, since only pricing can tell the two apart.
  */
 public record CreateRegistrationRequest(
-        @NotBlank(message = "must be supplied") String attendeeId,
+        @NotBlank(message = "must be supplied") @Size(max = 64, message = "must be at most 64 characters") String attendeeId,
         @NotBlank(message = "must be supplied") String attendeeName,
         @NotBlank(message = "must be supplied") @Email(message = "must be an email address") String attendeeEmail,
         @NotBlank(message = "must be supplied") String eventId,

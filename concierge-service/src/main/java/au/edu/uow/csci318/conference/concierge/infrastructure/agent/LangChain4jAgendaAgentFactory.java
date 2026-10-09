@@ -1,34 +1,18 @@
 package au.edu.uow.csci318.conference.concierge.infrastructure.agent;
 
-import au.edu.uow.csci318.conference.concierge.application.LlmUnavailableException;
 import au.edu.uow.csci318.conference.concierge.application.agent.AgendaAgentFactory;
 import au.edu.uow.csci318.conference.concierge.application.agent.AgendaBuilder;
 import au.edu.uow.csci318.conference.concierge.application.agent.AgendaTools;
-import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
  * Builds the LangChain4j proxy that is the Agenda Builder agent.
  *
- * <p>Takes an {@link ObjectProvider} rather than a {@link ChatModel} because there may not be
- * one. The Gemini starter registers its chat model only when an API key is configured, so with
- * no {@code GEMINI_API_KEY} the bean simply does not exist. Injecting the model directly would
- * make the application context fail to start, which would in turn make every
- * {@code @SpringBootTest} in this module depend on a paid credential. Resolving it lazily keeps
- * the service bootable and turns the missing key into a documented {@code 502} at the one
- * endpoint that needs it.
- *
- * <p>The blank-key check in front of it is not redundant. {@code application.yml} defaults the
- * key to an empty string so the placeholder always resolves, and an empty string is a
- * <em>present</em> property as far as {@code @ConditionalOnProperty} is concerned - so the
- * starter would happily build a chat model that cannot authenticate. Catching that here turns a
- * confusing 401 from Google into the same clean 502 as having no model at all.
- *
- * <p>A new proxy per request, bound to that request's tools. See {@code AgendaToolsFactory} for
- * why the tools cannot be shared.
+ * <p>Whether there is a model at all is {@link ConfiguredChatModel}'s decision; what a runaway
+ * loop looks like to the caller is {@link LoopLimit}'s, and what an invented tool name gets back
+ * is {@link UnknownTool}'s. A new proxy per request, bound to that
+ * request's tools; see {@code AgendaToolsFactory} for why the tools cannot be shared.
  */
 @Component
 public class LangChain4jAgendaAgentFactory implements AgendaAgentFactory {
@@ -42,32 +26,22 @@ public class LangChain4jAgendaAgentFactory implements AgendaAgentFactory {
      */
     private static final int MAX_TOOL_CALLING_ROUND_TRIPS = 12;
 
-    private static final String NO_MODEL =
-            "No language model is configured. Set GEMINI_API_KEY in .env to enable the concierge agents.";
+    private final ConfiguredChatModel chatModel;
 
-    private final ObjectProvider<ChatModel> chatModels;
-    private final String apiKey;
-
-    public LangChain4jAgendaAgentFactory(
-            ObjectProvider<ChatModel> chatModels,
-            @Value("${langchain4j.google-ai-gemini.chat-model.api-key:}") String apiKey) {
-        this.chatModels = chatModels;
-        this.apiKey = apiKey;
+    public LangChain4jAgendaAgentFactory(ConfiguredChatModel chatModel) {
+        this.chatModel = chatModel;
     }
 
+    /** The proxy, wrapped so a runaway loop surfaces as {@code LLM_LOOP_LIMIT} (Task 1). */
     @Override
     public AgendaBuilder agentFor(AgendaTools tools) {
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new LlmUnavailableException(NO_MODEL);
-        }
-        ChatModel model = chatModels.getIfAvailable();
-        if (model == null) {
-            throw new LlmUnavailableException(NO_MODEL);
-        }
-        return AiServices.builder(AgendaBuilder.class)
-                .chatModel(model)
+        AgendaBuilder agent = AiServices.builder(AgendaBuilder.class)
+                .chatModel(chatModel.require())
                 .tools(tools)
+                .hallucinatedToolNameStrategy(UnknownTool::answer)
                 .maxToolCallingRoundTrips(MAX_TOOL_CALLING_ROUND_TRIPS)
                 .build();
+        return (attendeeId, interests) -> LoopLimit.enforce(MAX_TOOL_CALLING_ROUND_TRIPS,
+                () -> agent.buildAgenda(attendeeId, interests));
     }
 }

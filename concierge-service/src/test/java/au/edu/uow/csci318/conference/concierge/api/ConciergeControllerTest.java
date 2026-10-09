@@ -5,6 +5,8 @@ import au.edu.uow.csci318.conference.concierge.application.port.RegistrationPort
 import au.edu.uow.csci318.conference.concierge.support.FakeCatalog;
 import au.edu.uow.csci318.conference.concierge.support.FakeRegistrations;
 import au.edu.uow.csci318.conference.concierge.support.ScriptedChatModel;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +21,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import static au.edu.uow.csci318.conference.concierge.support.Sessions.at;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -192,5 +195,46 @@ class ConciergeControllerTest {
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.code").value("LLM_UNAVAILABLE"))
                 .andExpect(jsonPath("$.message").exists());
+    }
+
+    /**
+     * Regression: a model that never stops asking for tools used to escape as a bare 500 with
+     * Spring's default body, because LangChain4j reports its round-trip ceiling as a plain
+     * RuntimeException rather than a LangChain4jException.
+     */
+    @Test
+    void reportsARunawayAgentLoopInThePlatformErrorShape() throws Exception {
+        model.thenKeepsCallingTool("searchSessions", "{\"track\":\"PLATFORM\"}");
+
+        mockMvc.perform(post("/api/v1/concierge/agenda")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody("streams")))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("LLM_LOOP_LIMIT"))
+                .andExpect(jsonPath("$.message").exists());
+
+        assertThat(model.turns()).isLessThanOrEqualTo(13);
+    }
+
+    /**
+     * Regression: LangChain4j's default answer to a tool name the model invented is a plain
+     * RuntimeException, which escaped as a bare 500. The model is now told there is no such tool,
+     * and carries on.
+     */
+    @Test
+    void tellsTheModelThereIsNoSuchToolInsteadOfFailingTheRequest() throws Exception {
+        model.thenCallsTool("bookEverySession", "{}")
+                .thenAnswers("{\"items\":[],\"summary\":\"Nothing suitable.\"}");
+
+        mockMvc.perform(post("/api/v1/concierge/agenda")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody("streams")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.summary").value("Nothing suitable."));
+
+        ChatMessage toolResult = model.requests().get(1).messages().getLast();
+        assertThat(toolResult).isInstanceOf(ToolExecutionResultMessage.class);
+        assertThat(((ToolExecutionResultMessage) toolResult).text())
+                .isEqualTo("There is no tool named bookEverySession.");
     }
 }

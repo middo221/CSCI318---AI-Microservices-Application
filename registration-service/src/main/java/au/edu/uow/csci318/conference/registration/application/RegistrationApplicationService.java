@@ -8,7 +8,9 @@ import au.edu.uow.csci318.conference.registration.domain.SessionNotFoundExceptio
 import au.edu.uow.csci318.conference.registration.domain.event.DomainEventPublisher;
 import au.edu.uow.csci318.conference.registration.domain.model.HoldWindow;
 import au.edu.uow.csci318.conference.registration.domain.model.Money;
+import au.edu.uow.csci318.conference.registration.domain.model.RefundRequester;
 import au.edu.uow.csci318.conference.registration.domain.model.Registration;
+import au.edu.uow.csci318.conference.registration.domain.model.RegistrationStatus;
 import au.edu.uow.csci318.conference.registration.domain.model.SeatHold;
 import au.edu.uow.csci318.conference.registration.domain.model.SessionView;
 import au.edu.uow.csci318.conference.registration.domain.repository.RegistrationRepository;
@@ -21,6 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,16 +51,19 @@ public class RegistrationApplicationService {
     private final SeatAllocationService allocation = new SeatAllocationService();
     private final RegistrationPricingService pricing = new RegistrationPricingService();
     private final HoldWindow holdWindow;
+    private final ZoneId timeZone;
 
     public RegistrationApplicationService(
             RegistrationRepository registrations,
             SessionViewRepository sessions,
             DomainEventPublisher domainEvents,
-            @Value("${conference.registration.hold-window:PT2M}") Duration holdWindow) {
+            @Value("${conference.registration.hold-window:PT2M}") Duration holdWindow,
+            @Value("${conference.registration.time-zone:Australia/Sydney}") String timeZone) {
         this.registrations = registrations;
         this.sessions = sessions;
         this.domainEvents = domainEvents;
         this.holdWindow = new HoldWindow(holdWindow);
+        this.timeZone = ZoneId.of(timeZone);
     }
 
     /**
@@ -84,7 +92,8 @@ public class RegistrationApplicationService {
                 command.conferenceEventId(),
                 holds,
                 total,
-                command.cardToken());
+                command.cardToken(),
+                firstSessionStart(views.values()));
 
         // Drain before saving. Spring Data sees an id that is already assigned, so save() takes
         // the merge path and hands back a different managed copy — and domainEvents is @Transient,
@@ -102,6 +111,22 @@ public class RegistrationApplicationService {
         return saved;
     }
 
+    /**
+     * When the earliest of the requested sessions begins, as an instant.
+     *
+     * <p>The catalogue publishes wall-clock times with no zone, because a programme is read in local
+     * time. Billing needs an instant to count refund days back from, so the replica's times are read
+     * in the conference's own zone — configuration, not the JVM default, which on a developer's
+     * laptop or a CI runner could be anything.
+     */
+    private Instant firstSessionStart(Collection<SessionView> views) {
+        return views.stream()
+                .map(view -> view.getTimeSlot().start())
+                .min(Comparator.naturalOrder())
+                .map(start -> start.atZone(timeZone).toInstant())
+                .orElseThrow();
+    }
+
     private Map<String, SessionView> loadViews(List<SessionRequest> requests) {
         Map<String, SessionView> views = new LinkedHashMap<>();
         for (SessionRequest request : requests) {
@@ -113,21 +138,100 @@ public class RegistrationApplicationService {
     }
 
     /**
-     * Confirms a registration whose payment succeeded (FR-08).
+     * Settles a {@code payment-succeeded} (FR-08), or reverses it when it came too late (FR-07).
      *
-     * <p>Seat counts on the replica are deliberately left alone: the seats were taken when the
-     * hold was created and they stay taken. Only the hold's status changes.
+     * <p>Payment refuses to charge past the hold deadline, but a charge can still land in the seconds
+     * between the deadline and the next sweep. By then the seats are back on sale, so the registration
+     * stays {@code EXPIRED} or {@code CANCELLED} and asks for the money back instead. A success for a
+     * registration already {@code CONFIRMED} or {@code REFUNDED} is a replay and changes nothing.
+     *
+     * <p>Seat counts on the replica are deliberately left alone when confirming: the seats were taken
+     * when the hold was created and they stay taken. Only the hold's status changes.
      *
      * @throws RegistrationNotFoundException if the id is unknown
-     * @throws IllegalStateException         if the registration is no longer awaiting payment
      */
     @Transactional
-    public void confirmPaid(String registrationId) {
+    public PaymentSettlement settlePayment(String registrationId) {
         Registration registration = findById(registrationId);
-        registration.confirm();
+        PaymentSettlement outcome = switch (registration.getStatus()) {
+            case PENDING_PAYMENT -> {
+                registration.confirm();
+                yield PaymentSettlement.CONFIRMED;
+            }
+            case EXPIRED, CANCELLED -> {
+                registration.requestLatePaymentReversal();
+                yield PaymentSettlement.REVERSAL_REQUESTED;
+            }
+            case CONFIRMED, REFUNDED -> PaymentSettlement.ALREADY_SETTLED;
+        };
         List<DomainEvent> recorded = registration.pullDomainEvents();
         registrations.save(registration);
         domainEvents.publishAll(recorded);
+        return outcome;
+    }
+
+    /**
+     * Applies a refund Billing issued (FR-11): the registration is refunded, its seats go back on sale,
+     * and one {@code seats-released} per session offers them to that session's waitlist.
+     *
+     * <p>A registration that is not {@code CONFIRMED} is left alone and {@code false} returned: that
+     * is a reversed late payment, whose seats were released long ago, or a redelivery.
+     *
+     * @throws RegistrationNotFoundException if the id is unknown
+     */
+    @Transactional
+    public boolean applyRefundIssued(String registrationId) {
+        Registration registration = findById(registrationId);
+        if (registration.getStatus() != RegistrationStatus.CONFIRMED) {
+            return false;
+        }
+        registration.refund();
+        List<DomainEvent> recorded = registration.pullDomainEvents();
+        registrations.save(registration);
+        returnSeats(registration);
+        domainEvents.publishAll(recorded);
+        return true;
+    }
+
+    /**
+     * Applies a refund Billing declined: the pending request is settled and nothing else changes.
+     *
+     * @return {@code true} if a pending request was cleared
+     * @throws RegistrationNotFoundException if the id is unknown
+     */
+    @Transactional
+    public boolean applyRefundDeclined(String registrationId) {
+        Registration registration = findById(registrationId);
+        if (!registration.isRefundRequested()) {
+            return false;
+        }
+        registration.clearRefundRequest();
+        registrations.save(registration);
+        return true;
+    }
+
+    /**
+     * Asks Billing for a confirmed registration's money back (FR-11).
+     *
+     * <p>Returns the instance it changed, which carries {@code refundRequestedAt}. The registration is
+     * not given up here: Billing decides, and the answer settles it when it arrives on
+     * {@code refund-issued} or {@code refund-declined}.
+     *
+     * @throws RegistrationNotFoundException if the id is unknown
+     * @throws au.edu.uow.csci318.conference.registration.domain.RegistrationNotConfirmedException
+     *         unless confirmed
+     * @throws au.edu.uow.csci318.conference.registration.domain.NothingToRefundException if free
+     * @throws au.edu.uow.csci318.conference.registration.domain.RefundAlreadyRequestedException
+     *         if a request is already undecided
+     */
+    @Transactional
+    public Registration requestRefund(String registrationId, String reason, RefundRequester requestedBy) {
+        Registration registration = findById(registrationId);
+        registration.requestRefund(reason, requestedBy, Instant.now());
+        List<DomainEvent> recorded = registration.pullDomainEvents();
+        registrations.save(registration);
+        domainEvents.publishAll(recorded);
+        return registration;
     }
 
     /**

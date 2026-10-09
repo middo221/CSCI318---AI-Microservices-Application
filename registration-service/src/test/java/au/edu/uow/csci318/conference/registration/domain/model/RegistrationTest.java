@@ -1,12 +1,16 @@
 package au.edu.uow.csci318.conference.registration.domain.model;
 
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
+import au.edu.uow.csci318.conference.common.event.RefundRequested;
 import au.edu.uow.csci318.conference.common.event.RegistrationCancelled;
 import au.edu.uow.csci318.conference.common.event.RegistrationConfirmed;
 import au.edu.uow.csci318.conference.common.event.RegistrationExpired;
 import au.edu.uow.csci318.conference.common.event.RegistrationRequested;
 import au.edu.uow.csci318.conference.common.event.SeatsReleased;
 import au.edu.uow.csci318.conference.common.event.SeatsReserved;
+import au.edu.uow.csci318.conference.registration.domain.NothingToRefundException;
+import au.edu.uow.csci318.conference.registration.domain.RefundAlreadyRequestedException;
+import au.edu.uow.csci318.conference.registration.domain.RegistrationNotConfirmedException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -20,6 +24,8 @@ class RegistrationTest {
     private static final AttendeeRef ATTENDEE = new AttendeeRef("att-1042", "Dana", "dana@example.com");
     private static final Instant EXPIRES = Instant.parse("2026-09-14T09:15:00Z");
 
+    private static final Instant FIRST_SESSION = Instant.parse("2026-11-19T22:00:00Z");
+
     private static Registration twoSessions() {
         return Registration.request(
                 "reg-1",
@@ -28,7 +34,8 @@ class RegistrationTest {
                 List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES),
                         SeatHold.hold("h-2", "ses-2", 1, EXPIRES)),
                 Money.aud("148.50"),
-                "TOK_OK");
+                "TOK_OK",
+                FIRST_SESSION);
     }
 
     @Test
@@ -56,6 +63,7 @@ class RegistrationTest {
             assertThat(requested.currency()).isEqualTo("AUD");
             assertThat(requested.cardToken()).isEqualTo("TOK_OK");
             assertThat(requested.holdExpiresAt()).isEqualTo(EXPIRES);
+            assertThat(requested.firstSessionStartsAt()).isEqualTo(FIRST_SESSION);
         });
         assertThat(events.subList(1, 3))
                 .allSatisfy(event -> assertThat(event).isInstanceOf(SeatsReserved.class));
@@ -71,7 +79,7 @@ class RegistrationTest {
     @Test
     void refusesARegistrationHoldingNoSeats() {
         assertThatThrownBy(() -> Registration.request(
-                "reg-1", ATTENDEE, "conf-1", List.of(), Money.aud("0.00"), "TOK_OK"))
+                "reg-1", ATTENDEE, "conf-1", List.of(), Money.aud("0.00"), "TOK_OK", FIRST_SESSION))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("at least one");
     }
@@ -86,7 +94,7 @@ class RegistrationTest {
                 "reg-1", ATTENDEE, "conf-1",
                 List.of(SeatHold.hold("h-1", "ses-1", 1, EXPIRES.plusSeconds(60)),
                         SeatHold.hold("h-2", "ses-2", 1, EXPIRES)),
-                Money.aud("20.00"), "TOK_OK");
+                Money.aud("20.00"), "TOK_OK", FIRST_SESSION);
 
         RegistrationRequested requested = (RegistrationRequested) registration.pullDomainEvents().get(0);
 
@@ -98,7 +106,7 @@ class RegistrationTest {
     void refusesAPaidRegistrationWithNoCardToken() {
         assertThatThrownBy(() -> Registration.request(
                 "reg-1", ATTENDEE, "conf-1",
-                List.of(SeatHold.hold("h-1", "ses-1", 1, EXPIRES)), Money.aud("49.50"), " "))
+                List.of(SeatHold.hold("h-1", "ses-1", 1, EXPIRES)), Money.aud("49.50"), " ", FIRST_SESSION))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("card token");
     }
@@ -112,7 +120,7 @@ class RegistrationTest {
     void confirmsAFreeRegistrationImmediatelyWithoutAskingForPayment() {
         Registration registration = Registration.request(
                 "reg-free", ATTENDEE, "conf-1",
-                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null);
+                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null, FIRST_SESSION);
 
         assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
         assertThat(registration.getSeatHolds())
@@ -132,7 +140,7 @@ class RegistrationTest {
     void neverExpiresAFreeRegistration() {
         Registration registration = Registration.request(
                 "reg-free", ATTENDEE, "conf-1",
-                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null);
+                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null, FIRST_SESSION);
 
         assertThat(registration.isExpiredAt(EXPIRES.plusSeconds(3600))).isFalse();
     }
@@ -227,5 +235,158 @@ class RegistrationTest {
 
         assertThat(registration.pullDomainEvents()).hasSize(3);
         assertThat(registration.pullDomainEvents()).isEmpty();
+    }
+
+    private static final Instant NOW = Instant.parse("2026-10-09T02:00:00Z");
+
+    private static Registration confirmedTwoSessions() {
+        Registration registration = twoSessions();
+        registration.confirm();
+        registration.pullDomainEvents();
+        return registration;
+    }
+
+    /** Billing may decline, so nothing is given up until it answers. */
+    @Test
+    void asksBillingForTheMoneyBackWithoutGivingAnythingUpYet() {
+        Registration registration = confirmedTwoSessions();
+
+        registration.requestRefund("  I have been hospitalised  ", RefundRequester.AGENT, NOW);
+
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
+        assertThat(registration.getSeatHolds())
+                .allSatisfy(hold -> assertThat(hold.getStatus()).isEqualTo(SeatHoldStatus.CONFIRMED));
+        assertThat(registration.isRefundRequested()).isTrue();
+        assertThat(registration.getRefundRequestedAt()).isEqualTo(NOW);
+        assertThat(registration.pullDomainEvents()).singleElement()
+                .isInstanceOfSatisfying(RefundRequested.class, requested -> {
+                    assertThat(requested.registrationId()).isEqualTo("reg-1");
+                    assertThat(requested.attendeeId()).isEqualTo("att-1042");
+                    assertThat(requested.reason()).isEqualTo("I have been hospitalised");
+                    assertThat(requested.requestedBy()).isEqualTo("AGENT");
+                    assertThat(requested.kind()).isEqualTo(RefundRequested.KIND_ATTENDEE_REQUEST);
+                    assertThat(requested.occurredAt()).isEqualTo(NOW);
+                });
+    }
+
+    @Test
+    void refusesARefundBeforeTheRegistrationIsConfirmed() {
+        assertThatThrownBy(() -> twoSessions().requestRefund("x", RefundRequester.ATTENDEE, NOW))
+                .isInstanceOf(RegistrationNotConfirmedException.class)
+                .hasMessageContaining("PENDING_PAYMENT");
+    }
+
+    @Test
+    void refusesARefundOfARegistrationAlreadyRefunded() {
+        Registration registration = confirmedTwoSessions();
+        registration.refund();
+
+        assertThatThrownBy(() -> registration.requestRefund("again", RefundRequester.ATTENDEE, NOW))
+                .isInstanceOf(RegistrationNotConfirmedException.class);
+    }
+
+    /** A free registration took no payment, so there is no money to ask for. */
+    @Test
+    void refusesARefundOfAFreeRegistration() {
+        Registration free = Registration.request("reg-free", ATTENDEE, "conf-1",
+                List.of(SeatHold.hold("h-1", "ses-1", 2, EXPIRES)), Money.aud("0.00"), null, FIRST_SESSION);
+
+        assertThatThrownBy(() -> free.requestRefund("x", RefundRequester.ATTENDEE, NOW))
+                .isInstanceOf(NothingToRefundException.class);
+    }
+
+    @Test
+    void refusesASecondRequestWhileTheFirstAwaitsADecision() {
+        Registration registration = confirmedTwoSessions();
+        registration.requestRefund("first", RefundRequester.ATTENDEE, NOW);
+
+        assertThatThrownBy(() -> registration.requestRefund("second", RefundRequester.ATTENDEE, NOW))
+                .isInstanceOf(RefundAlreadyRequestedException.class);
+    }
+
+    @Test
+    void acceptsANewRequestOnceTheFirstWasDeclined() {
+        Registration registration = confirmedTwoSessions();
+        registration.requestRefund("first", RefundRequester.ATTENDEE, NOW);
+        registration.clearRefundRequest();
+        registration.pullDomainEvents();
+
+        registration.requestRefund("second", RefundRequester.ATTENDEE, NOW.plusSeconds(60));
+
+        assertThat(registration.getRefundRequestedAt()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(registration.pullDomainEvents()).hasSize(1);
+    }
+
+    @Test
+    void requiresAReasonForARefund() {
+        assertThatThrownBy(() -> confirmedTwoSessions().requestRefund(" ", RefundRequester.ATTENDEE, NOW))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** Every session's seats come back, each announced under its own session — Review Focus 4. */
+    @Test
+    void refundReleasesEverySeatAndAnnouncesEachSession() {
+        Registration registration = confirmedTwoSessions();
+        registration.requestRefund("x", RefundRequester.ATTENDEE, NOW);
+        registration.pullDomainEvents();
+
+        registration.refund();
+
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.REFUNDED);
+        assertThat(registration.getSeatHolds())
+                .allSatisfy(hold -> assertThat(hold.getStatus()).isEqualTo(SeatHoldStatus.RELEASED));
+        assertThat(registration.isRefundRequested()).isFalse();
+        List<DomainEvent> events = registration.pullDomainEvents();
+        assertThat(events).allSatisfy(event -> assertThat(event).isInstanceOf(SeatsReleased.class));
+        assertThat(events).extracting(event -> ((SeatsReleased) event).sessionId())
+                .containsExactly("ses-1", "ses-2");
+        assertThat(events).extracting(event -> ((SeatsReleased) event).quantity())
+                .containsExactly(2, 1);
+    }
+
+    @Test
+    void refusesToRefundARegistrationThatWasNeverConfirmed() {
+        assertThatThrownBy(() -> twoSessions().refund()).isInstanceOf(IllegalStateException.class);
+    }
+
+    /**
+     * The defect FR-07 recorded: a charge that lands seconds after the hold expired. The seats are
+     * already gone, so the registration stays EXPIRED and simply asks for the money to go back.
+     */
+    @Test
+    void asksForALatePaymentBackOnceTheSeatsAreGone() {
+        Registration registration = twoSessions();
+        registration.expire();
+        registration.pullDomainEvents();
+
+        registration.requestLatePaymentReversal();
+
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.EXPIRED);
+        assertThat(registration.isRefundRequested())
+                .as("nobody asked, so there is no pending attendee request to settle")
+                .isFalse();
+        assertThat(registration.pullDomainEvents()).singleElement()
+                .isInstanceOfSatisfying(RefundRequested.class, requested -> {
+                    assertThat(requested.requestedBy()).isEqualTo(RefundRequested.REQUESTED_BY_SYSTEM);
+                    assertThat(requested.kind()).isEqualTo(RefundRequested.KIND_LATE_PAYMENT_REVERSAL);
+                    assertThat(requested.reason()).contains("EXPIRED");
+                });
+    }
+
+    @Test
+    void reversesALatePaymentForACancelledRegistrationToo() {
+        Registration registration = twoSessions();
+        registration.cancel();
+        registration.pullDomainEvents();
+
+        registration.requestLatePaymentReversal();
+
+        assertThat(registration.pullDomainEvents()).singleElement().isInstanceOf(RefundRequested.class);
+    }
+
+    @Test
+    void refusesToReverseThePaymentOfAConfirmedRegistration() {
+        assertThatThrownBy(() -> confirmedTwoSessions().requestLatePaymentReversal())
+                .isInstanceOf(IllegalStateException.class);
     }
 }

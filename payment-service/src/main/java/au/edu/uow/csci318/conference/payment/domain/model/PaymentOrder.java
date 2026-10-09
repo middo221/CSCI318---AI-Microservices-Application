@@ -3,6 +3,8 @@ package au.edu.uow.csci318.conference.payment.domain.model;
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
 import au.edu.uow.csci318.conference.common.event.PaymentFailed;
 import au.edu.uow.csci318.conference.common.event.PaymentSucceeded;
+import au.edu.uow.csci318.conference.payment.domain.AlreadyRefundedException;
+import au.edu.uow.csci318.conference.payment.domain.OrderNotPaidException;
 import au.edu.uow.csci318.conference.payment.domain.gateway.ChargeResult;
 import au.edu.uow.csci318.conference.payment.domain.gateway.PaymentGateway;
 import jakarta.persistence.AttributeOverride;
@@ -20,6 +22,7 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderColumn;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -49,6 +52,11 @@ import java.util.UUID;
  * charging for seats that are already back on sale. The attempts list is still a list — as the
  * specification models it — so a retry flow can be added without a schema change if the group ever
  * decides the saga should allow one.
+ *
+ * <p><strong>Refunded at most once.</strong> {@link #markRefunded()} moves {@code PAID → REFUNDED}
+ * exactly once, and the version column makes that hold when the organiser's override and an
+ * attendee's request read the order together: only the first commit wins. A {@code Long} rather than
+ * a {@code long}, so a new order is recognisably new and is inserted rather than merged.
  *
  * <p><strong>Events are recorded, not published.</strong> The application service drains them with
  * {@link #pullDomainEvents()} <em>before</em> saving — the order arrives with its id already
@@ -81,6 +89,15 @@ public class PaymentOrder {
     @Column(name = "hold_expires_at", nullable = false)
     private Instant holdExpiresAt;
 
+    /**
+     * When the registration's first session begins — what the refund policy counts days back from.
+     * Nullable: an order raised from a {@code registration-requested} produced before this field
+     * existed has no date, and the policy then declines with {@code EVENT_DATE_UNKNOWN} rather than
+     * guessing.
+     */
+    @Column(name = "first_session_starts_at")
+    private Instant firstSessionStartsAt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 16)
     private PaymentStatus status;
@@ -93,6 +110,10 @@ public class PaymentOrder {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Version
+    @Column(name = "version")
+    private Long version;
+
     @Transient
     private final List<DomainEvent> domainEvents = new ArrayList<>();
 
@@ -100,11 +121,13 @@ public class PaymentOrder {
         // required by JPA
     }
 
-    private PaymentOrder(String id, String registrationId, Money amount, Instant holdExpiresAt) {
+    private PaymentOrder(String id, String registrationId, Money amount, Instant holdExpiresAt,
+                         Instant firstSessionStartsAt) {
         this.id = id;
         this.registrationId = registrationId;
         this.amount = amount;
         this.holdExpiresAt = holdExpiresAt;
+        this.firstSessionStartsAt = firstSessionStartsAt;
         this.status = PaymentStatus.PENDING;
         this.createdAt = Instant.now();
     }
@@ -112,10 +135,13 @@ public class PaymentOrder {
     /**
      * Raises an order for what a registration owes.
      *
+     * <p>{@code firstSessionStartsAt} is deliberately not checked: it may be null.
+     *
      * @throws IllegalArgumentException if any attribute is missing, or the amount is zero —
      *                                  specification section 4.1 requires more than zero
      */
-    public static PaymentOrder raise(String id, String registrationId, Money amount, Instant holdExpiresAt) {
+    public static PaymentOrder raise(String id, String registrationId, Money amount,
+                                     Instant holdExpiresAt, Instant firstSessionStartsAt) {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("payment order id must be supplied");
         }
@@ -132,7 +158,7 @@ public class PaymentOrder {
         if (holdExpiresAt == null) {
             throw new IllegalArgumentException("payment order must know when the seat hold expires");
         }
-        return new PaymentOrder(id, registrationId.trim(), amount, holdExpiresAt);
+        return new PaymentOrder(id, registrationId.trim(), amount, holdExpiresAt, firstSessionStartsAt);
     }
 
     /**
@@ -190,6 +216,33 @@ public class PaymentOrder {
                 reason));
     }
 
+    /**
+     * Checks that money can still go back against this order.
+     *
+     * @throws AlreadyRefundedException if it already has
+     * @throws OrderNotPaidException    if the order never took any
+     */
+    public void requireRefundable() {
+        if (status == PaymentStatus.REFUNDED) {
+            throw new AlreadyRefundedException(id);
+        }
+        if (status != PaymentStatus.PAID) {
+            throw new OrderNotPaidException(id, status);
+        }
+    }
+
+    /**
+     * Records that money went back. Records no event of its own: the {@code Refund} aggregate
+     * announces the refund, carrying this order's id.
+     *
+     * @throws AlreadyRefundedException if it already has
+     * @throws OrderNotPaidException    if the order never took any
+     */
+    public void markRefunded() {
+        requireRefundable();
+        status = PaymentStatus.REFUNDED;
+    }
+
     private void requirePending() {
         if (status != PaymentStatus.PENDING) {
             throw new IllegalStateException(
@@ -219,6 +272,11 @@ public class PaymentOrder {
 
     public Instant getHoldExpiresAt() {
         return holdExpiresAt;
+    }
+
+    /** {@code null} when the request that raised this order did not say. */
+    public Instant getFirstSessionStartsAt() {
+        return firstSessionStartsAt;
     }
 
     public PaymentStatus getStatus() {

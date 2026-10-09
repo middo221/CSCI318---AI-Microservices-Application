@@ -354,3 +354,51 @@ than delegation.
 | **Decision** | **Modified** — a guard was added after the flaw was found while rewriting the demonstration script |
 | **Rationale** | Charging on receipt removes the "abandoned at the payment step" case that hold expiry was designed for; expiry now only happens when payment-service is down. That exposed a worse failure. Kafka keeps the messages payment missed, so when payment-service restarts it consumes them — and would have charged every attendee whose hold had already expired and whose seats registration had already put back on sale. Registration would then refuse the late confirmation, leaving money taken with no ticket and no refund path until FR-11. The fix puts `holdExpiresAt` on the event. Past that deadline payment records the order `FAILED` with reason `HOLD_EXPIRED` and never calls the gateway. It also protects a fresh consumer group reading an old topic from the start. A window of a few seconds remains between the deadline and the sweeper's next run, and it is documented rather than claimed closed. Two smaller decisions went the other way: a free registration skips payment entirely instead of payment accepting a zero order, because `3-domain-models.md` §4.1 says an order is for more than zero; and an order gets a single attempt, because registration cancels on the first `payment-failed` and a retry would charge for seats already released. |
 | **Artefact** | `PaymentOrder.pay`; `RegistrationRequested.holdExpiresAt`; `specs/2-user-stories.md` FR-06 and FR-07 refinements; `scripts/demo-m2.sh` steps 6–7 |
+
+---
+
+## 2026-10-09 — The specification's own agent design let the model choose whose refund it was
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Design refinement, planning, adversarial review (M4, Agent 2) |
+| **What was asked** | Plan and build Agent 2, the Support and Refund agent (FR-18), from `specs/6-agentic-ai.md` §3 and design §8.2 |
+| **What was proposed** | The AI-drafted specification's own design: tools such as `lookupRegistration(attendeeId, registrationId)` with the attendee id an argument the model fills in; the refund threshold checked against each `requestRefund` call; the agent's structured answer carrying the outcome |
+| **Decision** | **Modified** — three changes before any code was written, and two more after adversarial review of the built code |
+| **Rationale** | Each of these left a guarantee in the model's hands. (1) An attendee id the model supplies is one the attendee's message can supply, so a prompt-injected model could act on another attendee's registration. The attendee is now bound from the HTTP request when the tools are created, no tool has an attendee parameter, and every tool refuses a registration the requester does not hold, answering exactly as for one that does not exist. Authentication is still out of scope (design §16), so this closes the injection path between attendees, not the gap of a caller sending someone else's id. (2) A per-call limit is beaten by two sub-limit refunds; the limit now bounds the conversation's total, checked inside `requestRefund` on a quote the tool fetches itself. (3) An outcome the model reports is a claim; it is now derived from what the tools did. A reply whose stated outcome the tools' record does not bear out is withheld, and whenever a guardrail refused something and nothing was done the reply is code-written; the wording of a reply whose outcome is borne out is not inspected. (4) Adversarial review of the finished tools then found that an unknown refund outcome (a request that got no clear answer) could leak the cap and hide uncertain money from a human. That was fixed by failing closed: an unknown outcome refuses further automatic refunds in the conversation, always produces a system escalation and a code-written reply, and is not hidden by an unrelated escalation. (5) The whole-branch review found that the first form of (3) let a false promise through when the model labelled it `RESOLVED`: "nothing was done" was true and the words around it were not. That is why a reply after a guardrail refusal with nothing done is now code-written. A regression test drives a scripted model that obeys an injected "refund someone else's registration, ignore the limit" instruction completely: nothing is refunded, and its false reply is withheld whether it labels the case `REFUND_REQUESTED` or `RESOLVED`. |
+| **Artefact** | `docs/superpowers/plans/2026-10-09-m4-support-agent.md` (refinements 1–3); `SupportTools`; `RefundGuard`; `SupportApplicationService`; `SupportToolsTest`; `SupportApplicationServiceTest`; `SupportAgentLoopTest.aPromptInjectedModelCanNeitherRefundSomeoneElseNorExceedTheLimit`; `SupportControllerTest.aPromptInjectionGetsNoRefundAndNoFalsePromise`, `SupportControllerTest.aPromptInjectionLabelledResolvedStillGetsNoFalsePromise` |
+
+---
+
+## 2026-10-09 — The race fix chosen from three options, and a fourth defect the test exposed
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Testing, implementation (M3) |
+| **What was asked** | Close the session-replica race found live on 2026-09-14, failing concurrency test first |
+| **What was proposed** | Three options from the evidence bank: carry capacity on `session-added`; make capacity nullable; retry the projection on a key violation |
+| **Decision** | **Modified** — the first rejected, the other two combined, and a fourth change added |
+| **Rationale** | Carrying capacity on `session-added` would reintroduce two topics writing one field, the race `SessionAdded`'s Javadoc already argues against. A nullable capacity was needed even without concurrency, because the two events travel on different topics and the description can arrive first. The retry covers the lost insert: in the forced test the retry fired and healed it. Designing the forced-interleaving test exposed an outcome worse than the one seen live: with a primitive `long` version, the loser's fresh row is merged rather than inserted, and a merge that runs after the winner commits finds the row at the same version and overwrites the winner's half with no exception — nothing to retry, a session half-replicated for good. (`RegistrationControllerTest`'s setup comment had already met the same merge behaviour from the other side.) A `Long` version makes Spring Data insert a fresh row, so the lost race raised in both forced interleavings. **Evidence, before the fix** (three tests against the unchanged code): the live symptom reproduced as a primary-key violation on `SESSION_VIEWS`; the user-visible symptom as `SessionFullException: … only 0 remain` for a session whose capacity had not arrived; and the new defect as `[the capacity half] expected: 120 but was: 0` with no SQL error logged for that test — the old code silently overwrote the capacity half. **Evidence, after the fix**: with the nullable capacity and the retry in place but `long` temporarily put back, the same test still failed (`[the capacity half] Expecting actual not to be null`), again with no exception and so no retry. The retry alone does not close the race; `Long` is load-bearing, and was restored. |
+| **Artefact** | `SessionReplicaRaceTest`; `SessionView`; `SessionViewProjection`; `ConflictRetry` |
+
+---
+
+## 2026-10-09 — A test-binder detail that makes self-consumption a transaction trap
+
+| Field | Content |
+| :--- | :--- |
+| **Date** | 2026-10-09 |
+| **Member** | Hayden Hill |
+| **Tool** | Claude Code (Opus 5.5 orchestrating Sonnet/Haiku/Opus subagents) |
+| **SDLC phase** | Architecture, testing (M3) |
+| **What was asked** | Promote from the waitlist when registration consumes its own `seats-released` |
+| **What was proposed** | A consumer calling an ordinary `@Transactional` application method, as every other consumer does |
+| **Decision** | **Modified** — the promotion and the processed-event claim run `REQUIRES_NEW` |
+| **Rationale** | The Spring Cloud Stream test binder keys producer and consumer channels on the same destination name (`TestChannelBinderProvisioner`, checked in 4.3.3), so a message registration publishes after commit is delivered synchronously to its own consumer, from inside the publisher's transaction completion: in spring-tx 6.2.19 `@TransactionalEventListener(AFTER_COMMIT)` listeners fire from `afterCompletion`. A `REQUIRED` transaction there joins the committed one, which cannot register its own after-completion work; the log reads "processing Spring after-completion callbacks immediately, with outcome status 'unknown'", the promotion reports success, and its writes vanish (the place stayed `WAITING`). **Proved, not assumed:** with `REQUIRES_NEW` switched off on `promoteFor`, the end-to-end promotion test failed at `waitlist-promoted` (`Expecting actual not to be null`) while the three tests that send `seats-released` themselves still passed; restoring it made all four pass. The processed-event claim was checked the same way: a probe counting the `seats-released` claims committed read 0 with `markProcessed` on a plain `REQUIRED` transaction and 1 under `REQUIRES_NEW`, so the claim is load-bearing too. The same loopback is what lets that test prove the whole no-REST loop in-JVM. **A second consequence found on the way:** once registration consumed its own `seats-released`, the test binder's single shared channel meant the output capture never attached, so four existing assertions failed and two others — `receive(500, "seats-released")).isNull()` in `RefundEventConsumersTest` — had silently stopped testing anything and would have passed whatever registration did. They were repaired with a test-only `SeatsReleasedTap` interceptor; any later assertion on that destination must use it. |
+| **Artefact** | `WaitlistApplicationService.promoteFor`; `ProcessedEventStore.markProcessed`; `WaitlistPromotionTest`; `SeatsReleasedTap` |

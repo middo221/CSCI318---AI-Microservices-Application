@@ -27,12 +27,9 @@ import java.util.function.Consumer;
  * a replayed topic after a restart would sail past the guard and hand an attendee two codes for
  * one seat.
  *
- * <p><strong>{@code refund-issued} and {@code event-cancelled} are not consumed yet.</strong>
- * Specification section 6.3 voids tickets on both, and {@code Ticket.voidTicket} and
- * {@code TicketVoided} are implemented and tested for exactly that. Neither event has a record in
- * {@code common-events} and neither producer exists — {@code payment-service} and the catalogue's
- * cancellation path are other members' work — so the beans are deliberately absent rather than
- * bound to a topic nobody writes. {@code registration-cancelled} is not consumed either:
+ * <p><strong>{@code event-cancelled} is not consumed yet.</strong> Nothing produces it.
+ * {@code refund-issued} is consumed by {@code PaymentEventConsumers}, because it is Billing's
+ * event. {@code registration-cancelled} is not consumed either:
  * {@code Registration.cancel()} runs only from {@code PENDING_PAYMENT}, so a cancelled
  * registration never had tickets and the handler would be a permanent no-op.
  */

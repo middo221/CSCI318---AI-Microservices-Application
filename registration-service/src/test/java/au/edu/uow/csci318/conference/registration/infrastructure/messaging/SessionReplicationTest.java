@@ -76,13 +76,14 @@ class SessionReplicationTest {
         assertThat(view.getTimeSlot().end()).isEqualTo(LocalDateTime.parse("2026-09-14T10:30"));
         assertThat(view.getPrice().amount()).isEqualByComparingTo("49.50");
         assertThat(view.getPrice().currency()).isEqualTo("AUD");
-        assertThat(view.isComplete()).isTrue();
+        assertThat(view.isComplete()).as("described, but its capacity has not arrived").isFalse();
     }
 
     @Test
     void takesCapacityOnlyFromTheCapacityTopic() {
         sessionAdded("occ-11", "ses-11", "Observability in practice");
-        assertThat(views.findById("ses-11").orElseThrow().getCapacity()).isZero();
+        assertThat(views.findById("ses-11").orElseThrow().getCapacity())
+                .as("unknown until the capacity topic speaks").isNull();
 
         capacityChanged("occ-12", "ses-11", 120);
 

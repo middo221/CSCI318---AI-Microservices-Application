@@ -12,11 +12,14 @@ import java.time.Instant;
  * layer does not depend on the shape of a Kafka message. The consumer does the translation.
  *
  * <p>{@code holdExpiresAt} is when registration releases the seats; nothing is charged after it.
+ * {@code firstSessionStartsAt} is what the refund policy counts days back from; it is null for a
+ * request produced before registration sent it.
  */
 public record PayForRegistrationCommand(String registrationId,
                                         Money amount,
                                         Instant holdExpiresAt,
-                                        CardToken cardToken) {
+                                        CardToken cardToken,
+                                        Instant firstSessionStartsAt) {
 
     public PayForRegistrationCommand {
         if (registrationId == null || registrationId.isBlank()) {

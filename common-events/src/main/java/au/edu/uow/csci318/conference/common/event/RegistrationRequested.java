@@ -32,6 +32,13 @@ import java.time.Instant;
  * attendees for seats registration has already expired and put back on sale. Past this instant,
  * Billing refuses the charge instead of taking it.
  *
+ * <p><strong>{@link #firstSessionStartsAt()} is when the attendee's first session begins</strong> —
+ * the instant the refund policy counts days back from. Registration knows it from its replica of the
+ * programme; Billing has none. It is deliberately <em>not</em> validated: it was added after this
+ * event was in use, and a message produced before it existed must still deserialise, the same
+ * reasoning as {@code RegistrationConfirmed.attendeeName}. Billing treats a missing value as an
+ * unknown event date and declines a policy refund rather than guessing.
+ *
  * <p>A free registration never produces this event: a payment order must be for more than zero,
  * so {@code registration-service} confirms a zero-total registration on the spot instead.
  */
@@ -44,7 +51,8 @@ public record RegistrationRequested(
         BigDecimal totalAmount,
         String currency,
         Instant holdExpiresAt,
-        String cardToken) implements DomainEvent {
+        String cardToken,
+        Instant firstSessionStartsAt) implements DomainEvent {
 
     @Override
     public String partitionKey() {

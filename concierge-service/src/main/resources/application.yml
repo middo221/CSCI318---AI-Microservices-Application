@@ -16,9 +16,16 @@ conference:
   concierge:
     catalog-base-url: http://localhost:8081
     registration-base-url: http://localhost:8082
+    payment-base-url: http://localhost:8083
+    ticketing-base-url: http://localhost:8084
     # A conference day holds roughly this many sessions. Beyond it an "agenda" is
     # just the programme again, which helps nobody.
     max-agenda-items: 8
+    # FR-18. The most money the support agent may move without a human. Enforced inside
+    # the requestRefund tool, never in the prompt (design section 8.2), and applied to the
+    # total one conversation requests, so asking twice does not get round it.
+    refund-auto-approve-threshold: 200.00
+    currency: AUD
 
 langchain4j:
   google-ai-gemini:

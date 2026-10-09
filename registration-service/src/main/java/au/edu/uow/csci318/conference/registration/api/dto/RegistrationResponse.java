@@ -13,6 +13,8 @@ import java.util.List;
  * <p>Flattens the aggregate rather than serialising it. Exposing the entity directly would publish
  * the persistence model as the API contract, so a mapping change would silently become a breaking
  * change for the concierge agents that read this.
+ *
+ * <p>{@code refundRequested} is true while a refund is with Billing awaiting a decision.
  */
 public record RegistrationResponse(String id,
                                    String attendeeId,
@@ -23,7 +25,8 @@ public record RegistrationResponse(String id,
                                    BigDecimal totalAmount,
                                    String currency,
                                    Instant createdAt,
-                                   List<SeatHoldResponse> seatHolds) {
+                                   List<SeatHoldResponse> seatHolds,
+                                   boolean refundRequested) {
 
     /** One block of seats held against one session. */
     public record SeatHoldResponse(String id,
@@ -53,6 +56,7 @@ public record RegistrationResponse(String id,
                 registration.getTotalAmount().amount(),
                 registration.getTotalAmount().currency(),
                 registration.getCreatedAt(),
-                registration.getSeatHolds().stream().map(SeatHoldResponse::from).toList());
+                registration.getSeatHolds().stream().map(SeatHoldResponse::from).toList(),
+                registration.isRefundRequested());
     }
 }

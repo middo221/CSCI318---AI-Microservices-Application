@@ -1,17 +1,24 @@
 package au.edu.uow.csci318.conference.payment.infrastructure.messaging;
 
+import au.edu.uow.csci318.conference.common.event.RefundRequested;
 import au.edu.uow.csci318.conference.common.event.RegistrationRequested;
 import au.edu.uow.csci318.conference.payment.application.PaymentApplicationService;
+import au.edu.uow.csci318.conference.payment.application.RefundApplicationService;
+import au.edu.uow.csci318.conference.payment.application.command.DecideRefundCommand;
 import au.edu.uow.csci318.conference.payment.application.command.PayForRegistrationCommand;
 import au.edu.uow.csci318.conference.payment.domain.model.CardToken;
 import au.edu.uow.csci318.conference.payment.domain.model.Money;
 import au.edu.uow.csci318.conference.payment.domain.model.PaymentOrder;
+import au.edu.uow.csci318.conference.payment.domain.model.Refund;
+import jakarta.persistence.OptimisticLockException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.messaging.Message;
 
+import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
@@ -28,9 +35,10 @@ import java.util.function.Consumer;
  * second guard is the one that matters after a restart: {@code ddl-auto: create-drop} empties the
  * table, and a replayed topic would otherwise charge every attendee again.
  *
- * <p><strong>{@code refund-requested} is not consumed yet.</strong> Refunds are FR-11, in M3, and the
- * event has no record in {@code common-events}, so the bean is deliberately absent rather than bound
- * to a topic nobody writes.
+ * <p>{@code refund-requested} is decided by {@code RefundApplicationService}. Its idempotency rests
+ * on the same two guards: the processed-event table, and the order's own state - an order moves to
+ * {@code REFUNDED} once, so a replayed request is answered {@code ALREADY_REFUNDED} instead of
+ * refunding twice.
  */
 @Configuration
 public class RegistrationEventConsumers {
@@ -39,11 +47,14 @@ public class RegistrationEventConsumers {
 
     private final ProcessedEventStore processedEvents;
     private final PaymentApplicationService payments;
+    private final RefundApplicationService refunds;
 
     public RegistrationEventConsumers(ProcessedEventStore processedEvents,
-                                      PaymentApplicationService payments) {
+                                      PaymentApplicationService payments,
+                                      RefundApplicationService refunds) {
         this.processedEvents = processedEvents;
         this.payments = payments;
+        this.refunds = refunds;
     }
 
     /** Handles {@code registration-requested}: raises an order and charges it (FR-07). */
@@ -60,7 +71,8 @@ public class RegistrationEventConsumers {
                         event.registrationId(),
                         new Money(event.totalAmount(), event.currency()),
                         event.holdExpiresAt(),
-                        new CardToken(event.cardToken())));
+                        new CardToken(event.cardToken()),
+                        event.firstSessionStartsAt()));
                 log.info("payment order {} for registration {} is {} ({} {})",
                         order.getId(), order.getRegistrationId(), order.getStatus(),
                         order.getAmount().amount(), order.getAmount().currency());
@@ -71,6 +83,61 @@ public class RegistrationEventConsumers {
                 // which would block the partition for every registration behind it. The
                 // registration's hold expires on its own and returns the seats.
                 log.warn("cannot charge registration {}: {}", event.registrationId(), ex.getMessage());
+            }
+        };
+    }
+
+    /**
+     * Handles {@code refund-requested}: decides the refund and announces the outcome (FR-11).
+     *
+     * <p>The event's {@code requestedBy} and {@code kind} strings are translated here, at the
+     * boundary, so the application layer never compares against another context's vocabulary. An
+     * unrecognised value is treated as an ordinary attendee request.
+     */
+    @Bean
+    public Consumer<Message<RefundRequested>> refundRequested() {
+        return message -> {
+            RefundRequested event = message.getPayload();
+            if (!processedEvents.markProcessed(event.eventId(), event.eventType())) {
+                log.debug("ignoring redelivered {} id={}", event.eventType(), event.eventId());
+                return;
+            }
+            DecideRefundCommand command;
+            try {
+                command = new DecideRefundCommand(
+                        event.registrationId(),
+                        event.reason(),
+                        RefundRequested.REQUESTED_BY_AGENT.equals(event.requestedBy()),
+                        RefundRequested.KIND_LATE_PAYMENT_REVERSAL.equals(event.kind()));
+            }
+            catch (IllegalArgumentException ex) {
+                // Nothing to retry: a request with no registration id can never be decided.
+                log.warn("cannot decide refund for registration {}: {}", event.registrationId(), ex.getMessage());
+                return;
+            }
+            try {
+                Optional<Refund> decided;
+                try {
+                    decided = refunds.decide(command);
+                }
+                catch (OptimisticLockingFailureException | OptimisticLockException ex) {
+                    // Two decisions for one order both passed requireRefundable(); this one lost at
+                    // commit, outside decide's body. Decide again in a fresh transaction: the order
+                    // is now REFUNDED, so registration is told ALREADY_REFUNDED and always hears back.
+                    log.info("refund of registration {} lost a concurrent race; deciding once more",
+                            event.registrationId());
+                    decided = refunds.decide(command);
+                }
+                decided.ifPresentOrElse(
+                        refund -> log.info("refund {} for registration {} is {} ({}%, {})",
+                                refund.getId(), refund.getRegistrationId(), refund.getStatus(),
+                                refund.getRefundPercent(), refund.getDecisionCode()),
+                        () -> log.info("refund for registration {} refused before any decision",
+                                event.registrationId()));
+            }
+            catch (OptimisticLockingFailureException | OptimisticLockException ex) {
+                // Lost twice: absorbed, because a rethrow is redelivered forever and blocks the partition.
+                log.warn("refund of registration {} lost the race twice: {}", event.registrationId(), ex.getMessage());
             }
         };
     }
