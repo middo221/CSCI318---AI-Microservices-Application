@@ -167,13 +167,23 @@ if [ "$CODE" != "200" ]; then
       note "with a higher free-tier limit."
       ;;
     502)
-      fail "502 LLM_UNAVAILABLE - the concierge has no language model."
-      printf '\n'
-      note "Put GEMINI_API_KEY in .env and run: bash scripts/run-all.sh   (it reads .env and passes the key to the concierge)."
-      note "Or stop concierge-service and restart it with the key exported into ITS shell:"
-      printf '\n'
-      printf '     %sset -a; . ./.env; set +a%s\n' "$bold" "$off"
-      printf '     %s./mvnw spring-boot:run -pl concierge-service%s\n' "$bold" "$off"
+      MESSAGE=$(printf '%s' "$RESPONSE" | jsonval "['message']" 2>/dev/null || echo "")
+      case "$MESSAGE" in
+        "No language model is configured"*)
+          fail "502 LLM_UNAVAILABLE - the concierge has no language model."
+          printf '\n'
+          note "Put GEMINI_API_KEY in .env and run: bash scripts/run-all.sh   (it reads .env and passes the key to the concierge)."
+          note "Or stop concierge-service and restart it with the key exported into ITS shell:"
+          printf '\n'
+          printf '     %sset -a; . ./.env; set +a%s\n' "$bold" "$off"
+          printf '     %s./mvnw spring-boot:run -pl concierge-service%s\n' "$bold" "$off"
+          ;;
+        *)
+          fail "502 - the concierge has a model, but the model call failed: ${MESSAGE:-no message}"
+          note "The key is configured. The concierge log shows Gemini's reply: an upstream error, or an"
+          note "answer it could not read (it asks once more before giving up). Wait a minute and re-run."
+          ;;
+      esac
       ;;
     504) fail "504 LLM_TIMEOUT - the model did not answer in time. Try again." ;;
     *)   fail "HTTP $CODE - see the concierge terminal for the stack trace." ;;
