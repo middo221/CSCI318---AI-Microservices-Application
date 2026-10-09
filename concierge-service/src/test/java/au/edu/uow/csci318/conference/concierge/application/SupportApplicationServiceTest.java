@@ -140,7 +140,7 @@ class SupportApplicationServiceTest {
         assertThat(result.outcome()).isEqualTo(SupportOutcome.RESOLVED);
         assertThat(result.refunds()).isEmpty();
         assertThat(result.reply()).doesNotContain("$500").doesNotContain("refunded to you")
-                .contains("No refund has been requested");
+                .contains("No refund has been requested in this conversation");
         assertThat(result.notes())
                 .anySatisfy(note -> assertThat(note).contains("withheld"))
                 .anySatisfy(note -> assertThat(note).contains("reg-theirs"))
@@ -181,7 +181,7 @@ class SupportApplicationServiceTest {
 
         assertThat(result.outcome()).isEqualTo(SupportOutcome.RESOLVED);
         assertThat(result.reply()).doesNotContain("on its way")
-                .contains("No refund has been requested").contains("nothing has been passed to an organiser");
+                .contains("No refund has been requested in this conversation").contains("nothing has been passed to an organiser");
         assertThat(result.notes()).singleElement().asString().contains("withheld");
     }
 

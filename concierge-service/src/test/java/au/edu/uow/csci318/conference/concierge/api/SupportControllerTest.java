@@ -220,7 +220,7 @@ class SupportControllerTest {
                 .andExpect(jsonPath("$.outcome").value("RESOLVED"))
                 .andExpect(jsonPath("$.refunds.length()").value(0))
                 .andExpect(jsonPath("$.escalations.length()").value(0))
-                .andExpect(jsonPath("$.reply").value(containsString("No refund has been requested")))
+                .andExpect(jsonPath("$.reply").value(containsString("No refund has been requested in this conversation")))
                 .andExpect(jsonPath("$.notes").value(hasItem(containsString("withheld"))))
                 .andReturn();
 

@@ -229,9 +229,9 @@ public class SupportTools {
             case Refused refused -> new QuoteAnswer(false, null, false, refused.explanation());
             case Owned owned -> {
                 // The same checks requestRefund makes before it quotes, so the advice never contradicts the action.
-                Optional<String> blocked = refundBlocked(owned.registration());
+                Optional<RefundBlock> blocked = refundBlocked(owned.registration());
                 if (blocked.isPresent()) {
-                    yield new QuoteAnswer(false, null, false, blocked.get());
+                    yield new QuoteAnswer(false, null, false, blocked.get().explanation());
                 }
                 yield switch (quoteFor(owned.registration().registrationId())) {
                     case Quoted(RefundQuote quote) -> {
@@ -260,13 +260,14 @@ public class SupportTools {
         RegistrationDetails registration = ((Owned) ownership).registration();
         String id = registration.registrationId();
 
-        Optional<String> blocked = refundBlocked(registration);
+        Optional<RefundBlock> blocked = refundBlocked(registration);
         if (blocked.isPresent()) {
-            if (refundOutcomeUnknown) {
+            // Only uncertain money is a refusal; a refund already requested is not one, it is done.
+            if (blocked.get().outcomeUnknown()) {
                 refusals.add("Declined to request a refund on registration %s: an earlier refund's outcome is unknown."
                         .formatted(id));
             }
-            return RefundAnswer.notRequested(blocked.get());
+            return RefundAnswer.notRequested(blocked.get().explanation());
         }
 
         RefundQuote quote;
@@ -411,29 +412,40 @@ public class SupportTools {
         return new Refused(NOT_HELD.formatted(registrationId));
     }
 
+    /** Why a refund may not be requested now; {@code outcomeUnknown} when the reason is uncertain money. */
+    private record RefundBlock(String explanation, boolean outcomeUnknown) {
+    }
+
     /**
      * Why no refund may be requested on {@code registration} now, before any quote is fetched;
      * empty when one may be. {@link #evaluateRefundPolicy} and {@link #requestRefund} both ask, so
      * the advice never contradicts the action.
+     *
+     * <p>Most specific first. The registration whose refund went unanswered is unknown; one whose
+     * refund was accepted, here or earlier, is already requested, even if a later refund in this
+     * conversation went unanswered; only then does the unknown outcome block the rest.
      */
-    private Optional<String> refundBlocked(RegistrationDetails registration) {
+    private Optional<RefundBlock> refundBlocked(RegistrationDetails registration) {
         String id = registration.registrationId();
-        if (refundOutcomeUnknown) {
-            return Optional.of(id.equals(unknownRefundRegistrationId)
-                    ? ("The refund request for registration %s got no answer, so it is unknown whether it was "
-                            + "accepted. Do not retry; an organiser is notified automatically to check it.").formatted(id)
-                    : ("An earlier refund's outcome in this conversation is unknown, so no further refund can be "
-                            + "requested in it. An organiser is notified about that one automatically; call "
-                            + "escalateToOrganiser if the attendee wants registration %s refunded too.").formatted(id));
+        if (refundOutcomeUnknown && id.equals(unknownRefundRegistrationId)) {
+            return Optional.of(new RefundBlock(("The refund request for registration %s got no answer, so it is "
+                    + "unknown whether it was accepted. Do not retry; an organiser is notified automatically to "
+                    + "check it.").formatted(id), true));
         }
         if (refundsRequested.stream().anyMatch(refund -> refund.registrationId().equals(id))) {
-            return Optional.of(("A refund for registration %s has already been requested in this conversation. "
-                    + "Nothing more is needed for it.").formatted(id));
+            return Optional.of(new RefundBlock(("A refund for registration %s has already been requested in this "
+                    + "conversation. Nothing more is needed for it.").formatted(id), false));
         }
         if (registration.refundRequested()) {
-            return Optional.of(("A refund has already been requested for registration %s, so another cannot be "
-                    + "requested and nothing more is needed for it. Tell the attendee it is already in hand.")
-                    .formatted(id));
+            return Optional.of(new RefundBlock(("A refund has already been requested for registration %s, so "
+                    + "another cannot be requested and nothing more is needed for it. Tell the attendee it is "
+                    + "already in hand.").formatted(id), false));
+        }
+        if (refundOutcomeUnknown) {
+            return Optional.of(new RefundBlock(("An earlier refund's outcome in this conversation is unknown, so no "
+                    + "further refund can be requested in it. An organiser is notified about that one "
+                    + "automatically; call escalateToOrganiser if the attendee wants registration %s refunded too.")
+                    .formatted(id), true));
         }
         return Optional.empty();
     }

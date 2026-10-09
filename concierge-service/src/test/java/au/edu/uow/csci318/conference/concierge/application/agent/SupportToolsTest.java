@@ -443,6 +443,37 @@ class SupportToolsTest {
         assertThat(registrations.refundCalls()).extracting(RefundCall::registrationId).containsExactly("reg-mine");
     }
 
+    /**
+     * A refund already accepted stays "already requested" after a later one goes unanswered: the
+     * unknown outcome on reg-tiny is no reason to tell the model reg-mine needs an organiser, or
+     * to record a refusal for a refund that was in fact made.
+     */
+    @Test
+    void anAcceptedRefundIsStillReportedAsRequestedAfterALaterOneGoesUnanswered() {
+        registrations.withDetails(confirmed("reg-tiny", ME, "40.00"))
+                .withDetails(refundPending("reg-big", ME, "447.00"));
+        payments.quoting(fullRefund("reg-tiny", "40.00"));
+        assertThat(tools.requestRefund("reg-mine", "Hospitalised").requested()).isTrue();
+        registrations.withRefundsUnavailable();
+        tools.requestRefund("reg-tiny", "Clash");   // 149.00 + 40.00 is within the limit, so it is sent
+        assertThat(tools.refundOutcomeUnknown()).isTrue();
+        int refusalsBefore = tools.refusals().size();
+
+        SupportTools.RefundAnswer again = tools.requestRefund("reg-mine", "Hospitalised");
+        SupportTools.QuoteAnswer advice = tools.evaluateRefundPolicy("reg-mine");
+        SupportTools.QuoteAnswer earlier = tools.evaluateRefundPolicy("reg-big");
+
+        assertThat(again.requested()).isFalse();
+        assertThat(again.explanation()).contains("already been requested in this conversation")
+                .doesNotContain("escalateToOrganiser").doesNotContain("unknown");
+        assertThat(advice.explanation()).contains("already been requested in this conversation")
+                .doesNotContain("escalateToOrganiser");
+        assertThat(earlier.explanation()).contains("already been requested").doesNotContain("escalateToOrganiser");
+        assertThat(tools.refusals()).hasSize(refusalsBefore);
+        assertThat(registrations.refundCalls()).extracting(RefundCall::registrationId)
+                .containsExactly("reg-mine", "reg-tiny");
+    }
+
     @Test
     void retryingTheUnknownRefundIsRefusedWithoutAnotherRequest() {
         registrations.withRefundsUnavailable();

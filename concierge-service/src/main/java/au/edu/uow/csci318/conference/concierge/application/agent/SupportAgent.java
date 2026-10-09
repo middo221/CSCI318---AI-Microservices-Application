@@ -10,11 +10,16 @@ import dev.langchain4j.service.V;
  * <p>A LangChain4j {@code AiServices} interface; the proxy is generated at runtime and drives the
  * plan-act-observe loop over {@link SupportTools}.
  *
- * <p>The system message is guidance, not enforcement. "You act only for this attendee" and "never
- * promise money a tool did not confirm" are both re-enforced in code - by {@link SupportTools} and
- * by {@code SupportApplicationService} - so the prompt exists to make the first attempt good, not
- * to make a bad one impossible. The attendee id is deliberately absent from the prompt: the model
- * has no use for it, and no tool would accept it.
+ * <p>The system message is guidance, not enforcement, and the prompt exists to make the first
+ * attempt good. "You act only for this attendee" is enforced in code by {@link SupportTools}: no
+ * tool takes an attendee, and every registration is checked against the one bound from the
+ * request. "Never promise money a tool did not confirm" is enforced only in part, by
+ * {@code SupportApplicationService}: the outcome reported is always the tools' record; a reply
+ * whose stated outcome that record does not bear out, or that states none, is withheld; and the
+ * reply is written by code whenever a guardrail refused something and nothing was done, or a
+ * refund's outcome is unknown. The wording of a reply whose outcome is borne out is not inspected.
+ * The attendee id is deliberately absent from the prompt: the model has no use for it, and no tool
+ * would accept it.
  *
  * <p>Kept short, and it asks for batched tool calls, for the reason {@link AgendaBuilder} does:
  * the free Gemini tier allows five requests a minute and every turn spends one.

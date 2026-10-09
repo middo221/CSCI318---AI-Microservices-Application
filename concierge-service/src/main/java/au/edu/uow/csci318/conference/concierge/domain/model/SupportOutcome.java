@@ -42,7 +42,10 @@ public enum SupportOutcome {
     /**
      * Whether the tools' record supports a claim of this outcome.
      *
-     * <p>{@link #RESOLVED} claims nothing was done, which is never a false promise.
+     * <p>{@link #RESOLVED} claims only that nothing was done, which the record always bears out:
+     * there is nothing the claim itself can overstate. The words around it are a separate matter,
+     * which this method does not judge; {@code SupportApplicationService} writes the reply itself
+     * when a guardrail refused something and nothing was done.
      */
     public boolean isBorneOutBy(boolean refundRequested, boolean escalated) {
         return switch (this) {

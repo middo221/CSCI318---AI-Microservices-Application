@@ -33,7 +33,7 @@ against Gemini and the live services, and its output pasted below.
 | Check | Result |
 | :--- | :--- |
 | Full reactor green, offline, no API key | `BUILD SUCCESS`, all 8 reactor projects `SUCCESS` |
-| Tests per module | common-events 63, event-catalog-service 117, registration-service 132, payment-service 51, ticketing-service 97, analytics-service 1, concierge-service 226 (687 in all) |
+| Tests per module | common-events 63, event-catalog-service 117, registration-service 132, payment-service 51, ticketing-service 97, analytics-service 1, concierge-service 227 (688 in all) |
 | Domain imports no framework | `grep -rlE "springframework\|langchain4j" .../concierge/domain/` printed nothing (grep exit 1) |
 | No tool takes an attendee id | `SupportAgentLoopTest.givesTheModelNoParameterInWhichToNameAnAttendee` |
 | Someone else's registration is refused by every tool | `SupportToolsTest.refusesEveryToolOnSomeoneElsesRegistration` |
@@ -42,13 +42,13 @@ against Gemini and the live services, and its output pasted below.
 | Text that is not a registration id is never repeated back | `SupportToolsTest.neverRepeatsAMalformedIdBack` |
 | Refund limit enforced in code, per conversation, at or below 200.00 AUD | `RefundGuardTest` (including `.approvesARunningTotalThatLandsExactlyOnTheLimit`, `.treatsAmountsOfDifferentScaleAsEqual`, `.refusesAForeignQuoteAboveTheLimitForItsCurrency`), `SupportToolsTest.capsWhatOneConversationCanRefundInTotal`, `.aRefundThatWasNotAcceptedLeavesRoomUnderTheLimit` |
 | Money is decided only on a quote for the registration that was verified | `SupportToolsTest.refusesAQuoteForADifferentRegistration`, `.doesNotQuoteFromAQuoteForADifferentRegistration` |
-| The policy advice and the refund action make the same checks | `SupportToolsTest.saysARefundRequestedInThisConversationNeedsNothingMore`, `.saysARefundRegistrationAlreadyHoldsNeedsNothingMore`, `.offersNoRefundOnceARefundsOutcomeIsUnknown` |
+| The policy advice and the refund action make the same checks | `SupportToolsTest.saysARefundRequestedInThisConversationNeedsNothingMore`, `.saysARefundRegistrationAlreadyHoldsNeedsNothingMore`, `.offersNoRefundOnceARefundsOutcomeIsUnknown`, `.anAcceptedRefundIsStillReportedAsRequestedAfterALaterOneGoesUnanswered` |
 | An unanswered refund is unknown and blocks further automatic refunds | `SupportToolsTest.treatsAnUnansweredRefundAsUnknownAndRefusesAnyFurtherRefund`, `.retryingTheUnknownRefundIsRefusedWithoutAnotherRequest` |
 | An unknown refund outcome always becomes a system escalation, marked `raisedBy: SYSTEM` | `SupportApplicationServiceTest.escalatesByItselfWhenARefundOutcomeIsUnknownAndTheModelDidNot`, `.escalatesAnUnknownRefundEvenWhenTheModelThenFails`, `.anUnrelatedEscalationBeforeTheUnknownRefundDoesNotHideIt`, `.anEarlierEscalationOnTheSameRegistrationDoesNotStandInForTheUnknownRefund` |
 | A claim the record does not bear out, or no recognisable claim, is replaced | `SupportApplicationServiceTest.withholdsAReplyThatClaimsARefundThatWasNeverMade`, `.replacesTheReplyWhenTheClaimIsUnrecognised`, `.replacesTheReplyWhenThereIsNoClaim` |
 | After a guardrail refusal with nothing done, the reply is code-written | `SupportApplicationServiceTest.withholdsAResolvedReplyOnceAGuardrailHasRefusedSomething` |
 | The model sees a null-free quote | `SupportToolsTest.explainsAQuoteWhoseEventDateIsUnknown` |
-| Prompt injection gets no refund, and its false reply is withheld however it is labelled | `SupportAgentLoopTest.aPromptInjectedModelCanNeitherRefundSomeoneElseNorExceedTheLimit`, `SupportControllerTest.aPromptInjectionGetsNoRefundAndNoFalsePromise` (labelled `REFUND_REQUESTED`), `SupportControllerTest.aPromptInjectionLabelledResolvedStillGetsNoFalsePromise` (labelled `RESOLVED`) |
+| Prompt injection gets no refund, and its false reply is withheld whether labelled `REFUND_REQUESTED` or `RESOLVED` | `SupportAgentLoopTest.aPromptInjectedModelCanNeitherRefundSomeoneElseNorExceedTheLimit`, `SupportControllerTest.aPromptInjectionGetsNoRefundAndNoFalsePromise` (labelled `REFUND_REQUESTED`), `SupportControllerTest.aPromptInjectionLabelledResolvedStillGetsNoFalsePromise` (labelled `RESOLVED`) |
 | A refund survives a model failure after it | `SupportControllerTest.stillReportsARefundThatWasMadeBeforeTheModelFailed` |
 | A runaway loop is `502 LLM_LOOP_LIMIT`, not a bare 500 | `ConciergeControllerTest.reportsARunawayAgentLoopInThePlatformErrorShape`, `SupportControllerTest.reportsARunawayLoopAsLlmLoopLimitWhenNothingWasDone` |
 | A tool name the model invents is answered, not a bare 500 | `ConciergeControllerTest.tellsTheModelThereIsNoSuchToolInsteadOfFailingTheRequest`, `SupportControllerTest.tellsTheModelThereIsNoSuchToolInsteadOfFailingTheRequest` |
@@ -85,7 +85,7 @@ SupportApplicationServiceTest            30
 AgendaBuilderLoopTest                    5
 AgendaToolsTest                          12
 SupportAgentLoopTest                     5
-SupportToolsTest                         41
+SupportToolsTest                         42
 SupportDomainModelTest                   12
 SupportOutcomeTest                       9
 TimeSlotTest                             8
@@ -98,7 +98,7 @@ RestPaymentClientTest                    6
 RestRegistrationClientTest               18
 RestTicketingClientTest                  3
 InMemoryEscalationStoreTest              3
-concierge total                          226
+concierge total                          227
 ```
 
 ### Demonstration-script self-test
@@ -211,7 +211,9 @@ instructs the model, but nothing above depends on its obeying.
   outcome the tools' record does not bear out is withheld, as is one with no recognisable outcome,
   and whenever a guardrail refused something and nothing was done the reply is code-written. But a
   model that really did request a refund, or really did escalate, could still misdescribe it in the
-  prose around a true label. The `outcome`, `refunds` and `escalations` fields are always true.
+  prose around a true label; and so could a model that did nothing and was refused nothing, whose
+  `RESOLVED` reply is kept as written. The `outcome`, `refunds` and `escalations` fields are always
+  true.
 - **A refund `POST` that gets no answer leaves the refund's existence unknown until an organiser
   checks.** Registration may or may not have accepted it, so it is never reported as not requested.
   The agent is told not to retry, no further refund is requested in that conversation, the service

@@ -6138,10 +6138,14 @@ tools' record. Name the test that proves each. State the authentication caveat f
 
 - Authentication is out of scope (design §16): a caller can send any `attendeeId`. The guarantee is
   that the *model* cannot change it.
-- A model can still word a false promise without claiming an outcome; only a mismatched claim is
-  caught. The `outcome`, `refunds` and `escalations` fields are always true.
-- A refund `POST` that times out after registration accepted it is reported as not requested; the
-  agent offers escalation, and registration's `409 REFUND_ALREADY_REQUESTED` makes a retry safe.
+- *(Superseded during review; the verification note states the current behaviour.)* The wording of
+  a reply whose outcome is borne out is not inspected. A reply whose stated outcome the tools'
+  record does not bear out, or that states none, is withheld, and whenever a guardrail refused
+  something and nothing was done the reply is code-written. The `outcome`, `refunds` and
+  `escalations` fields are always true.
+- *(Superseded during review.)* A refund `POST` that gets no answer is never reported as not
+  requested: its outcome is unknown until an organiser checks. The agent is told not to retry, no
+  further refund is requested in the conversation, and the service raises its own escalation.
 - Escalations are held in memory and lost on restart.
 
 ## Live run against Gemini

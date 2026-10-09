@@ -171,8 +171,10 @@ public class SupportApplicationService {
             case REFUND_REQUESTED -> refunds.stream()
                     .map(SupportApplicationService::refundSentence)
                     .collect(java.util.stream.Collectors.joining(" "));
-            case RESOLVED -> "Sorry, I could not give a reliable answer to that. No refund has been requested and "
-                    + "nothing has been passed to an organiser. Please try again, or contact an organiser.";
+            // "In this conversation": a refund requested in an earlier one may well be pending.
+            case RESOLVED -> "Sorry, I could not give a reliable answer to that. No refund has been requested in this "
+                    + "conversation and nothing has been passed to an organiser. Please try again, or contact an "
+                    + "organiser.";
         };
     }
 
