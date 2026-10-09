@@ -43,9 +43,9 @@ class RegistrationControllerTest {
     /**
      * {@code @SpringBootTest} is not transactional and the H2 schema outlives each test method, so
      * the rows written here survive into the next one. The setup therefore reuses an existing row
-     * rather than saving a fresh instance over it — a new object carries version 0, and the
-     * optimistic-locking column would reject it against a row the previous test had already
-     * bumped. Reserved seats are reset explicitly so every test starts from a known count.
+     * rather than saving a fresh instance over it — a new object carries no version and would be
+     * inserted, colliding with the row the previous test left behind. Reserved seats are reset
+     * explicitly so every test starts from a known count.
      */
     @BeforeEach
     void setUp() {

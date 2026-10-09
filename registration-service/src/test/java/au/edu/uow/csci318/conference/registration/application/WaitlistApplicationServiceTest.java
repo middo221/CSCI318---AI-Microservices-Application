@@ -2,6 +2,7 @@ package au.edu.uow.csci318.conference.registration.application;
 
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
 import au.edu.uow.csci318.conference.common.event.WaitlistPromoted;
+import au.edu.uow.csci318.conference.registration.domain.SessionNotFoundException;
 import au.edu.uow.csci318.conference.registration.domain.model.Money;
 import au.edu.uow.csci318.conference.registration.domain.model.SessionView;
 import au.edu.uow.csci318.conference.registration.domain.model.TimeSlot;
@@ -18,6 +19,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class WaitlistApplicationServiceTest {
 
@@ -120,5 +122,33 @@ class WaitlistApplicationServiceTest {
     @Test
     void doesNothingForASessionItHasNeverHeardOf() {
         assertThat(service.promoteFor("ses-unknown", 2)).isZero();
+    }
+
+    /** Described, but its capacity has not arrived: unknown to the waitlist — never full. */
+    @Test
+    void refusesToQueueForASessionWhoseCapacityHasNotArrived() {
+        SessionView unsized = SessionView.forSession("ses-1");
+        unsized.describe("conf-1", "Observability in practice", MORNING, Money.aud("49.50"));
+        views.put("ses-1", unsized);
+
+        assertThatThrownBy(() -> service.join("ses-1", "att-a")).isInstanceOf(SessionNotFoundException.class);
+        assertThat(waitlistRows).isEmpty();
+    }
+
+    /**
+     * A replica that cannot size the session has no seat to offer. Defensive — a waitlist is only
+     * ever opened for a complete, full session — but a release must never turn into a promotion, or an
+     * exception, on a capacity nobody has stated.
+     */
+    @Test
+    void promotesNobodyFromASessionWhoseCapacityIsUnknown() {
+        givenAFullSessionWithQueue(2, "att-a", "att-b");
+        SessionView unsized = SessionView.forSession("ses-1");
+        unsized.describe("conf-1", "Observability in practice", MORNING, Money.aud("49.50"));
+        views.put("ses-1", unsized);
+
+        assertThat(service.promoteFor("ses-1", 2)).isZero();
+
+        assertThat(published).isEmpty();
     }
 }

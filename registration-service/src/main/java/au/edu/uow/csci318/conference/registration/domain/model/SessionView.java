@@ -22,7 +22,8 @@ import jakarta.persistence.Version;
  * writes it. Kafka orders messages within a partition but not across topics, so letting both
  * topics write capacity would let a capacity edit that overtook the creation event be silently
  * reverted. A row is therefore assembled from two independent messages and is only
- * {@link #isComplete() complete} once the description has arrived.
+ * {@link #isComplete() complete} once <strong>both</strong> have arrived. Until then the session is
+ * unknown to registration — never full.
  *
  * <p>{@code reservedSeats} is written by this service alone, in the same transaction as the
  * {@link SeatHold} that caused it to move.
@@ -55,15 +56,26 @@ public class SessionView {
     })
     private TimeSlot timeSlot;
 
-    @Column(name = "capacity", nullable = false)
-    private int capacity;
+    /**
+     * Seat capacity, from {@code session-capacity-changed} alone. {@code null} until that event has
+     * arrived: an unknown capacity is not a capacity of zero, and reporting it as zero is what made a
+     * brand-new session answer "full, 0 remain" on 2026-09-14.
+     */
+    @Column(name = "capacity")
+    private Integer capacity;
 
     @Column(name = "reserved_seats", nullable = false)
     private int reservedSeats;
 
+    /**
+     * A {@code Long}, not a {@code long}: a freshly built row then has no version, so Spring Data
+     * inserts it rather than merging it. With a primitive, a row created by two racing consumers was
+     * merged by the loser — and, if the winner had already committed, silently overwritten with no
+     * exception for anybody to retry.
+     */
     @Version
-    @Column(name = "version", nullable = false)
-    private long version;
+    @Column(name = "version")
+    private Long version;
 
     @Embedded
     @AttributeOverrides({
@@ -78,7 +90,6 @@ public class SessionView {
 
     private SessionView(String sessionId) {
         this.sessionId = sessionId;
-        this.capacity = 0;
         this.reservedSeats = 0;
     }
 
@@ -112,10 +123,11 @@ public class SessionView {
      * Whether {@code quantity} more seats can be taken without exceeding capacity.
      *
      * <p>False while the session is over-subscribed by a capacity cut: existing holds are
-     * grandfathered, but no further seats may be taken until the session drains.
+     * grandfathered, but no further seats may be taken until the session drains. False, too, while
+     * the capacity is unknown.
      */
     public boolean canAccommodate(int quantity) {
-        return quantity > 0 && reservedSeats + quantity <= capacity;
+        return capacity != null && quantity > 0 && reservedSeats + quantity <= capacity;
     }
 
     /**
@@ -144,26 +156,32 @@ public class SessionView {
         reservedSeats = Math.max(0, reservedSeats - quantity);
     }
 
-    /** True once {@code session-added} has been applied and the row describes a real session. */
+    /** True once both halves have arrived: the description and the capacity. */
     public boolean isComplete() {
-        return title != null;
+        return title != null && capacity != null;
     }
 
     /**
      * Seats still free, floored at zero. Capacity may be cut below the number already held —
      * specification section 5.1 grandfathers those holds rather than revoking them — so the
      * arithmetic can go negative and must not be reported that way.
+     *
+     * <p>Zero while the capacity is unknown: nothing can be offered from a capacity nobody has
+     * stated. Callers ask {@link #isComplete()} first; this is the safe answer for one that did not.
      */
     public int getAvailableSeats() {
-        return Math.max(0, capacity - reservedSeats);
+        return capacity == null ? 0 : Math.max(0, capacity - reservedSeats);
     }
 
     /**
      * True when no further seat can be taken — including a session over-subscribed by a capacity cut,
      * whose existing holds are grandfathered. Only a full session has a waitlist worth joining.
+     *
+     * <p>False while the capacity is unknown: an unknown session is not full, so it has no waitlist
+     * either. Callers ask {@link #isComplete()} first; this is the safe answer for one that did not.
      */
     public boolean isFull() {
-        return getAvailableSeats() == 0;
+        return capacity != null && getAvailableSeats() == 0;
     }
 
     public String getSessionId() {
@@ -182,7 +200,8 @@ public class SessionView {
         return timeSlot;
     }
 
-    public int getCapacity() {
+    /** {@code null} until {@code session-capacity-changed} has arrived. */
+    public Integer getCapacity() {
         return capacity;
     }
 

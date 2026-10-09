@@ -71,6 +71,7 @@ public class WaitlistApplicationService {
      * replica now rather than taken from the event: somebody may have registered for a freed seat
      * before the release was handled, and a capacity cut can leave a session still over-subscribed
      * after a release, in which case nobody is promoted. A promotion is an offer, not a held seat.
+     * A session the replica cannot size — unknown, or half-replicated — has no seat to offer either.
      *
      * <p><strong>{@code REQUIRES_NEW}, deliberately.</strong> This runs from the {@code seats-released}
      * consumer, and registration consumes its own topic. Under the in-JVM test binder that consumer
@@ -82,8 +83,8 @@ public class WaitlistApplicationService {
      * Against a real broker the consumer runs on its own thread with nothing bound, and this behaves
      * exactly like {@code REQUIRED}: correctness never depends on the synchronous delivery.
      *
-     * @return how many attendees were promoted; zero for a session nobody is waiting for
-     * @throws SessionNotFoundException if a session with a waitlist is unknown to the replica
+     * @return how many attendees were promoted; zero for a session nobody is waiting for, or one the
+     *         replica cannot size
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public int promoteFor(String sessionId, int releasedSeats) {
@@ -91,7 +92,8 @@ public class WaitlistApplicationService {
         if (found.isEmpty()) {
             return 0;
         }
-        int seats = Math.min(releasedSeats, availability.availabilityOf(sessionId).getAvailableSeats());
+        int free = availability.findComplete(sessionId).map(SessionView::getAvailableSeats).orElse(0);
+        int seats = Math.min(releasedSeats, free);
         Waitlist waitlist = found.get();
         List<WaitlistPlace> promoted = waitlist.promote(seats, Instant.now());
         if (promoted.isEmpty()) {

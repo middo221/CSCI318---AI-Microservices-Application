@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SessionViewTest {
@@ -18,21 +19,51 @@ class SessionViewTest {
 
         assertThat(view.getSessionId()).isEqualTo("ses-1");
         assertThat(view.isComplete()).isFalse();
-        assertThat(view.getCapacity()).isZero();
+        assertThat(view.getCapacity()).as("unknown, not zero").isNull();
         assertThat(view.getReservedSeats()).isZero();
     }
 
     @Test
-    void becomesCompleteOnceItHasBeenDescribed() {
+    void becomesCompleteOnlyOnceBothHalvesHaveArrived() {
         SessionView view = SessionView.forSession("ses-1");
 
         view.describe("evt-1", "Observability in practice", MORNING, Money.aud("49.50"));
+        assertThat(view.isComplete()).as("described but not yet sized").isFalse();
 
+        view.setCapacity(120);
         assertThat(view.isComplete()).isTrue();
         assertThat(view.getEventId()).isEqualTo("evt-1");
         assertThat(view.getTitle()).isEqualTo("Observability in practice");
         assertThat(view.getTimeSlot()).isEqualTo(MORNING);
         assertThat(view.getPrice()).isEqualTo(Money.aud("49.50"));
+    }
+
+    @Test
+    void offersNoSeatsWhileItsCapacityIsUnknown() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.describe("evt-1", "Observability in practice", MORNING, Money.aud("49.50"));
+
+        assertThat(view.canAccommodate(1)).isFalse();
+        assertThat(view.getAvailableSeats()).isZero();
+    }
+
+    /**
+     * Unknown is neither free nor full. Every caller checks {@link SessionView#isComplete()} first, but
+     * one that forgot would get a safe answer rather than a {@code NullPointerException}: no seat to
+     * offer, no waitlist to join, and a refusal to reserve.
+     */
+    @Test
+    void isNeitherFreeNorFullWhileItsCapacityIsUnknown() {
+        SessionView view = SessionView.forSession("ses-1");
+        view.describe("evt-1", "Observability in practice", MORNING, Money.aud("49.50"));
+
+        assertThatCode(() -> {
+            view.getAvailableSeats();
+            view.isFull();
+        }).doesNotThrowAnyException();
+        assertThat(view.getAvailableSeats()).as("nothing to offer from an unknown capacity").isZero();
+        assertThat(view.isFull()).as("unknown is not full").isFalse();
+        assertThatThrownBy(() -> view.reserve(1)).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
