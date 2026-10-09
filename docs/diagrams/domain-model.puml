@@ -23,26 +23,26 @@ title Converge — domain model overview (bounded contexts and Published Languag
 !include include/domain-published-language.iuml
 !include include/domain-event-links.iuml
 
-note bottom of DomainEvent
-  Every record in common-events
-  implements DomainEvent: topic =
-  eventType(), key = partitionKey().
-end note
+' White links (Smetana ignores hidden and transparent ones) only stagger the contexts into two columns.
+Event -[#FFFFFF]-> Registration
+PaymentOrder -[#FFFFFF]-> Ticket
+ClashDetector -[#FFFFFF]-> FillRate
 
 legend right
   <b>Reading this diagram</b>
   «AggregateRoot», «Entity», «ValueObject», «DomainService»,
   «ReadModel», «DomainEvent», «Port»: DDD roles of each class
-  filled-diamond line: composition inside an aggregate (owned lifecycle)
+  filled-diamond line: composition inside an aggregate
   solid arrow: association to an enumeration-typed attribute
-  - - > «publishes»: the aggregate records the event; it is sent
-          to Kafka after the transaction commits
-  - - > «reacts to»: a consumer in that context turns the event
-          into a change to this class
-  - - > labelled "by id only": a reference across aggregates
+  dashed arrow "by id only": a reference across aggregates
+  Every Published Language record implements DomainEvent:
+  topic = eventType(), key = partitionKey().
+  <b>Events are not drawn here.</b> Which aggregate publishes
+  and which reacts to each Published Language record is in the
+  per-context figures (domain-programme, -registration,
+  -billing, -access, -insight, -published-language).
   Attendee assistance has no events: it reads other contexts
-  over REST. Operational insight only reacts, and its two
-  alerts stay inside analytics-service. Nothing crosses a
-  context boundary except the Published Language records.
+  over REST. Nothing crosses a context boundary except the
+  Published Language records.
 endlegend
 @enduml

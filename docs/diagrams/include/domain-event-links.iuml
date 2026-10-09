@@ -2,8 +2,10 @@
 ' "publishes" = the aggregate records the event and the application layer sends it after commit.
 ' "reacts to" = a consumer in that service turns the event into a change to this class.
 ' A per-context detail diagram sets !$only = "<context>" before including this file, to get only
-' its own links; the overview leaves it unset and gets all of them.
+' its own links; the overview (domain-model.puml) sets $overview and draws none of them: sixty-odd dashed
+' lines across the contexts cannot be read on one page. The per-context figures carry the events.
 
+!if (%not(%variable_exists("$overview")))
 !$only ?= "all"
 
 !if ($only == "all") || ($only == "programme")
@@ -59,4 +61,5 @@ RegistrationFunnel ..> RegistrationRequested : <<reacts to>>\ncounted by topic
 RegistrationFunnel ..> PaymentSucceeded : <<reacts to>>\ncounted by topic
 RegistrationFunnel ..> PaymentFailed : <<reacts to>>\ncounted by topic
 RegistrationFunnel ..> RegistrationExpired : <<reacts to>>\ncounted by topic
+!endif
 !endif
