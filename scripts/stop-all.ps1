@@ -6,8 +6,9 @@
   A JVM is stopped only when its command line carries -Dconverge.service=<name>, the tag run-all
   gives every JVM it starts. With -Orphans, a JVM is also stopped when its classpath points into
   <this checkout>\<module>\target\classes: a spring-boot:run fork left behind by Ctrl+C, which
-  keeps its port and file-locks maven-wrapper.jar. A sibling worktree's build or services, and any
-  other Java program on the machine, never match.
+  keeps its port and file-locks maven-wrapper.jar. Ports 8081-8086 are shared, so only one Converge
+  stack can run at a time: a tagged service JVM is stopped whichever checkout started it. Untagged
+  JVMs (Maven, surefire, an IDE, a sibling worktree's forks) and any other Java program never match.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\stop-all.ps1
@@ -61,7 +62,8 @@ if ($SelfTest) {
         @(0, 'an untagged spring-boot:run fork is left alone without -Orphans', "java -cp $r\registration-service\target\classes;C:\m2\a.jar App", $all, $false),
         @(1, 'this checkout''s spring-boot:run fork matches with -Orphans', "java -cp $r\registration-service\target\classes;C:\m2\a.jar App", $all, $true),
         @(1, 'forward slashes and case do not hide it', "java -cp c:/users/X/converge/registration-service/target/classes;a.jar App", $all, $true),
-        @(0, 'a sibling worktree''s fork never matches', "java -cp $r\.worktrees\m3\registration-service\target\classes;a.jar App", $all, $true),
+        @(1, 'a sibling checkout''s tagged service IS matched (shared ports)', "java -Dconverge.service=payment-service -jar $r\.worktrees\m4\payment-service\target\payment-service-0.1.0-SNAPSHOT.jar", $all, $false),
+        @(0, 'a sibling worktree''s untagged fork never matches', "java -cp $r\.worktrees\m3\registration-service\target\classes;a.jar App", $all, $true),
         @(0, 'a sibling worktree''s Maven build never matches', "`"C:\jdk\bin\java.exe`" -Dmaven.multiModuleProjectDirectory=$r\.worktrees\m4 org.codehaus.plexus.classworlds.launcher.Launcher -pl concierge-service -am test", $all, $true),
         @(0, 'Maven itself is never stopped',            "java -Dmaven.multiModuleProjectDirectory=$r org.codehaus.plexus.classworlds.launcher.Launcher spring-boot:run -pl registration-service", $all, $true),
         @(0, 'another Java program never matches',       'java -jar C:\tools\some-other-app.jar', $all, $true)

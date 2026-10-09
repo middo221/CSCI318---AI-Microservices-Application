@@ -23,7 +23,7 @@
 param(
     [switch] $NoBuild,
     [string[]] $Only = @(),
-    [int] $TimeoutSeconds = 240,
+    [ValidateRange(1, 86400)] [int] $TimeoutSeconds = 240,
     [switch] $Check,
     [switch] $SelfTest
 )
@@ -59,8 +59,12 @@ function Get-EnvValue([string] $Path, [string] $Name) {
         $key, $value = $line.Split('=', 2)
         if ($key.Trim() -ne $Name) { continue }
         $value = $value.Trim()
-        if ($value.Length -ge 2 -and ($value[0] -eq '"' -or $value[0] -eq "'") -and $value[-1] -eq $value[0]) {
-            $value = $value.Substring(1, $value.Length - 2)
+        if ($value.Length -ge 1 -and ($value[0] -eq '"' -or $value[0] -eq "'")) {
+            # quoted: the value ends at the closing quote; anything after it is a comment
+            $end = $value.IndexOf($value[0], 1)
+            $value = if ($end -ge 0) { $value.Substring(1, $end - 1) } else { $value.Substring(1) }
+        } else {
+            $value = ($value -replace '\s+#.*$', '').Trim()
         }
         $found = $value
     }
@@ -68,6 +72,31 @@ function Get-EnvValue([string] $Path, [string] $Name) {
 }
 
 function Test-Wanted([string] $Name) { return (-not $Only.Count) -or ($Only -contains $Name) }
+
+# Names in $Names that the service table does not list.
+function Get-UnknownNames([string[]] $Names, $ServiceTable) {
+    return @($Names | Where-Object { $_ -notin @($ServiceTable | ForEach-Object { $_.Name }) })
+}
+
+# Failure markers spring leaves in a log, the same as run-all.sh checks.
+$FailurePatterns = @('APPLICATION FAILED TO START', 'Unable to access jarfile', 'Error starting ApplicationContext')
+function Test-StartFailed([string[]] $LogPaths) {
+    $existing = @($LogPaths | Where-Object { Test-Path -LiteralPath $_ })
+    if (-not $existing.Count) { return $false }
+    return [bool](Select-String -LiteralPath $existing -Pattern $FailurePatterns -Quiet -ErrorAction SilentlyContinue)
+}
+
+# status.txt as plain ASCII/UTF-8 (Tee-Object in Windows PowerShell 5.1 writes UTF-16).
+function Save-Status([string] $Path, [string] $Text) {
+    [IO.File]::WriteAllText($Path, $Text, (New-Object Text.UTF8Encoding $false))
+}
+
+# The last lines of each log, with a heading, as an array of strings.
+function Get-LogTail([string] $Path, [int] $Lines = 20) {
+    $out = @("--- $Path (last $Lines lines)")
+    if (Test-Path -LiteralPath $Path) { $out += @(Get-Content -LiteralPath $Path -Tail $Lines) } else { $out += '(no log file)' }
+    return $out
+}
 
 $Table = @(Read-ServiceTable (Join-Path $PSScriptRoot 'services.conf'))
 
@@ -92,24 +121,61 @@ if ($SelfTest) {
         Expect 'export is accepted and the last assignment wins' (Get-EnvValue "$tmp\twice.env" 'GEMINI_API_KEY') 'second'
         Expect 'a commented-out key is not a key' (Get-EnvValue "$tmp\none.env" 'GEMINI_API_KEY') ''
         Expect 'a missing .env yields nothing' (Get-EnvValue "$tmp\absent.env" 'GEMINI_API_KEY') ''
+        [IO.File]::WriteAllText("$tmp\inline.env", "GEMINI_API_KEY=abc # my key`n")
+        [IO.File]::WriteAllText("$tmp\inlineq.env", "GEMINI_API_KEY=`"ab # c`" # note`n")
+        Expect 'an inline comment is stripped from an unquoted value' (Get-EnvValue "$tmp\inline.env" 'GEMINI_API_KEY') 'abc'
+        Expect 'a # inside quotes is kept, the comment after it is not' (Get-EnvValue "$tmp\inlineq.env" 'GEMINI_API_KEY') 'ab # c'
+        $fixture = @('some line', 'Error starting ApplicationContext. To display the condition report...')
+        [IO.File]::WriteAllLines("$tmp\bad.err.log", $fixture)
+        [IO.File]::WriteAllLines("$tmp\good.log", @('Started App in 3 seconds'))
+        Expect 'a failure marker in .err.log is found' (Test-StartFailed @("$tmp\good.log", "$tmp\bad.err.log")) $true
+        Expect 'a healthy log is not a failure' (Test-StartFailed @("$tmp\good.log", "$tmp\absent.err.log")) $false
+        [IO.File]::WriteAllLines("$tmp\jar.log", @('Error: Unable to access jarfile x.jar'))
+        Expect 'a missing jar is a failure' (Test-StartFailed @("$tmp\jar.log")) $true
+        [IO.File]::WriteAllLines("$tmp\long.log", @(1..30 | ForEach-Object { "line $_" }))
+        $tail = Get-LogTail "$tmp\long.log" 20
+        Expect 'the log tail has a heading and 20 lines, ending at the last' ("$($tail.Count)/$($tail[1])/$($tail[-1])") '21/line 11/line 30'
+        Expect 'a missing log is reported, not hidden' ((Get-LogTail "$tmp\nope.log" 20)[-1]) '(no log file)'
+        Save-Status "$tmp\status.txt" "service port`r`nalpha 1`r`n"
+        $bytes = [IO.File]::ReadAllBytes("$tmp\status.txt")
+        Expect 'status.txt is single-byte text, not UTF-16' ("$($bytes[0])/$($bytes.Length)") '115/23'
     } finally { Remove-Item -LiteralPath $tmp -Recurse -Force }
     Expect 'the shipped services.conf lists six services' $Table.Count 6
     $Only = @('payment-service')
     Expect '-Only includes a named service' (Test-Wanted 'payment-service') $true
     Expect '-Only excludes an unnamed one' (Test-Wanted 'analytics-service') $false
+    Expect 'Get-UnknownNames finds a misspelt service' ((Get-UnknownNames @('payment-service', 'paymnt-service') $Table) -join ',') 'paymnt-service'
+    Expect 'Get-UnknownNames accepts real services' (Get-UnknownNames @('payment-service', 'analytics-service') $Table).Count 0
     if ($failures -eq 0) { Write-Host '   every helper can say no'; exit 0 }
     Write-Host "   FAILED: $failures helper check(s)"; exit 1
 }
 
+$bad = Get-UnknownNames $Only $Table
+if ($bad.Count) {
+    Write-Host "   unknown service(s) in -Only: $($bad -join ', ')"
+    Write-Host "   Known: $(($Table | ForEach-Object { $_.Name }) -join ' ')"
+    exit 2
+}
+
 New-Item -ItemType Directory -Force -Path (Join-Path $Root 'logs') | Out-Null
 
+$script:Down = @()
 function Show-Status {
     $rows = foreach ($s in $Table | Where-Object { Test-Wanted $_.Name }) {
         $code = Get-ProbeCode $s.Port $s.Probe
-        [pscustomobject]@{ service = $s.Name; port = $s.Port; state = $(if (Test-Ready $code) { 'READY' } else { 'DOWN' }); HTTP = $code; log = "logs\$($s.Name).log" }
+        [pscustomobject]@{ service = $s.Name; port = $s.Port; state = $(if (Test-Ready $code) { 'READY' } else { 'DOWN' }); HTTP = $code; log = "logs\$($s.Name).log, logs\$($s.Name).err.log" }
     }
-    $rows | Format-Table -AutoSize | Out-String | Tee-Object -FilePath (Join-Path $Root 'logs\status.txt') | Write-Host
-    return @($rows | Where-Object { $_.state -eq 'DOWN' }).Count -eq 0
+    $text = $rows | Format-Table -AutoSize | Out-String
+    Save-Status (Join-Path $Root 'logs\status.txt') $text
+    Write-Host $text
+    $script:Down = @($rows | Where-Object { $_.state -eq 'DOWN' } | ForEach-Object { $_.service })
+    return $script:Down.Count -eq 0
+}
+
+function Show-Failures {
+    foreach ($n in $script:Down) {
+        foreach ($f in @("logs\$n.log", "logs\$n.err.log")) { Get-LogTail (Join-Path $Root $f) 20 | ForEach-Object { Write-Host $_ } }
+    }
 }
 
 if ($Check) { if (Show-Status) { exit 0 } else { exit 1 } }
@@ -124,14 +190,21 @@ if (-not ($version -match 'version "21([."]|$)')) {
 Write-Host "   Java 21: $java"
 
 docker info *> $null
-if ($LASTEXITCODE -ne 0) { Write-Host '   Docker is not running. Start Docker Desktop and run this again.'; exit 1 }
+if ($LASTEXITCODE -ne 0) {
+    Write-Host '   Docker is not running. Start Docker Desktop and run this again.'
+    Write-Host '   Kafka runs in Docker, and analytics-service needs the broker to start, so nothing is started without it.'
+    exit 1
+}
 function Get-KafkaHealth { (docker inspect -f '{{.State.Health.Status}}' converge-kafka 2>$null | Out-String).Trim() }
 if ((Get-KafkaHealth) -ne 'healthy') {
     Write-Host '   Kafka is not up - docker compose up -d'
     docker compose up -d *> $null
     for ($i = 0; $i -lt 60 -and (Get-KafkaHealth) -ne 'healthy'; $i++) { Start-Sleep -Seconds 2 }
 }
-if ((Get-KafkaHealth) -ne 'healthy') { Write-Host '   Kafka (converge-kafka) did not become healthy in 120s'; exit 1 }
+if ((Get-KafkaHealth) -ne 'healthy') {
+    Write-Host '   Kafka (converge-kafka) did not become healthy in 120s; analytics-service needs the broker to start, so nothing was started.'
+    exit 1
+}
 Write-Host '   Kafka is healthy on localhost:9092; Kafka UI on http://localhost:8080'
 
 $busy = @($Table | Where-Object { (-not $NoBuild) -or (Test-Wanted $_.Name) } |
@@ -156,6 +229,7 @@ if (-not $NoBuild) {
 }
 
 $inherited = $env:GEMINI_API_KEY
+$procs = @{}
 foreach ($s in $Table | Where-Object { Test-Wanted $_.Name }) {
     $jar = Get-ChildItem -Path (Join-Path $Root "$($s.Name)\target") -Filter "$($s.Name)-*.jar" -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $jar) { Write-Host "   no jar in $($s.Name)\target - run without -NoBuild"; exit 1 }
@@ -164,6 +238,7 @@ foreach ($s in $Table | Where-Object { Test-Wanted $_.Name }) {
         -ArgumentList @("-Dconverge.service=$($s.Name)", '-jar', "`"$($jar.FullName)`"") `
         -RedirectStandardOutput (Join-Path $Root "logs\$($s.Name).log") `
         -RedirectStandardError (Join-Path $Root "logs\$($s.Name).err.log")
+    $procs[$s.Name] = $p
     Set-Content -Path (Join-Path $Root "logs\$($s.Name).pid") -Value $p.Id
     Write-Host "   started $($s.Name) on $($s.Port) (PID $($p.Id), log: logs\$($s.Name).log)"
 }
@@ -175,12 +250,15 @@ while ($pending.Count -and (Get-Date) -lt $deadline) {
     $pending = @($pending | Where-Object {
         $code = Get-ProbeCode $_.Port $_.Probe
         if (Test-Ready $code) { Write-Host "   $($_.Name) answers on $($_.Port) (HTTP $code)"; $false }
-        elseif (Select-String -Path (Join-Path $Root "logs\$($_.Name).log") -Pattern 'APPLICATION FAILED TO START' -Quiet -ErrorAction SilentlyContinue) {
-            Write-Host "   $($_.Name) failed to start - see logs\$($_.Name).log"; $false }
+        elseif (Test-StartFailed @((Join-Path $Root "logs\$($_.Name).log"), (Join-Path $Root "logs\$($_.Name).err.log"))) {
+            Write-Host "   $($_.Name) failed to start - see logs\$($_.Name).log and .err.log"; $false }
+        elseif ($procs[$_.Name].HasExited) {
+            Write-Host "   $($_.Name) exited before it answered - see logs\$($_.Name).log and .err.log"; $false }
         else { $true }
     })
     if ($pending.Count) { Start-Sleep -Seconds 3 }
 }
 if (Show-Status) { Write-Host '   all requested services are up. Stop them with scripts\stop-all.ps1'; exit 0 }
+Show-Failures
 Write-Host "   not every service answered within ${TimeoutSeconds}s - read its log under logs\"
 exit 1

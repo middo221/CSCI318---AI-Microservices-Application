@@ -10,7 +10,9 @@
 #
 # A JVM is stopped only when its command line carries -Dconverge.service=<name> (run-all tags every
 # JVM it starts), or, with --orphans, when its classpath points into <this checkout>/<module>/
-# target/classes. A sibling worktree's build or services, and any other Java program, never match.
+# target/classes. Ports 8081-8086 are shared, so only one Converge stack can run at a time: a tagged
+# service JVM is stopped whichever checkout started it. Untagged JVMs (Maven, surefire, an IDE, a
+# sibling worktree's forks) and any other Java program never match.
 # On Windows the work is done by scripts/stop-all.ps1, which can read every process's command line.
 #
 set -u
@@ -65,7 +67,8 @@ if [ "$SELF_TEST" = 1 ]; then
   expect 1 "a longer name is not a prefix match"       "java -Dconverge.service=payment-service-old -jar x.jar" 0 payment-service
   expect 1 "a fork is left alone without --orphans"    "java -cp $r/registration-service/target/classes:a.jar App" 0 "${all[@]}"
   expect 0 "this checkout's fork matches with --orphans" "java -cp $r/registration-service/target/classes:a.jar App" 1 "${all[@]}"
-  expect 1 "a sibling worktree's fork never matches"   "java -cp $r/.worktrees/m3/registration-service/target/classes App" 1 "${all[@]}"
+  expect 1 "a sibling worktree's untagged fork never matches" "java -cp $r/.worktrees/m3/registration-service/target/classes App" 1 "${all[@]}"
+  expect 0 "a sibling checkout's tagged service IS matched (shared ports)" "java -Dconverge.service=payment-service -jar $r/.worktrees/m4/payment-service/target/payment-service-0.1.0-SNAPSHOT.jar" 0 "${all[@]}"
   expect 1 "Maven itself is never stopped"             "java -Dmaven.multiModuleProjectDirectory=$r org.codehaus.plexus.classworlds.launcher.Launcher" 1 "${all[@]}"
   expect 1 "another Java program never matches"        "java -jar /opt/other-app.jar" 1 "${all[@]}"
   [ "$failures" = 0 ] && { echo "   the matcher refuses everything that is not ours"; exit 0; }

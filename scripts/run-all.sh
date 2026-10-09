@@ -56,6 +56,32 @@ done
 # services [file]: "name port probe" for every row of scripts/services.conf
 services() { sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${1:-scripts/services.conf}" | awk '{print $1, $2, $3}'; }
 
+# unknown_names <csv> [file]: the names in a comma-separated list that services.conf does not list
+unknown_names() {
+  local n known; known=" $(services "${2:-scripts/services.conf}" | awk '{printf "%s ", $1}')"
+  for n in $(printf '%s' "$1" | tr ',' ' '); do
+    case "$known" in *" $n "*) ;; *) printf '%s ' "$n" ;; esac
+  done
+}
+
+# numeric <value>: a non-empty string of digits
+numeric() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; return 0; }
+
+# alive <pid>: does that process still exist?
+alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null; }
+
+# down_names <status.txt>: the services whose row says DOWN
+down_names() { awk '$3 == "DOWN" {print $1}' "$1"; }
+
+# log_tail <log file> [lines]: a heading and the last lines of a service log
+log_tail() {
+  printf '%s--- %s (last %s lines)%s\n' "$bold" "$1" "${2:-20}" "$off"
+  if [ -f "$1" ]; then tail -n "${2:-20}" "$1"; else echo "(no log file)"; fi
+}
+
+# show_failures: the log tail of every service the status table reported DOWN
+show_failures() { local n; for n in $(down_names logs/status.txt); do log_tail "logs/$n.log" 20; done; }
+
 # wanted <name>: is this service in --only (or is there no --only)?
 wanted() { [ -z "$ONLY" ] && return 0; case ",$ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
@@ -81,7 +107,11 @@ env_value() {
     k=$(printf '%s' "$k" | tr -d '[:space:]')
     [ "$k" = "$2" ] || continue
     v=$(printf '%s' "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-    case "$v" in \"*\") v=${v#\"}; v=${v%\"} ;; \'*\') v=${v#\'}; v=${v%\'} ;; esac
+    case "$v" in
+      \"*) v=${v#\"}; v=${v%%\"*} ;;
+      \'*) v=${v#\'}; v=${v%%\'*} ;;
+      *) v=$(printf '%s' "$v" | sed -e 's/[[:space:]]\{1,\}#.*$//' -e 's/[[:space:]]*$//') ;;
+    esac
     found=$v
   done < "$1"
   printf '%s' "$found"
@@ -140,8 +170,33 @@ if [ "$SELF_TEST" = "1" ]; then
   ONLY=""
   expect 0 "no --only includes everything"                 wanted concierge-service
   same "the shipped services.conf lists six services"       "$(services | wc -l | tr -d ' ')" "6"
+  printf 'GEMINI_API_KEY=abc # my key\nOTHER=x\n' > "$WORK/inline.env"
+  printf 'GEMINI_API_KEY="ab # c" # note\n' > "$WORK/inlineq.env"
+  same "an inline comment is stripped from an unquoted value" "$(env_value "$WORK/inline.env" GEMINI_API_KEY)" "abc"
+  same "a # inside quotes is kept, the comment after it is not" "$(env_value "$WORK/inlineq.env" GEMINI_API_KEY)" "ab # c"
+  same "unknown_names finds a misspelt service"             "$(unknown_names "payment-service,paymnt-service,x" | sed 's/ $//')" "paymnt-service x"
+  same "unknown_names accepts every real service"           "$(unknown_names "payment-service,analytics-service")" ""
+  expect 0 "a numeric --timeout is accepted"                numeric 240
+  expect 1 "a non-numeric --timeout is refused"             numeric 4m
+  expect 1 "an empty --timeout is refused"                  numeric ""
+  sleep 0 & dead=$!; wait "$dead" 2>/dev/null
+  expect 0 "alive: this shell is alive"                     alive $$
+  expect 1 "alive: an exited process is not"                alive "$dead"
+  printf 'service port state HTTP log\nalpha 1 READY 200 x\nbeta 2 DOWN 000 y\ngamma 3 DOWN 503 z\n' > "$WORK/status.txt"
+  same "down_names lists only the DOWN rows"                "$(down_names "$WORK/status.txt" | tr '\n' ' ')" "beta gamma "
+  : > "$WORK/svc.log"; for i in $(seq 1 30); do echo "line $i" >> "$WORK/svc.log"; done
+  same "log_tail prints the last 20 lines, not 21"          "$(log_tail "$WORK/svc.log" 20 | sed 's/\x1b\[[0-9;]*m//g' | sed -n '2p;$p' | tr '\n' ',')" "line 11,line 30,"
+  same "log_tail says when there is no log"                 "$(log_tail "$WORK/none.log" 20 | tail -1)" "(no log file)"
   if [ "$failures" = "0" ]; then ok "every helper can say no"; exit 0; fi
   fail "FAILED: $failures helper check(s) cannot be trusted"; exit 1
+fi
+
+numeric "$TIMEOUT" || { fail "--timeout needs a number of seconds, not '$TIMEOUT'"; exit 2; }
+bad=$(unknown_names "$ONLY")
+if [ -n "$bad" ]; then
+  fail "unknown service(s) in --only: $bad"
+  note "Known: $(services | awk '{printf "%s ", $1}')"
+  exit 2
 fi
 
 mkdir -p logs
@@ -168,6 +223,7 @@ ok "Java 21: $JAVA"
 
 if ! docker info >/dev/null 2>&1; then
   fail "Docker is not running. Start Docker Desktop, wait for it to settle, and run this again."
+  note "Kafka runs in Docker, and analytics-service needs the broker to start, so nothing is started without it."
   exit 1
 fi
 if [ "$(kafka_health)" != "healthy" ]; then
@@ -175,7 +231,10 @@ if [ "$(kafka_health)" != "healthy" ]; then
   docker compose up -d >/dev/null 2>&1 || { fail "docker compose up -d failed"; exit 1; }
   for _ in $(seq 1 60); do [ "$(kafka_health)" = "healthy" ] && break; sleep 2; done
 fi
-[ "$(kafka_health)" = "healthy" ] || { fail "Kafka (converge-kafka) did not become healthy in 120s"; exit 1; }
+[ "$(kafka_health)" = "healthy" ] || {
+  fail "Kafka (converge-kafka) did not become healthy in 120s; analytics-service needs the broker to start, so nothing was started."
+  exit 1
+}
 ok "Kafka is healthy on localhost:9092; Kafka UI on http://localhost:8080"
 
 busy=""
@@ -239,6 +298,7 @@ while [ -n "${pending// /}" ] && [ "$(date +%s)" -lt "$deadline" ]; do
     code=$(probe_code "$port" "$probe")
     if is_ready "$code"; then ok "$name answers on $port (HTTP $code)"
     elif failed_to_start "$name"; then fail "$name failed to start - see logs/$name.log"
+    elif ! alive "$(cat "logs/$name.pid" 2>/dev/null)"; then fail "$name exited before it answered - see logs/$name.log"
     else still="$still $name"; fi
   done
   pending="$still"
@@ -249,6 +309,7 @@ printf '\n'
 status_table | tee logs/status.txt
 printf '\n'
 if grep -q " DOWN " logs/status.txt; then
+  show_failures
   fail "not every service answered within ${TIMEOUT}s - read its log under logs/"
   exit 1
 fi
