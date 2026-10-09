@@ -23,6 +23,6 @@ public enum RegistrationStatus {
     /** The hold window elapsed with no payment attempt. Seats have been released. */
     EXPIRED,
 
-    /** A confirmed registration that was later refunded. Reached in M3. */
+    /** A confirmed registration whose payment was returned (FR-11). Seats released, tickets voided. Terminal. */
     REFUNDED
 }

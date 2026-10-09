@@ -99,6 +99,23 @@ public class SeatHold {
         status = SeatHoldStatus.RELEASED;
     }
 
+    /**
+     * Returns paid-for seats to inventory after the registration is refunded (FR-11).
+     *
+     * <p>The only way out of {@code CONFIRMED}. Kept apart from {@link #release()} so that the two
+     * rules stay separately visible: unpaid holds are released, paid holds are refunded. A confirmed
+     * hold reaching {@link #release()} is still a bug, and is still refused.
+     *
+     * @throws IllegalStateException if the hold is not {@code CONFIRMED}
+     */
+    public void releaseAfterRefund() {
+        if (status != SeatHoldStatus.CONFIRMED) {
+            throw new IllegalStateException(
+                    "cannot refund seat hold " + id + ": it is " + status + ", and only paid-for seats are refunded");
+        }
+        status = SeatHoldStatus.RELEASED;
+    }
+
     private void requireHeld(String action) {
         if (status != SeatHoldStatus.HELD) {
             throw new IllegalStateException(

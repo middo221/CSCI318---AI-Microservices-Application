@@ -7,14 +7,17 @@ import au.edu.uow.csci318.conference.payment.domain.model.Money;
 import au.edu.uow.csci318.conference.payment.domain.model.PaymentOrder;
 import au.edu.uow.csci318.conference.payment.domain.model.PaymentStatus;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.OptimisticLockException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Round-trips the aggregate through a real schema.
@@ -28,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class JpaPaymentOrderRepositoryTest {
 
     private static final Instant HOLD_EXPIRES = Instant.parse("2026-09-15T10:02:00Z");
+    private static final Instant FIRST_SESSION = Instant.parse("2026-11-19T22:00:00Z");
 
     @Autowired
     private JpaPaymentOrderRepository orders;
@@ -41,11 +45,20 @@ class JpaPaymentOrderRepositoryTest {
     }
 
     private PaymentOrder paidOrder(String id, String registrationId) {
-        PaymentOrder order = PaymentOrder.raise(id, registrationId, Money.aud("148.50"), HOLD_EXPIRES);
+        PaymentOrder order = PaymentOrder.raise(id, registrationId, Money.aud("148.50"), HOLD_EXPIRES, FIRST_SESSION);
         order.pay(new CardToken("TOK_OK"),
                 (orderId, amount, token) -> ChargeResult.succeeded("sim-" + id),
                 HOLD_EXPIRES.minusSeconds(60));
         return order;
+    }
+
+    @Test
+    void roundTripsWhenTheFirstSessionStarts() {
+        orders.save(paidOrder("pay-2", "reg-2"));
+        detach();
+
+        assertThat(orders.findById("pay-2").orElseThrow().getFirstSessionStartsAt())
+                .isEqualTo(FIRST_SESSION);
     }
 
     @Test
@@ -77,5 +90,29 @@ class JpaPaymentOrderRepositoryTest {
         assertThat(orders.findByRegistrationId("reg-3")).get()
                 .extracting(PaymentOrder::getId).isEqualTo("pay-3");
         assertThat(orders.findByRegistrationId("reg-nobody")).isEmpty();
+    }
+
+    /**
+     * The organiser's override and an attendee's request can reach the same order together. Both
+     * read it PAID; the version column is what lets only the first of them refund it.
+     */
+    @Test
+    void refusesToRefundFromAStaleCopyOfTheOrder() {
+        orders.save(paidOrder("pay-4", "reg-4"));
+        detach();
+        PaymentOrder first = orders.findById("pay-4").orElseThrow();
+        entityManager.detach(first);
+        PaymentOrder stale = orders.findById("pay-4").orElseThrow();
+        entityManager.detach(stale);
+
+        first.markRefunded();
+        orders.save(first);
+        entityManager.flush();
+
+        stale.markRefunded();
+        assertThatThrownBy(() -> {
+            orders.save(stale);
+            entityManager.flush();
+        }).isInstanceOfAny(OptimisticLockingFailureException.class, OptimisticLockException.class);
     }
 }

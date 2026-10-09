@@ -1,5 +1,6 @@
 package au.edu.uow.csci318.conference.registration.infrastructure.messaging;
 
+import au.edu.uow.csci318.conference.common.event.RegistrationRequested;
 import au.edu.uow.csci318.conference.registration.application.RegistrationApplicationService;
 import au.edu.uow.csci318.conference.registration.application.command.RequestRegistrationCommand;
 import au.edu.uow.csci318.conference.registration.application.command.SessionRequest;
@@ -21,6 +22,7 @@ import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.Message;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -113,6 +115,10 @@ class RegistrationRequestPublishingTest {
         assertThat(payload.hasNonNull("holdExpiresAt"))
                 .as("payment refuses to charge past this deadline, so it must survive serialisation")
                 .isTrue();
+        RegistrationRequested decoded = objectMapper.treeToValue(payload, RegistrationRequested.class);
+        assertThat(decoded.firstSessionStartsAt())
+                .as("09:00 AEST on 14 September — billing counts refund days back from this")
+                .isEqualTo(Instant.parse("2026-09-13T23:00:00Z"));
     }
 
     @Test

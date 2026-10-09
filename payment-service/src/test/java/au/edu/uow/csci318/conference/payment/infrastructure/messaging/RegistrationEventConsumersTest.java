@@ -68,11 +68,52 @@ class RegistrationEventConsumersTest {
     private static RegistrationRequested requested(String registrationId, String cardToken,
                                                    Instant holdExpiresAt) {
         return new RegistrationRequested(UUID.randomUUID().toString(), Instant.now(), registrationId,
-                "att-1042", "conf-1", new BigDecimal("148.50"), "AUD", holdExpiresAt, cardToken);
+                "att-1042", "conf-1", new BigDecimal("148.50"), "AUD", holdExpiresAt, cardToken,
+                Instant.parse("2026-11-19T22:00:00Z"));
     }
 
     private void send(RegistrationRequested event) {
         inbound.send(MessageBuilder.withPayload(event).build(), "registration-requested");
+    }
+
+    @Test
+    void storesWhenTheFirstSessionStartsOnTheOrder() {
+        String registrationId = "reg-" + UUID.randomUUID();
+
+        send(requested(registrationId, "TOK_OK"));
+
+        assertThat(outbound.receive(2000, "payment-succeeded")).isNotNull();
+        assertThat(payments.findByRegistrationId(registrationId).getFirstSessionStartsAt())
+                .isEqualTo(Instant.parse("2026-11-19T22:00:00Z"));
+    }
+
+    /**
+     * Raw JSON with no {@code firstSessionStartsAt}, exactly as a message produced before this
+     * change would arrive from the broker. It is still charged; the date is simply unknown.
+     */
+    @Test
+    void chargesARequestProducedBeforeTheStartTimeExisted() {
+        String registrationId = "reg-" + UUID.randomUUID();
+        String json = """
+                {
+                  "eventId": "%s",
+                  "occurredAt": "2026-10-09T02:15:30Z",
+                  "registrationId": "%s",
+                  "attendeeId": "att-1042",
+                  "conferenceEventId": "conf-1",
+                  "totalAmount": 148.50,
+                  "currency": "AUD",
+                  "holdExpiresAt": "%s",
+                  "cardToken": "TOK_OK"
+                }
+                """.formatted(UUID.randomUUID(), registrationId, Instant.now().plusSeconds(900));
+
+        inbound.send(MessageBuilder.withPayload(json.getBytes(StandardCharsets.UTF_8))
+                .setHeader("contentType", "application/json")
+                .build(), "registration-requested");
+
+        assertThat(outbound.receive(2000, "payment-succeeded")).isNotNull();
+        assertThat(payments.findByRegistrationId(registrationId).getFirstSessionStartsAt()).isNull();
     }
 
     @Test

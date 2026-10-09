@@ -1,12 +1,16 @@
 package au.edu.uow.csci318.conference.registration.domain.model;
 
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
+import au.edu.uow.csci318.conference.common.event.RefundRequested;
 import au.edu.uow.csci318.conference.common.event.RegistrationCancelled;
 import au.edu.uow.csci318.conference.common.event.RegistrationConfirmed;
 import au.edu.uow.csci318.conference.common.event.RegistrationExpired;
 import au.edu.uow.csci318.conference.common.event.RegistrationRequested;
 import au.edu.uow.csci318.conference.common.event.SeatsReleased;
 import au.edu.uow.csci318.conference.common.event.SeatsReserved;
+import au.edu.uow.csci318.conference.registration.domain.NothingToRefundException;
+import au.edu.uow.csci318.conference.registration.domain.RefundAlreadyRequestedException;
+import au.edu.uow.csci318.conference.registration.domain.RegistrationNotConfirmedException;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.CascadeType;
@@ -90,6 +94,13 @@ public class Registration {
     private Instant createdAt;
 
     /**
+     * When a refund was asked for that is still awaiting Billing's decision; {@code null} otherwise.
+     * Cleared when Billing answers either way, so it marks a pending request, not a history.
+     */
+    @Column(name = "refund_requested_at")
+    private Instant refundRequestedAt;
+
+    /**
      * Events recorded since the last drain. {@code @Transient} because they are messages about the
      * aggregate, not state of it — persisting them would make replay ambiguous.
      */
@@ -133,6 +144,9 @@ public class Registration {
      * also carries the earliest hold expiry, so Billing never charges for seats this aggregate has
      * already released.
      *
+     * <p>{@code firstSessionStartsAt} is passed through to Billing, which counts refund days back
+     * from it; it is not stored here.
+     *
      * @throws IllegalArgumentException if any attribute is missing, no seats are held, or a
      *                                  registration that costs money has no card token
      */
@@ -141,7 +155,8 @@ public class Registration {
                                        String conferenceEventId,
                                        List<SeatHold> seatHolds,
                                        Money totalAmount,
-                                       String cardToken) {
+                                       String cardToken,
+                                       Instant firstSessionStartsAt) {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("registration id must be supplied");
         }
@@ -180,7 +195,8 @@ public class Registration {
                 totalAmount.amount(),
                 totalAmount.currency(),
                 registration.earliestHoldExpiry(),
-                cardToken.trim()));
+                cardToken.trim(),
+                firstSessionStartsAt));
         registration.recordSeatsReserved();
         return registration;
     }
@@ -253,16 +269,122 @@ public class Registration {
                 UUID.randomUUID().toString(), Instant.now(), id, attendee.attendeeId()));
     }
 
+    /**
+     * Asks Billing for this registration's money back (FR-11).
+     *
+     * <p>Records a {@code RefundRequested} of kind {@code ATTENDEE_REQUEST} — and nothing else yet.
+     * The registration stays {@code CONFIRMED}, its seats stay taken and its tickets stay valid until
+     * Billing answers, because Billing may decline. The request is remembered so a second cannot be
+     * raised while the first is undecided.
+     *
+     * @throws RegistrationNotConfirmedException unless {@code CONFIRMED}
+     * @throws NothingToRefundException          if the registration cost nothing
+     * @throws RefundAlreadyRequestedException   if a request is already awaiting a decision
+     */
+    public void requestRefund(String reason, RefundRequester requestedBy, Instant now) {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("a refund request must give a reason");
+        }
+        if (requestedBy == null) {
+            throw new IllegalArgumentException("a refund request must say who is asking");
+        }
+        if (now == null) {
+            throw new IllegalArgumentException("the current instant must be supplied");
+        }
+        if (status != RegistrationStatus.CONFIRMED) {
+            throw new RegistrationNotConfirmedException(id, status);
+        }
+        if (totalAmount.isZero()) {
+            throw new NothingToRefundException(id);
+        }
+        if (refundRequestedAt != null) {
+            throw new RefundAlreadyRequestedException(id);
+        }
+        refundRequestedAt = now;
+        domainEvents.add(new RefundRequested(
+                UUID.randomUUID().toString(),
+                now,
+                id,
+                attendee.attendeeId(),
+                reason.trim(),
+                requestedBy.name(),
+                RefundRequested.KIND_ATTENDEE_REQUEST));
+    }
+
+    /**
+     * Asks Billing to return a charge that arrived after this registration's seats were released.
+     *
+     * <p>The gap FR-07 recorded: payment refuses to charge past the hold deadline, but a charge can
+     * still land in the seconds between the deadline and the next sweep. The seats are back on sale
+     * and may already be someone else's, so the registration stays as it is; only the money goes back.
+     * Billing refunds a request of kind {@code LATE_PAYMENT_REVERSAL} in full, without the policy.
+     *
+     * @throws IllegalStateException unless {@code EXPIRED} or {@code CANCELLED}
+     */
+    public void requestLatePaymentReversal() {
+        if (status != RegistrationStatus.EXPIRED && status != RegistrationStatus.CANCELLED) {
+            throw new IllegalStateException("registration " + id + " is " + status
+                    + "; only a registration whose seats were already released has a late payment to reverse");
+        }
+        domainEvents.add(new RefundRequested(
+                UUID.randomUUID().toString(),
+                Instant.now(),
+                id,
+                attendee.attendeeId(),
+                "payment arrived after the registration was " + status,
+                RefundRequester.SYSTEM.name(),
+                RefundRequested.KIND_LATE_PAYMENT_REVERSAL));
+    }
+
+    /**
+     * Applies a refund Billing has issued (FR-11): {@code CONFIRMED → REFUNDED}.
+     *
+     * <p>Every hold is released and one {@code SeatsReleased} is recorded per session — which is also
+     * what offers each session's seats to its waitlist (FR-10). Any refund, half or full, ends the
+     * registration: keeping half the money and the seat is not on offer.
+     *
+     * @throws IllegalStateException unless {@code CONFIRMED}
+     */
+    public void refund() {
+        if (status != RegistrationStatus.CONFIRMED) {
+            throw new IllegalStateException("cannot refund registration " + id + ": it is " + status
+                    + ", and only a CONFIRMED registration holds paid-for seats");
+        }
+        seatHolds.forEach(hold -> {
+            hold.releaseAfterRefund();
+            recordSeatsReleased(hold);
+        });
+        status = RegistrationStatus.REFUNDED;
+        refundRequestedAt = null;
+    }
+
+    /** Billing declined: the request is settled and the registration is exactly as it was. */
+    public void clearRefundRequest() {
+        refundRequestedAt = null;
+    }
+
+    public boolean isRefundRequested() {
+        return refundRequestedAt != null;
+    }
+
+    public Instant getRefundRequestedAt() {
+        return refundRequestedAt;
+    }
+
     private void releaseHolds() {
         seatHolds.stream().filter(SeatHold::isHeld).forEach(hold -> {
             hold.release();
-            domainEvents.add(new SeatsReleased(
-                    UUID.randomUUID().toString(),
-                    Instant.now(),
-                    id,
-                    hold.getSessionId(),
-                    hold.getQuantity()));
+            recordSeatsReleased(hold);
         });
+    }
+
+    private void recordSeatsReleased(SeatHold hold) {
+        domainEvents.add(new SeatsReleased(
+                UUID.randomUUID().toString(),
+                Instant.now(),
+                id,
+                hold.getSessionId(),
+                hold.getQuantity()));
     }
 
     private void requirePendingPayment(String action) {

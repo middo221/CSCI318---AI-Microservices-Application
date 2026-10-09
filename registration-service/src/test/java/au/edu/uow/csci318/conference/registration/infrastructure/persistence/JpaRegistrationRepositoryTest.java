@@ -2,6 +2,7 @@ package au.edu.uow.csci318.conference.registration.infrastructure.persistence;
 
 import au.edu.uow.csci318.conference.registration.domain.model.AttendeeRef;
 import au.edu.uow.csci318.conference.registration.domain.model.Money;
+import au.edu.uow.csci318.conference.registration.domain.model.RefundRequester;
 import au.edu.uow.csci318.conference.registration.domain.model.Registration;
 import au.edu.uow.csci318.conference.registration.domain.model.RegistrationStatus;
 import au.edu.uow.csci318.conference.registration.domain.model.SeatHold;
@@ -46,7 +47,8 @@ class JpaRegistrationRepositoryTest {
                 List.of(SeatHold.hold(id + "-h1", "ses-1", 2, EXPIRES),
                         SeatHold.hold(id + "-h2", "ses-2", 1, EXPIRES)),
                 Money.aud("148.50"),
-                "TOK_OK");
+                "TOK_OK",
+                Instant.parse("2026-11-19T22:00:00Z"));
     }
 
     private void detach() {
@@ -135,5 +137,18 @@ class JpaRegistrationRepositoryTest {
     @Test
     void returnsEmptyForAnIdThatWasNeverIssued() {
         assertThat(registrations.findById("no-such-registration")).isEmpty();
+    }
+
+    @Test
+    void remembersAPendingRefundRequest() {
+        Registration registration = twoSessions("reg-refund", "att-1042");
+        registration.confirm();
+        registration.requestRefund("Hospitalised", RefundRequester.ATTENDEE, Instant.parse("2026-10-09T02:00:00Z"));
+        registrations.save(registration);
+        detach();
+
+        Registration loaded = registrations.findById("reg-refund").orElseThrow();
+        assertThat(loaded.isRefundRequested()).isTrue();
+        assertThat(loaded.getRefundRequestedAt()).isEqualTo(Instant.parse("2026-10-09T02:00:00Z"));
     }
 }

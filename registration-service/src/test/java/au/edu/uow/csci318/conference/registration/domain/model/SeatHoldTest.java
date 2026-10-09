@@ -89,4 +89,21 @@ class SeatHoldTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("session");
     }
+
+    @Test
+    void returnsPaidForSeatsAfterARefund() {
+        SeatHold hold = SeatHold.hold("h-1", "ses-1", 2, Instant.parse("2026-09-14T09:15:00Z"));
+        hold.confirm();
+
+        hold.releaseAfterRefund();
+
+        assertThat(hold.getStatus()).isEqualTo(SeatHoldStatus.RELEASED);
+    }
+
+    @Test
+    void refundsOnlyConfirmedSeats() {
+        SeatHold held = SeatHold.hold("h-1", "ses-1", 2, Instant.parse("2026-09-14T09:15:00Z"));
+
+        assertThatThrownBy(held::releaseAfterRefund).isInstanceOf(IllegalStateException.class);
+    }
 }

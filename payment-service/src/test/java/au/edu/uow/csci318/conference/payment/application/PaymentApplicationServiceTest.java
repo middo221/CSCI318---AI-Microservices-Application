@@ -76,13 +76,14 @@ class PaymentApplicationServiceTest {
 
     private static PayForRegistrationCommand paying(String registrationId, String token) {
         return new PayForRegistrationCommand(registrationId, Money.aud("148.50"),
-                Instant.now().plusSeconds(900), new CardToken(token));
+                Instant.now().plusSeconds(900), new CardToken(token),
+                Instant.now().plusSeconds(45L * 86_400));
     }
 
     @Test
     void refusesToChargeForAHoldThatHasAlreadyExpired() {
         PaymentOrder order = service.payForRegistration(new PayForRegistrationCommand(
-                "reg-late", Money.aud("148.50"), Instant.now().minusSeconds(60), new CardToken("TOK_OK")));
+                "reg-late", Money.aud("148.50"), Instant.now().minusSeconds(60), new CardToken("TOK_OK"), null));
 
         assertThat(order.getStatus()).isEqualTo(PaymentStatus.FAILED);
         assertThat(charges).as("the gateway must never be called").hasValue(0);

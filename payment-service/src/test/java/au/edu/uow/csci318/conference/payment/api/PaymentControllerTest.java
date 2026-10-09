@@ -41,7 +41,7 @@ class PaymentControllerTest {
     private PaymentOrder givenAnOrder(String token) {
         return payments.payForRegistration(new PayForRegistrationCommand(
                 "reg-" + UUID.randomUUID(), Money.aud("148.50"),
-                Instant.now().plusSeconds(900), new CardToken(token)));
+                Instant.now().plusSeconds(900), new CardToken(token), null));
     }
 
     @Test

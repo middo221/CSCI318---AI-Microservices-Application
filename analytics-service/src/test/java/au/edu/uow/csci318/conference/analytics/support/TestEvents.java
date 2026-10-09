@@ -44,12 +44,14 @@ public final class TestEvents {
 
     /**
      * <strong>The only place in analytics-service that constructs {@code RegistrationRequested}.</strong>
-     * The {@code feat/m3-refunds-waitlist} branch adds a trailing {@code Instant firstSessionStartsAt}
-     * component; when the two branches meet, this one call is the whole fix. Do not inline it.
+     * M3's refunds work added the trailing {@code Instant firstSessionStartsAt} component; keeping
+     * construction here made that merge a one-line change. The funnel never reads the payload, so
+     * the value is arbitrary. Do not inline it.
      */
     public static RegistrationRequested registrationRequested(String registrationId) {
         return new RegistrationRequested(id(), T0, registrationId, "att-1042", "evt-1",
-                new BigDecimal("148.50"), "AUD", T0.plusSeconds(120), "TOK_OK");
+                new BigDecimal("148.50"), "AUD", T0.plusSeconds(120), "TOK_OK",
+                T0.plus(java.time.Duration.ofDays(45)));
     }
 
     public static PaymentSucceeded paymentSucceeded(String registrationId) {

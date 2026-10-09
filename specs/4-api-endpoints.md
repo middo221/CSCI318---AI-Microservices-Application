@@ -35,12 +35,15 @@ Milestones: **M0** skeleton · **M1** catalogue and first event · **M2** the sa
 | **FR-06** | `POST` | `/registrations` | `CreateRegistrationRequest` | `201 Created` (`RegistrationResponse`) | emits `registration-requested` and one `seats-reserved` per session |
 | — | `GET` | `/registrations/{id}` | *None* | `200 OK` (`RegistrationResponse`) | None |
 | — | `GET` | `/attendees/{attendeeId}/registrations` | *None* | `200 OK` (`Array<RegistrationResponse>`) | None |
-| **FR-11** | `POST` | `/registrations/{id}/refund-requests` | `RefundRequest` | `202 Accepted` (`RefundRequestResponse`) | emits `refund-requested` *(M3)* |
-| **FR-10** | `POST` | `/sessions/{sessionId}/waitlist` | `JoinWaitlistRequest` | `201 Created` (`WaitlistEntryResponse`) | emits `waitlist-joined` *(M3)* |
+| **FR-11** | `POST` | `/registrations/{id}/refund-requests` | `RefundRequest` | `202 Accepted` (`RefundRequestResponse`) | emits `refund-requested` |
+| **FR-10** | `POST` | `/sessions/{sessionId}/waitlist` | `JoinWaitlistRequest` | `201 Created` (`WaitlistEntryResponse`) | emits `waitlist-joined` |
+| **FR-10** | `GET` | `/sessions/{sessionId}/waitlist` | *None* | `200 OK` (`Array<WaitlistEntryResponse>`) | None |
 | **FR-06** | `GET` | `/sessions/{sessionId}/availability` | *None* | `200 OK` (`SessionAvailabilityResponse`) | reads local `SessionView`, replicated from catalog events. `reservedSeats` moves as seats are held and released. `404` until `session-added` has arrived |
 
 **Error responses:** `400` (`VALIDATION_FAILED`, `INVALID_REQUEST`), `404`
-(`REGISTRATION_NOT_FOUND`, `SESSION_NOT_FOUND`), `409` (`SESSION_FULL`).
+(`REGISTRATION_NOT_FOUND`, `SESSION_NOT_FOUND`), `409` (`SESSION_FULL`, `SESSION_NOT_FULL`,
+`ALREADY_WAITLISTED`, `REGISTRATION_NOT_CONFIRMED`, `REFUND_ALREADY_REQUESTED`, `NOTHING_TO_REFUND`,
+`CONCURRENT_UPDATE`).
 
 `SESSION_FULL` refuses the **whole** registration in M2. Design section 6.3 routes a full session
 to the waitlist, which is FR-10 and arrives in M3.
@@ -53,10 +56,11 @@ to the waitlist, which is FR-10 and arrives in M3.
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **FR-07** | `GET` | `/payment-orders/{id}` | *None* | `200 OK` (`PaymentOrderResponse`) | None *(M2)* |
 | **FR-07** | `GET` | `/registrations/{registrationId}/payment-order` | *None* | `200 OK` (`PaymentOrderResponse`) | None *(M2)* |
-| **FR-11** | `GET` | `/refund-policy/quote` | *None* | `200 OK` (`RefundQuoteResponse`) | Query `registrationId`; used by the support agent *(M3)* |
-| **FR-11** | `POST` | `/payment-orders/{id}/refunds` | `IssueRefundRequest` | `201 Created` (`RefundResponse`) | emits `refund-issued` *(M3)* |
+| **FR-11** | `GET` | `/refund-policy/quote` | *None* | `200 OK` (`RefundQuoteResponse`) | Query `registrationId`; used by the support agent |
+| **FR-11** | `POST` | `/payment-orders/{id}/refunds` | `IssueRefundRequest` | `201 Created` (`RefundResponse`) | emits `refund-issued` |
 
-**Error responses:** `400`, `404` (`PAYMENT_ORDER_NOT_FOUND`), `409` (`ALREADY_REFUNDED`).
+**Error responses:** `400` (`VALIDATION_FAILED`, `INVALID_REQUEST`), `404` (`PAYMENT_ORDER_NOT_FOUND`), `409`
+(`NOT_PAID`, `ALREADY_REFUNDED`).
 
 ---
 

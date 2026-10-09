@@ -1,8 +1,10 @@
 package au.edu.uow.csci318.conference.registration.application;
 
 import au.edu.uow.csci318.conference.common.event.DomainEvent;
+import au.edu.uow.csci318.conference.common.event.RefundRequested;
 import au.edu.uow.csci318.conference.common.event.RegistrationConfirmed;
 import au.edu.uow.csci318.conference.common.event.RegistrationRequested;
+import au.edu.uow.csci318.conference.common.event.SeatsReleased;
 import au.edu.uow.csci318.conference.common.event.SeatsReserved;
 import au.edu.uow.csci318.conference.registration.application.command.RequestRegistrationCommand;
 import au.edu.uow.csci318.conference.registration.application.command.SessionRequest;
@@ -12,6 +14,7 @@ import au.edu.uow.csci318.conference.registration.domain.SessionNotFoundExceptio
 import au.edu.uow.csci318.conference.registration.domain.event.DomainEventPublisher;
 import au.edu.uow.csci318.conference.registration.domain.model.AttendeeRef;
 import au.edu.uow.csci318.conference.registration.domain.model.Money;
+import au.edu.uow.csci318.conference.registration.domain.model.RefundRequester;
 import au.edu.uow.csci318.conference.registration.domain.model.Registration;
 import au.edu.uow.csci318.conference.registration.domain.model.RegistrationStatus;
 import au.edu.uow.csci318.conference.registration.domain.model.SessionView;
@@ -22,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -95,18 +99,42 @@ class RegistrationApplicationServiceTest {
     @BeforeEach
     void setUp() {
         service = new RegistrationApplicationService(
-                registrations, sessionViews, publisher, Duration.ofMinutes(15));
+                registrations, sessionViews, publisher, Duration.ofMinutes(15), "Australia/Sydney");
     }
 
     private void givenSession(String id, int capacity, String price) {
+        givenSession(id, capacity, price, MORNING);
+    }
+
+    private void givenSession(String id, int capacity, String price, TimeSlot slot) {
         SessionView view = SessionView.forSession(id);
-        view.describe("conf-1", "Session " + id, MORNING, Money.aud(price));
+        view.describe("conf-1", "Session " + id, slot, Money.aud(price));
         view.setCapacity(capacity);
         views.put(id, view);
     }
 
     private static RequestRegistrationCommand requesting(SessionRequest... sessions) {
         return new RequestRegistrationCommand(DANA, "conf-1", List.of(sessions), "TOK_OK");
+    }
+
+    /**
+     * Catalogue times are wall-clock times with no zone, and Billing counts refund days back from
+     * this instant. It is converted in conference time — and late November is after NSW moves to
+     * UTC+11 on 4 October 2026, so a fixed +10 would shift every policy boundary by an hour.
+     */
+    @Test
+    void tellsPaymentWhenTheFirstSessionStartsInConferenceTime() {
+        givenSession("ses-late", 120, "49.50", new TimeSlot(
+                LocalDateTime.parse("2026-11-21T14:00"), LocalDateTime.parse("2026-11-21T15:00")));
+        givenSession("ses-early", 120, "25.00", new TimeSlot(
+                LocalDateTime.parse("2026-11-20T09:00"), LocalDateTime.parse("2026-11-20T10:30")));
+
+        service.request(requesting(new SessionRequest("ses-late", 1), new SessionRequest("ses-early", 1)));
+
+        assertThat(published).filteredOn(RegistrationRequested.class::isInstance).singleElement()
+                .satisfies(event -> assertThat(((RegistrationRequested) event).firstSessionStartsAt())
+                        .as("09:00 AEDT on 20 November is 22:00 UTC the day before")
+                        .isEqualTo(Instant.parse("2026-11-19T22:00:00Z")));
     }
 
     @Test
@@ -261,5 +289,94 @@ class RegistrationApplicationServiceTest {
         assertThat(stored).isEmpty();
         assertThat(published).isEmpty();
         assertThat(views.get("ses-1").getReservedSeats()).isZero();
+    }
+
+    private Registration givenAPendingRegistration() {
+        givenSession("ses-1", 120, "49.50");
+        Registration registration = service.request(requesting(new SessionRequest("ses-1", 2)));
+        published.clear();
+        return registration;
+    }
+
+    private Registration givenAConfirmedRegistration() {
+        Registration registration = givenAPendingRegistration();
+        service.settlePayment(registration.getId());
+        published.clear();
+        return registration;
+    }
+
+    @Test
+    void confirmsAPaymentThatArrivesInTime() {
+        Registration registration = givenAPendingRegistration();
+
+        assertThat(service.settlePayment(registration.getId())).isEqualTo(PaymentSettlement.CONFIRMED);
+
+        assertThat(stored.get(registration.getId()).getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
+        assertThat(published).singleElement().isInstanceOf(RegistrationConfirmed.class);
+    }
+
+    /** The FR-07 defect, closed: the seats stay released and the money is asked back. */
+    @Test
+    void asksForAPaymentBackThatArrivedAfterTheHoldExpired() {
+        Registration registration = givenAPendingRegistration();
+        service.expireOverdue(Instant.now().plus(Duration.ofHours(1)));
+        published.clear();
+
+        assertThat(service.settlePayment(registration.getId()))
+                .isEqualTo(PaymentSettlement.REVERSAL_REQUESTED);
+
+        assertThat(stored.get(registration.getId()).getStatus()).isEqualTo(RegistrationStatus.EXPIRED);
+        assertThat(views.get("ses-1").getReservedSeats()).as("the seats stay released").isZero();
+        assertThat(published).singleElement().isInstanceOfSatisfying(RefundRequested.class,
+                requested -> assertThat(requested.kind()).isEqualTo(RefundRequested.KIND_LATE_PAYMENT_REVERSAL));
+    }
+
+    @Test
+    void ignoresARepeatedSuccessForARegistrationAlreadyConfirmed() {
+        Registration registration = givenAConfirmedRegistration();
+
+        assertThat(service.settlePayment(registration.getId())).isEqualTo(PaymentSettlement.ALREADY_SETTLED);
+
+        assertThat(published).isEmpty();
+    }
+
+    @Test
+    void refundsAConfirmedRegistrationAndReturnsItsSeats() {
+        Registration registration = givenAConfirmedRegistration();
+        assertThat(views.get("ses-1").getReservedSeats()).isEqualTo(2);
+
+        assertThat(service.applyRefundIssued(registration.getId())).isTrue();
+
+        assertThat(stored.get(registration.getId()).getStatus()).isEqualTo(RegistrationStatus.REFUNDED);
+        assertThat(views.get("ses-1").getReservedSeats()).isZero();
+        assertThat(published).singleElement().isInstanceOf(SeatsReleased.class);
+    }
+
+    /** A reversed late payment: the seats were released long ago, so there is nothing to undo. */
+    @Test
+    void changesNothingWhenARefundArrivesForARegistrationThatWasNeverConfirmed() {
+        Registration registration = givenAPendingRegistration();
+        service.expireOverdue(Instant.now().plus(Duration.ofHours(1)));
+        published.clear();
+
+        assertThat(service.applyRefundIssued(registration.getId())).isFalse();
+
+        assertThat(stored.get(registration.getId()).getStatus()).isEqualTo(RegistrationStatus.EXPIRED);
+        assertThat(published).isEmpty();
+    }
+
+    @Test
+    void settlesADeclinedRequestWithoutChangingTheRegistration() {
+        Registration registration = givenAConfirmedRegistration();
+        service.requestRefund(registration.getId(), "Cannot attend", RefundRequester.ATTENDEE);
+        published.clear();
+
+        assertThat(service.applyRefundDeclined(registration.getId())).isTrue();
+
+        Registration settled = stored.get(registration.getId());
+        assertThat(settled.isRefundRequested()).isFalse();
+        assertThat(settled.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
+        assertThat(views.get("ses-1").getReservedSeats()).isEqualTo(2);
+        assertThat(published).isEmpty();
     }
 }
