@@ -28,6 +28,8 @@
 #   environment.txt          commit, branch, Java, Kafka, and the CONFERENCE_* settings of this shell
 #   expiry-helper.txt        with --with-expiry, what the helper did to payment-service
 #
+# Needs GNU `timeout` and GNU `sed` (Linux or Git Bash; on macOS install coreutils and gnu-sed).
+#
 # Prerequisites: Docker running, bash scripts/run-all.sh (every service READY). For 06-07 the
 # concierge must hold GEMINI_API_KEY in its own environment; run-all loads it from .env. This
 # script never reads, prints or logs the key, and redacts anything key-shaped in what it keeps.
@@ -87,15 +89,40 @@ HELPER_PID=""; OUT=""
 # strip_ansi <in> <out>: the transcript without colour codes or carriage returns
 strip_ansi() { sed -e 's/\x1b\[[0-9;]*m//g' -e 's/\r$//' "$1" > "$2"; }
 
-# redact <file>: Google API keys (AIza + 35 characters) replaced in place
-redact() { sed -i -E 's/AIza[0-9A-Za-z_-]{35}/<redacted-api-key>/g' "$1"; }
+# redact <file>: Google API keys (AIza + 35 characters, or the newer AQ. + 40 or more) replaced in place
+redact() { sed -i -E -e 's/AIza[0-9A-Za-z_-]{35}/<redacted-api-key>/g' -e 's/AQ\.[0-9A-Za-z_-]{40,}/<redacted-api-key>/g' "$1"; }
+
+# env_value <file> <NAME>: NAME's value in a .env file; the same rules as scripts/run-all.sh (UTF-8 BOM,
+# CRLF, `export NAME=`, spaces round =, quotes, inline comments; the last assignment wins).
+env_value() {
+  [ -f "$1" ] || return 0
+  local line k v found=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
+    line=${line#$'\xEF\xBB\xBF'}
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in *=*) ;; *) continue ;; esac
+    line=${line#export }
+    k=${line%%=*}; v=${line#*=}
+    k=$(printf '%s' "$k" | tr -d '[:space:]')
+    [ "$k" = "$2" ] || continue
+    v=$(printf '%s' "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    case "$v" in
+      \"*) v=${v#\"}; v=${v%%\"*} ;;
+      \'*) v=${v#\'}; v=${v%%\'*} ;;
+      *) v=$(printf '%s' "$v" | sed -e 's/[[:space:]]\{1,\}#.*$//' -e 's/[[:space:]]*$//') ;;
+    esac
+    found=$v
+  done < "$1"
+  printf '%s' "$found"
+}
 
 # The literal GEMINI_API_KEY, read from the shell or .env without printing it, so that a key that
 # does not look like AIza... is still redacted. Empty when there is none.
 load_key() {
   KEYVAL="${GEMINI_API_KEY:-}"
   if [ -z "$KEYVAL" ] && [ -f .env ]; then
-    KEYVAL=$(grep -E '^[[:space:]]*GEMINI_API_KEY=' .env | head -1 | cut -d= -f2- | tr -d '"\r' | sed "s/'//g")
+    KEYVAL=$(env_value .env GEMINI_API_KEY)
   fi
   [ "${#KEYVAL}" -ge 8 ] || KEYVAL=""
 }
@@ -206,15 +233,22 @@ run_demo() {
   return 0
 }
 
-wait_line() { # wait_line <file> <text> <seconds>
-  for _ in $(seq 1 "$3"); do grep -q "$2" "$1" 2>/dev/null && return 0; sleep 1; done; return 1
+# wait_line <file> <text> <seconds> [<stop-file>]: waits for the text; gives up early once the
+# optional stop-file exists (demo-m2 has exited, so the line can never come).
+wait_line() {
+  for _ in $(seq 1 "$3"); do
+    grep -q "$2" "$1" 2>/dev/null && return 0
+    [ -n "${4:-}" ] && [ -e "$4" ] && return 1
+    sleep 1
+  done
+  return 1
 }
 
 # Does for demo-m2 what it asks a person to do: stop payment-service, then start it again. Every
 # step and its outcome is written to expiry-helper.txt, which expiry_evidence reads afterwards.
 expiry_helper() {
   local log="$OUT/02-demo-m2.log" h="$OUT/expiry-helper.txt" rc
-  wait_line "$log" "Stop payment-service now" "$HELPER_WAIT" || { echo "helper: demo-m2 never asked for payment-service to be stopped" >> "$h"; return 0; }
+  wait_line "$log" "Stop payment-service now" "$HELPER_WAIT" "$OUT/.m2-done" || { echo "helper: demo-m2 never asked for payment-service to be stopped" >> "$h"; return 0; }
   # The jar's first life: the restart may overwrite this log, so keep it as it stands now.
   mkdir -p "$OUT/services"
   if cp "$PAY_LOG" "$OUT/services/payment-service.first-life.log" 2>/dev/null; then
@@ -224,7 +258,7 @@ expiry_helper() {
   fi
   bash "$SCRIPTS/stop-all.sh" payment-service >> "$h" 2>&1; rc=$?
   if [ $rc = 0 ]; then echo "helper: STOPPED payment-service" >> "$h"; else echo "helper: stop payment-service FAILED (exit $rc)" >> "$h"; return 0; fi
-  wait_line "$log" "Start payment-service again" "$HELPER_WAIT" || { echo "helper: demo-m2 never asked for payment-service to be started again" >> "$h"; return 0; }
+  wait_line "$log" "Start payment-service again" "$HELPER_WAIT" "$OUT/.m2-done" || { echo "helper: demo-m2 never asked for payment-service to be started again" >> "$h"; return 0; }
   bash "$RUN_ALL" --no-build --only payment-service >> "$h" 2>&1; rc=$?
   if [ $rc = 0 ]; then echo "helper: STARTED payment-service" >> "$h"; else echo "helper: start payment-service FAILED (exit $rc)" >> "$h"; fi
   return 0
@@ -248,8 +282,17 @@ run_sequence() {
   if [ "$WITH_EXPIRY" = "1" ]; then
     : > "$OUT/expiry-helper.txt"
     expiry_helper & HELPER_PID=$!
+    rm -f "$OUT/.m2-done"
     run_demo 02 demo-m2 SKIP_EXPIRY=0 HOLD_WINDOW_SECONDS=20
+    : > "$OUT/.m2-done"   # demo-m2 has exited: a helper still waiting for a line stops waiting
     wait "$HELPER_PID"; echo "helper exit: $?" >> "$OUT/expiry-helper.txt"; HELPER_PID=""
+    # Safety net: if the helper's restart failed, or demo-m2 died between "Stop" and "Start", rows
+    # 03-07 would all run with no payment-service. Row 02a still fails honestly in that case (the
+    # helper's own STARTED line is absent); this only protects the later rows.
+    if ! bash "$RUN_ALL" --check --only payment-service >/dev/null 2>&1; then
+      bash "$RUN_ALL" --no-build --only payment-service >> "$OUT/expiry-helper.txt" 2>&1
+      echo "helper: safety-net restart of payment-service" >> "$OUT/expiry-helper.txt"
+    fi
     if expiry_evidence "$OUT/expiry-helper.txt" "$OUT/02-demo-m2.txt" > "$OUT/expiry-evidence.txt"; then
       echo "02a expiry-evidence 0" >> "$OUT/results.txt"; ok "expiry evidence: payment stopped, hold EXPIRED, payment refused, payment started again"
     else
@@ -299,6 +342,13 @@ if [ "$SELF_TEST" = "1" ]; then
   # The fake key is assembled at run time, so this file never holds a key-shaped string itself.
   printf 'GET https://x/v1beta/models?key=AIza%s done\n' 'SyA1234567890abcdefghijklmnopqrstuv' > "$WORK/key.log"; redact "$WORK/key.log"
   same   "redact hides a Google API key" "$(cat "$WORK/key.log")" "GET https://x/v1beta/models?key=<redacted-api-key> done"
+  printf 'GET https://x/v1beta/models?key=AQ.%s done\n' 'Ab1234567890abcdefghijklmnopqrstuvwxyz_-ABCDE' > "$WORK/key2.log"; redact "$WORK/key2.log"
+  same   "redact hides a Google API key in the AQ. form" "$(cat "$WORK/key2.log")" "GET https://x/v1beta/models?key=<redacted-api-key> done"
+  # a .env saved by Notepad: BOM, CRLF, export, spaces round =, quotes, an inline comment
+  printf '\xEF\xBB\xBFexport GEMINI_API_KEY = "notepad-key-1234" # mine\r\n' > "$WORK/notepad.env"
+  same   "env_value reads a Notepad .env (BOM, CRLF, export, spaces, quotes, comment)" "$(env_value "$WORK/notepad.env" GEMINI_API_KEY)" "notepad-key-1234"
+  printf 'GEMINI_API_KEY=plain-key-5678 # note\n' > "$WORK/inline.env"
+  same   "env_value strips an inline comment" "$(env_value "$WORK/inline.env" GEMINI_API_KEY)" "plain-key-5678"
 
   # -- preflight against stub docker / run-all
   printf '#!/usr/bin/env bash\n[ "$1" = info ] && exit "${STUB_INFO:-0}"\necho "${STUB_HEALTH:-healthy}"\n' > "$WORK/docker"
@@ -400,6 +450,18 @@ exit 1
   mk_expiry "$WORK/ex-nostop" good 1
   same "stop-all failing: evidence row fails" "$(run_expiry "$WORK/ex-nostop")" "1"
 
+  # demo-m2 prints "Stop" but never "Start": the helper gives up when demo-m2 exits, and the safety net
+  # restarts payment-service. The stub RUN_ALL reports "down" until it has been started.
+  mk_expiry "$WORK/ex-nostart" good 0
+  printf '#!/usr/bin/env bash\necho "Stop payment-service now"\nsleep 2\nexit 1\n' > "$WORK/ex-nostart/demo-m2.sh"
+  printf '#!/usr/bin/env bash\nif [ "$1" = --check ]; then [ -f "%s/started-ex-nostart" ]; exit $?; fi\n[ "$1" = --no-build ] && touch "%s/started-ex-nostart"\nexit 0\n' "$WORK" "$WORK" > "$WORK/ex-nostart/run-all-stub.sh"
+  t0=$(date +%s); run_expiry "$WORK/ex-nostart" > /dev/null; took=$(( $(date +%s) - t0 ))
+  same "a demo-m2 that never says Start: the safety net restarted payment" "$([ -f "$WORK/started-ex-nostart" ] && echo yes || echo no)" "yes"
+  same "the safety-net line is in expiry-helper.txt" "$(grep -c 'helper: safety-net restart of payment-service' "$WORK/out-ex-nostart/expiry-helper.txt")" "1"
+  same "the helper did not wait out HELPER_WAIT (20 s) for a Start that never came" "$([ "$took" -lt 15 ] && echo yes || echo "no ($took s)")" "yes"
+  same "row 02a still fails honestly when the helper never restarted payment" "$(awk '$1=="02a"{print $3}' "$WORK/out-ex-nostart/results.txt")" "1"
+  same "no safety net when payment is already up" "$(grep -c 'safety-net' "$WORK/out-ex-good/expiry-helper.txt")" "0"
+
   if [ "$failures" = "0" ]; then ok "every summarising check can fail"; exit 0; fi
   fail "FAILED: $failures check(s) cannot be trusted"; exit 1
 fi
@@ -475,9 +537,10 @@ note "service logs copied to $OUT/services (API keys redacted)"
   echo
   summary_table "$OUT/results.txt"
   echo
-  echo "Exit 0 means a script ran to its end. demo-m3-analytics and demo-m4-support also exit 1 when"
-  echo "a check fails; the older scripts only fail their preflight, so read each transcript for what"
-  echo "was actually observed."
+  echo "Exit 0 means a script ran to its end. demo-m2 (its expiry checks), demo-m3 (every check),"
+  echo "demo-m3-analytics, demo-m4 (a non-200 answer, a clash) and demo-m4-support also exit 1 when a"
+  echo "check fails; demo-m1 and demo-ticketing only fail their preflight, so read each transcript for"
+  echo "what was actually observed."
   echo
   echo "## Topic end offsets"
   echo
