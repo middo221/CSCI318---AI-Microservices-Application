@@ -98,14 +98,15 @@ All responses are served from **Kafka Streams interactive queries**, not a datab
 
 | Feature | Method | Endpoint Path | Request Body | Response (Success) | Inter-Service Dependencies |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **FR-17** | `POST` | `/concierge/agenda` | `AgendaRequest` | `200 OK` (`AgendaResponse`) | REST to catalog, registration *(M4)* |
-| **FR-18** | `POST` | `/concierge/support` | `SupportRequest` | `200 OK` (`SupportResponse`) | REST to registration, payment, ticketing *(M4)* |
+| **FR-17** | `POST` | `/concierge/agenda` | `AgendaRequest` | `200 OK` (`AgendaResponse`) | REST to catalog, registration |
+| **FR-18** | `POST` | `/concierge/support` | `SupportRequest` | `200 OK` (`SupportResponse`) | REST to registration, payment, ticketing |
+| **FR-18** | `GET` | `/concierge/escalations` | *None* | `200 OK` (`Array<EscalationResponse>`) | None. The organisers' queue of cases the support agent escalated; in memory, newest first |
 
 `AgendaRequest` carries `attendeeId` and a free-text `interests` field.
 `SupportRequest` carries `attendeeId` and a free-text `message`.
 `SupportResponse` includes an `outcome` of `RESOLVED`, `REFUND_REQUESTED` or `ESCALATED`.
 
-**Error responses:** `400`, `502` (`LLM_UNAVAILABLE`), `504` (`LLM_TIMEOUT`).
+**Error responses:** `400` (`VALIDATION_FAILED`, `INVALID_REQUEST`), `429` (`LLM_RATE_LIMITED`), `502` (`LLM_UNAVAILABLE`, `LLM_LOOP_LIMIT`), `504` (`LLM_TIMEOUT`).
 
 ---
 

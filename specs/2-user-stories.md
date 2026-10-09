@@ -14,7 +14,7 @@ planned**, and it is maintained by hand.
 | `[~]` | Partially delivered — one side of the story exists, the other does not |
 | `[ ]` | Not started |
 
-**Last checked against the code:** 2026-09-15 — 10 delivered, 2 partial, 6 not started.
+**Last checked against the code:** 2026-10-09 — 10 delivered, 3 partial, 5 not started.
 
 ### Updating these checkboxes is part of delivering a story
 
@@ -59,7 +59,7 @@ crosses a service boundary is delivered when it has been observed crossing it.
 | **Analytics** | FR-15 | Receive a 90% capacity alert | Organiser | **Real-time** | `[ ]` |
 | **Analytics** | FR-16 | Monitor gate throughput and queue congestion | Organiser | **Real-time** | `[ ]` |
 | **Concierge** | FR-17 | Build a personal agenda from natural language | Attendee | **Agentic AI** | `[x]` |
-| **Concierge** | FR-18 | Raise a support request handled by an agent | Attendee | **Agentic AI** | `[ ]` |
+| **Concierge** | FR-18 | Raise a support request handled by an agent | Attendee | **Agentic AI** | `[~]` |
 
 **Real-time analysis stories (minimum 2):** FR-14, FR-15, FR-16 — three.
 **Agentic AI stories (minimum 2):** FR-17, FR-18 — two.
@@ -283,10 +283,21 @@ crosses a service boundary is delivered when it has been observed crossing it.
   **must** call the deterministic `detectTimeClashes` tool before proposing an agenda.
 
 ### FR-18: Raise a support request handled by an agent
-- [ ] **Not started — still blocked, but less so.** Of the three endpoints its tools need,
-  ticketing `GET /registrations/{id}/tickets` now exists, so the `lookupTicket` tool is unblocked.
-  Payment `GET /refund-policy/quote` and registration `POST /refund-requests` are still missing,
-  both behind FR-11.
+- [~] **Implemented and tested offline against a scripted model and the agreed contracts; live
+  Gemini + live services run pending (M5 live run).** `POST /api/v1/concierge/support` on
+  `SupportController`; the `SupportAgent` and its six tools in `SupportTools`; the refund limit in
+  `RefundGuard`, checked inside `requestRefund` on a quote the tool fetches itself; the organisers'
+  queue at `GET /api/v1/concierge/escalations`. See `docs/verification/2026-m4-support-agent.md`.
+  The payment and registration tools are coded against the FR-11 contract agreed with that track,
+  which is one more reason this stays `[~]` until a live run crosses those services.
+- **Refinement — the attendee is never the model's to name.** It comes from the request; no tool
+  takes an attendee id, and every tool that names a registration refuses one the requester does
+  not hold, with the same answer as for one that does not exist.
+- **Refinement — the limit bounds a conversation.** `refund-auto-approve-threshold` caps the total
+  one conversation may request automatically, so it cannot be beaten by asking twice.
+- **Refinement — the outcome is what the tools did.** `outcome` is derived from accepted refund
+  requests and recorded escalations, never from the model's text; a reply claiming an action the
+  tools did not take is withheld and replaced.
 - **As an** Attendee, **I want to** describe my problem in plain English and have it resolved
   or escalated, **so that** I do not wait on a volunteer reading a policy document.
 - **Sample input:** *"I've been hospitalised and can't attend next week. Can I get my money

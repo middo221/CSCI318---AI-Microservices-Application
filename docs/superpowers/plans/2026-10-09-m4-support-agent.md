@@ -4,7 +4,7 @@
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 >
-> **Status: not started.** Branch `feat/m4-support-agent`.
+> **Status: Tasks 1–10 complete on feat/m4-support-agent. The live run (Deferred, below) is outstanding and needs an API key.**
 
 **Goal:** Deliver FR-18 — an attendee describes a problem in plain English to
 `POST /api/v1/concierge/support` and a LangChain4j tool-calling agent resolves it, requests a
@@ -306,7 +306,7 @@ endpoint; Task 6 applies the same wrapper to the support agent and Task 8 tests 
   - `ScriptedChatModel.thenKeepsCallingTool(String toolName, String argumentsJson)` — a model that never stops
   - Error contract: `502 {"code": "LLM_LOOP_LIMIT", "message": …}`
 
-- [ ] **Step 1: Give the scripted model a way to never stop**
+- [x] **Step 1: Give the scripted model a way to never stop**
 
 In `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/support/ScriptedChatModel.java`,
 add a field next to `requests`:
@@ -352,7 +352,7 @@ with
         if (next == null) {
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/infrastructure/agent/LoopLimitTest.java`:
 
@@ -426,7 +426,7 @@ add `import static org.assertj.core.api.Assertions.assertThat;` and this test:
     }
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -436,7 +436,7 @@ Expected: compilation FAILURE — `LoopLimit` and `AgentLoopLimitException` not 
 `LoopLimitTest` temporarily and `reportsARunawayAgentLoopInThePlatformErrorShape` fails with
 status `500` — that is the defect.)
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application/AgentLoopLimitException.java`:
 
@@ -531,14 +531,14 @@ handler after `handleLlmTimeout`:
     }
 ```
 
-- [ ] **Step 5: Run to verify green**
+- [x] **Step 5: Run to verify green**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: BUILD SUCCESS; `LoopLimitTest` (3) and `ConciergeControllerTest` (now 6) pass. If
 `reportsARunawayAgentLoopInThePlatformErrorShape` still sees `500`, print the cause: LangChain4j's
 message has changed and `LANGCHAIN4J_CEILING` must follow it.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add concierge-service/src
@@ -576,7 +576,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
   - `class RefundGuard(BigDecimal autoApproveThreshold, String currency)` with `RefundDecision evaluate(RefundQuote quote, BigDecimal alreadyRequested)`, `autoApproveThreshold()`, `currency()`
   - Test support `SupportFixtures`: `ME`, `SOMEONE_ELSE`, `REQUESTED_AT`, `FIXED_CLOCK`, `confirmed(id, attendeeId, amount)`, `fullRefund(id, paid)`, `noRefund(id, paid)`, `unknownDate(id, paid)`, `quote(id, paid, refund, currency, eligible)`
 
-- [ ] **Step 1: Write the test fixtures**
+- [x] **Step 1: Write the test fixtures**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/support/SupportFixtures.java`:
 
@@ -649,7 +649,7 @@ public final class SupportFixtures {
 }
 ```
 
-- [ ] **Step 2: Write the failing guard test**
+- [x] **Step 2: Write the failing guard test**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/domain/service/RefundGuardTest.java`:
 
@@ -769,7 +769,7 @@ class RefundGuardTest {
 }
 ```
 
-- [ ] **Step 3: Write the failing outcome and model tests**
+- [x] **Step 3: Write the failing outcome and model tests**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/domain/model/SupportOutcomeTest.java`:
 
@@ -957,7 +957,7 @@ class SupportDomainModelTest {
 }
 ```
 
-- [ ] **Step 4: Run to verify they fail**
+- [x] **Step 4: Run to verify they fail**
 
 ```bash
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -966,7 +966,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 Expected: compilation FAILURE — `cannot find symbol` for `RefundGuard`, `RegistrationDetails`,
 `SupportOutcome` and the other new types.
 
-- [ ] **Step 5: Implement the domain records**
+- [x] **Step 5: Implement the domain records**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/domain/model/RegistrationDetails.java`:
 
@@ -1271,7 +1271,7 @@ public enum SupportOutcome {
 }
 ```
 
-- [ ] **Step 6: Implement the guard**
+- [x] **Step 6: Implement the guard**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/domain/service/RefundGuard.java`:
 
@@ -1364,18 +1364,18 @@ public class RefundGuard {
 Note `refusesAQuoteInAnotherCurrency` relies on the currency check running before the limit check;
 keep the order above.
 
-- [ ] **Step 7: Run to verify green**
+- [x] **Step 7: Run to verify green**
 
 Run: `./mvnw -q -pl concierge-service -am test` (with `JAVA_HOME` exported).
 Expected: BUILD SUCCESS. `RefundGuardTest` (12), `SupportOutcomeTest` (9) and
 `SupportDomainModelTest` (11) pass alongside Agent 1's existing 65.
 
-- [ ] **Step 8: Confirm the domain is still pure**
+- [x] **Step 8: Confirm the domain is still pure**
 
 Run: `grep -rlE "springframework|langchain4j" concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/domain/`
 Expected: no output.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/domain \
@@ -1412,7 +1412,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
   - package-private `UpstreamResults.rejected(HttpClientErrorException)`, `UpstreamResults.unavailable(String service, Exception)`, `UpstreamResults.readLeniently(String json, Class<T>)` in `infrastructure.client`
   - Test support `FakeRegistrations`: `withDetails(RegistrationDetails)`, `unavailable()`, `withRefundsUnavailable()`, `rejectingRefundsWith(String code)`, `lookups()`, `heldByQueries()`, `refundCalls()`, `clearCalls()`, nested `record RefundCall(String registrationId, String reason)`
 
-- [ ] **Step 1: Write the failing client tests**
+- [x] **Step 1: Write the failing client tests**
 
 Replace `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/infrastructure/client/RestRegistrationClientTest.java`
 with the following. The first six tests are Agent 1's, unchanged; the rest are new.
@@ -1731,13 +1731,13 @@ class RestRegistrationClientTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `./mvnw -q -pl concierge-service -am test` (with `JAVA_HOME` exported).
 Expected: compilation FAILURE — `UpstreamResult`, `findRegistration`, `registrationsHeldBy`,
 `requestRefund` not found.
 
-- [ ] **Step 3: Add the result type and widen the port**
+- [x] **Step 3: Add the result type and widen the port**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application/port/UpstreamResult.java`:
 
@@ -1831,7 +1831,7 @@ public interface RegistrationPort {
 }
 ```
 
-- [ ] **Step 4: Add the wire shapes**
+- [x] **Step 4: Add the wire shapes**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/infrastructure/client/dto/ApiErrorPayload.java`:
 
@@ -1956,7 +1956,7 @@ public record RegistrationPayload(String id,
 }
 ```
 
-- [ ] **Step 5: Add the shared failure mapping**
+- [x] **Step 5: Add the shared failure mapping**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/infrastructure/client/UpstreamResults.java`:
 
@@ -2014,7 +2014,7 @@ final class UpstreamResults {
 }
 ```
 
-- [ ] **Step 6: Implement the three new client methods**
+- [x] **Step 6: Implement the three new client methods**
 
 Replace `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/infrastructure/client/RestRegistrationClient.java`:
 
@@ -2157,7 +2157,7 @@ public class RestRegistrationClient implements RegistrationPort {
 }
 ```
 
-- [ ] **Step 7: Teach the fake registrations the new methods**
+- [x] **Step 7: Teach the fake registrations the new methods**
 
 Replace `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/support/FakeRegistrations.java`:
 
@@ -2306,13 +2306,13 @@ public class FakeRegistrations implements RegistrationPort {
 }
 ```
 
-- [ ] **Step 8: Run to verify green**
+- [x] **Step 8: Run to verify green**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: BUILD SUCCESS; `RestRegistrationClientTest` now 18 tests, all passing; Agent 1's tests
 untouched and green.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application/port \
@@ -2354,7 +2354,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
   - `ConciergeProperties(String catalogBaseUrl, String registrationBaseUrl, String paymentBaseUrl, String ticketingBaseUrl, int maxAgendaItems, BigDecimal refundAutoApproveThreshold, String currency)` — **this argument order**
   - Beans: `PaymentPort`, `TicketingPort`, `RefundGuard`, `EscalationStore`
 
-- [ ] **Step 1: Write the failing payment client test**
+- [x] **Step 1: Write the failing payment client test**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/infrastructure/client/RestPaymentClientTest.java`:
 
@@ -2480,7 +2480,7 @@ class RestPaymentClientTest {
 }
 ```
 
-- [ ] **Step 2: Write the failing ticketing client test**
+- [x] **Step 2: Write the failing ticketing client test**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/infrastructure/client/RestTicketingClientTest.java`:
 
@@ -2553,7 +2553,7 @@ class RestTicketingClientTest {
 }
 ```
 
-- [ ] **Step 3: Write the failing store and configuration tests**
+- [x] **Step 3: Write the failing store and configuration tests**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/infrastructure/escalation/InMemoryEscalationStoreTest.java`:
 
@@ -2622,13 +2622,13 @@ import au.edu.uow.csci318.conference.concierge.domain.service.RefundGuard;
     }
 ```
 
-- [ ] **Step 4: Run to verify failure**
+- [x] **Step 4: Run to verify failure**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: compilation FAILURE — `RestPaymentClient`, `RestTicketingClient`, `InMemoryEscalationStore`
 and `RefundGuard` bean not found.
 
-- [ ] **Step 5: Add the three ports**
+- [x] **Step 5: Add the three ports**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application/port/PaymentPort.java`:
 
@@ -2694,7 +2694,7 @@ public interface EscalationStore {
 }
 ```
 
-- [ ] **Step 6: Add the wire shapes and clients**
+- [x] **Step 6: Add the wire shapes and clients**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/infrastructure/client/dto/RefundQuotePayload.java`:
 
@@ -2859,7 +2859,7 @@ public class RestTicketingClient implements TicketingPort {
 }
 ```
 
-- [ ] **Step 7: Add the escalation store**
+- [x] **Step 7: Add the escalation store**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/infrastructure/escalation/InMemoryEscalationStore.java`:
 
@@ -2910,7 +2910,7 @@ public class InMemoryEscalationStore implements EscalationStore {
 }
 ```
 
-- [ ] **Step 8: Configuration**
+- [x] **Step 8: Configuration**
 
 Replace `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/infrastructure/config/ConciergeProperties.java`:
 
@@ -3066,13 +3066,13 @@ replace the body of `serviceDrivenBy` (the `new ConciergeProperties(...)` call, 
                         new java.math.BigDecimal("200.00"), "AUD"));
 ```
 
-- [ ] **Step 9: Run to verify green**
+- [x] **Step 9: Run to verify green**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: BUILD SUCCESS. New: `RestPaymentClientTest` (6), `RestTicketingClientTest` (3),
 `InMemoryEscalationStoreTest` (3), `ConciergeApplicationTest` now 2. Agent 1 unchanged and green.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add concierge-service/src/main concierge-service/src/test
@@ -3109,7 +3109,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
   - `SupportToolsFactory.create(String attendeeId, String attendeeMessage) -> SupportTools` (`@Component`)
   - Test support: `FakePayments` (`quoting`, `rejecting`, `unavailable`, `quoteRequests`, `clearCalls`), `FakeTicketing` (`withTickets`, `unavailable`, `requests`, `clearCalls`)
 
-- [ ] **Step 1: Write the payment and ticketing fakes**
+- [x] **Step 1: Write the payment and ticketing fakes**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/support/FakePayments.java`:
 
@@ -3217,7 +3217,7 @@ public class FakeTicketing implements TicketingPort {
 }
 ```
 
-- [ ] **Step 2: Write the failing tools test**
+- [x] **Step 2: Write the failing tools test**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/application/agent/SupportToolsTest.java`:
 
@@ -3587,12 +3587,12 @@ class SupportToolsTest {
 }
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: compilation FAILURE — `SupportTools` not found.
 
-- [ ] **Step 4: Implement the tools**
+- [x] **Step 4: Implement the tools**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application/agent/SupportTools.java`:
 
@@ -4022,7 +4022,7 @@ public class SupportToolsFactory {
 }
 ```
 
-- [ ] **Step 5: Run to verify green**
+- [x] **Step 5: Run to verify green**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: BUILD SUCCESS; `SupportToolsTest` 27 tests pass.
@@ -4030,7 +4030,7 @@ Expected: BUILD SUCCESS; `SupportToolsTest` 27 tests pass.
 If the compiler rejects a generic type pattern such as `case UpstreamResult.Ok<List<RegistrationDetails>> ok`,
 the JDK is not 21 — check `./mvnw -v` before changing the code.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application/agent/SupportTools.java \
@@ -4068,7 +4068,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
   - `LangChain4jSupportAgentFactory(ConfiguredChatModel)` (`@Component`), round-trip ceiling 8
   - `LangChain4jAgendaAgentFactory(ConfiguredChatModel)` — **constructor changes**; behaviour does not
 
-- [ ] **Step 1: Write the failing loop test**
+- [x] **Step 1: Write the failing loop test**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/application/agent/SupportAgentLoopTest.java`:
 
@@ -4250,7 +4250,7 @@ class SupportAgentLoopTest {
 }
 ```
 
-- [ ] **Step 2: Write the failing chat-model test**
+- [x] **Step 2: Write the failing chat-model test**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/infrastructure/agent/ConfiguredChatModelTest.java`:
 
@@ -4303,12 +4303,12 @@ class ConfiguredChatModelTest {
 }
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: compilation FAILURE — `SupportAgent`, `SupportReply`, `ConfiguredChatModel` not found.
 
-- [ ] **Step 4: Implement the agent interface and its reply**
+- [x] **Step 4: Implement the agent interface and its reply**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application/agent/SupportReply.java`:
 
@@ -4412,7 +4412,7 @@ public interface SupportAgentFactory {
 }
 ```
 
-- [ ] **Step 5: Extract the model lookup and build both agents with it**
+- [x] **Step 5: Extract the model lookup and build both agents with it**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/infrastructure/agent/ConfiguredChatModel.java`:
 
@@ -4568,7 +4568,7 @@ public class LangChain4jSupportAgentFactory implements SupportAgentFactory {
 }
 ```
 
-- [ ] **Step 6: Run to verify green**
+- [x] **Step 6: Run to verify green**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: BUILD SUCCESS. `SupportAgentLoopTest` (5) and `ConfiguredChatModelTest` (3) pass, and —
@@ -4576,13 +4576,13 @@ the point of the refactor — `ConciergeControllerTest` and `ConciergeController
 still pass unchanged, including `reportsThatNoLanguageModelIsConfigured` and Task 1's
 `reportsARunawayAgentLoopInThePlatformErrorShape`.
 
-- [ ] **Step 7: Confirm no deprecated LangChain4j API crept in**
+- [x] **Step 7: Confirm no deprecated LangChain4j API crept in**
 
 Run: `./mvnw -q -pl concierge-service -am test-compile -Dmaven.compiler.showDeprecation=true`
 Expected: no deprecation warnings from `concierge-service` sources (Agent 1's plan, refinement 7,
 records why: `maxSequentialToolsInvocations` is deprecated in 1.19.0).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application/agent \
@@ -4614,7 +4614,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
   - `SupportApplicationService(SupportToolsFactory, SupportAgentFactory, EscalationStore)` with
     `SupportResult handle(HandleSupportRequestCommand)` and `List<Escalation> escalations()`
 
-- [ ] **Step 1: Write the failing service test**
+- [x] **Step 1: Write the failing service test**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/application/SupportApplicationServiceTest.java`:
 
@@ -4860,13 +4860,13 @@ class SupportApplicationServiceTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: compilation FAILURE — `SupportApplicationService`, `SupportResult`,
 `HandleSupportRequestCommand` not found.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application/command/HandleSupportRequestCommand.java`:
 
@@ -5058,12 +5058,12 @@ public class SupportApplicationService {
 }
 ```
 
-- [ ] **Step 4: Run to verify green**
+- [x] **Step 4: Run to verify green**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: BUILD SUCCESS; `SupportApplicationServiceTest` 14 tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/application \
@@ -5096,7 +5096,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
   - `GET /api/v1/concierge/escalations` → `200 [{"escalationId", "attendeeId", "registrationId", "reason", "summary", "attendeeMessage", "createdAt"}]`, newest first
   - Errors as today: `400 VALIDATION_FAILED`, `502 LLM_UNAVAILABLE`, `429 LLM_RATE_LIMITED`, `504 LLM_TIMEOUT`
 
-- [ ] **Step 1: Write the failing endpoint test**
+- [x] **Step 1: Write the failing endpoint test**
 
 `concierge-service/src/test/java/au/edu/uow/csci318/conference/concierge/api/SupportControllerTest.java`:
 
@@ -5389,14 +5389,14 @@ two tests:
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: compilation succeeds; `SupportControllerTest` and the two new
 `ConciergeControllerWithoutModelTest` tests FAIL with `404` (no handler for `/support` or
 `/escalations`).
 
-- [ ] **Step 3: Implement the wire types**
+- [x] **Step 3: Implement the wire types**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/api/dto/SupportRequest.java`:
 
@@ -5513,7 +5513,7 @@ public record EscalationResponse(String escalationId,
 }
 ```
 
-- [ ] **Step 4: Implement the controller**
+- [x] **Step 4: Implement the controller**
 
 `concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/api/SupportController.java`:
 
@@ -5581,13 +5581,13 @@ in `handleLlmUnavailable`, change the log line (it now serves both agents):
 
 Leave `ConciergeController` itself untouched.
 
-- [ ] **Step 5: Run to verify green**
+- [x] **Step 5: Run to verify green**
 
 Run: `./mvnw -q -pl concierge-service -am test`.
 Expected: BUILD SUCCESS. `SupportControllerTest` (8) and `ConciergeControllerWithoutModelTest` (4)
 pass; `ConciergeControllerTest` (5) unchanged and green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/api \
@@ -5617,7 +5617,7 @@ fail. That is the lesson of `docs/verification/2026-m4-agenda-builder.md`, defec
 step that cannot fail manufactures false confidence. While writing this script one more instance
 was found in `scripts/demo-m4.sh` — see *Notes for Hayden*; do not copy its preflight.
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 `scripts/demo-m4-support.sh`:
 
@@ -5990,7 +5990,7 @@ note "3. Paste both into docs/verification/2026-m4-support-agent.md under 'Live 
 printf '\n'
 ```
 
-- [ ] **Step 2: Check the syntax and make it executable**
+- [x] **Step 2: Check the syntax and make it executable**
 
 ```bash
 bash -n scripts/demo-m4-support.sh && echo "syntax ok"
@@ -5998,14 +5998,14 @@ git update-index --add --chmod=+x scripts/demo-m4-support.sh 2>/dev/null || chmo
 ```
 Expected: `syntax ok`.
 
-- [ ] **Step 3: Prove the checks can fail**
+- [x] **Step 3: Prove the checks can fail**
 
 Run: `bash scripts/demo-m4-support.sh --self-test`
 Expected: nine green lines ending `every check can fail`, exit code 0. Then break one check on
 purpose — change `sys.exit(1 if touched else 0)` in `untouched` to `sys.exit(0)` — re-run, and
 confirm the self-test now reports `2 check(s) cannot be trusted` and exits 1. Revert the change.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/demo-m4-support.sh
@@ -6030,7 +6030,7 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
 - Consumes: everything above; test reports under `concierge-service/target/surefire-reports/`.
 - Produces: the evidence and the shared index entries the next person reads.
 
-- [ ] **Step 1: Full regression, offline, no key**
+- [x] **Step 1: Full regression, offline, no key**
 
 Stop Docker Desktop first (`docker ps` should fail), then:
 
@@ -6042,12 +6042,12 @@ Expected: `BUILD SUCCESS`, every module `SUCCESS`. `-o` keeps Maven off the netw
 the build nor the tests can reach it. If Docker could not be stopped, say so in the note, as the
 Agent 1 note did.
 
-- [ ] **Step 2: Domain purity**
+- [x] **Step 2: Domain purity**
 
 Run: `grep -rlE "springframework|langchain4j" concierge-service/src/main/java/au/edu/uow/csci318/conference/concierge/domain/`
 Expected: no output.
 
-- [ ] **Step 3: Read the counts from the reports, not the console**
+- [x] **Step 3: Read the counts from the reports, not the console**
 
 ```bash
 python - <<'PY'
@@ -6069,7 +6069,7 @@ Expected: Agent 1's classes as before (65, plus `ConciergeControllerTest` now 6,
 `SupportApplicationServiceTest` 14, `SupportControllerTest` 8. Record the real numbers whatever
 they are.
 
-- [ ] **Step 4: Write the verification note**
+- [x] **Step 4: Write the verification note**
 
 `docs/verification/2026-m4-support-agent.md` — the structure below, with every number and every
 pasted block taken from Steps 1–3 of this run. Do not copy the expected figures above into it.
@@ -6149,12 +6149,12 @@ tools' record. Name the test that proves each. State the authentication caveat f
 Pending (M5 live run): `scripts/demo-m4-support.sh`.
 ```
 
-- [ ] **Step 5: Flip FR-18 in the user stories, following the rules at the top of that file**
+- [x] **Step 5: Flip FR-18 in the user stories, following the rules at the top of that file**
 
 In `specs/2-user-stories.md`:
 
 1. Overview table, the FR-18 row: `` `[ ]` `` → `` `[~]` ``.
-2. Replace the FR-18 section's checkbox paragraph (the `- [ ] **Not started — still blocked, but less so.** …`
+2. Replace the FR-18 section's checkbox paragraph (the `- [x] **Not started — still blocked, but less so.** …`
    bullet, through `both behind FR-11.`) with:
 
 ```markdown
@@ -6181,7 +6181,7 @@ In `specs/2-user-stories.md`:
    `**Last checked against the code:** <today> — <x> delivered, <y> partial, <z> not started.`
    (On this branch's base it reads 10 / 2 / 6 before the edit, so 10 / 3 / 5 after it.)
 
-- [ ] **Step 6: Update the API summary, §6 only**
+- [x] **Step 6: Update the API summary, §6 only**
 
 In `specs/4-api-endpoints.md` §6:
 
@@ -6200,7 +6200,7 @@ In `specs/4-api-endpoints.md` §6:
 
 Change nothing else in `specs/` — see *Notes for Hayden* for what else is now out of date.
 
-- [ ] **Step 7: Record the modified AI proposal**
+- [x] **Step 7: Record the modified AI proposal**
 
 This plan modifies the AI-drafted specification's agent design (refinements 1–3), so append to
 `docs/ai-collaboration-log.md`:
@@ -6223,13 +6223,13 @@ This plan modifies the AI-drafted specification's agent design (refinements 1–
 | **Artefact** | `docs/superpowers/plans/2026-10-09-m4-support-agent.md` refinements 1–3; `SupportTools`; `RefundGuard`; `SupportApplicationService`; `SupportControllerTest.aPromptInjectionGetsNoRefundAndNoFalsePromise` |
 ```
 
-- [ ] **Step 8: Mark the plan's status**
+- [x] **Step 8: Mark the plan's status**
 
 At the top of this plan, replace `**Status: not started.**` with
 `**Status: Tasks 1–10 complete on feat/m4-support-agent. The live run (Deferred, below) is outstanding and needs an API key.**`
 and tick every completed checkbox.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add docs/verification/2026-m4-support-agent.md docs/ai-collaboration-log.md \
@@ -6245,26 +6245,26 @@ Claude-Session: https://claude.ai/code/session_01WDoqPipkF4TU91G1a7mTTS"
 
 ## Definition of Done
 
-- [ ] `./mvnw clean test` green across every module with Docker stopped, no network and **no
+- [x] `./mvnw clean test` green across every module with Docker stopped, no network and **no
       `GEMINI_API_KEY`**; live Gemini is never called by the default build
-- [ ] FR-18 delivered behind `POST /api/v1/concierge/support`; `GET /api/v1/concierge/escalations` serves the queue
-- [ ] Six tools, each tested on its arguments as well as its results
-- [ ] **No tool takes an attendee id, and every registration-scoped tool refuses a registration the requester does not hold**
-- [ ] **`requestRefund` fetches its own quote and refuses above 200.00 AUD per conversation, telling the agent to escalate**
-- [ ] **The outcome is derived from the tools' record; a reply claiming an action not taken is withheld**
-- [ ] **The prompt-injection regression passes at loop level and over HTTP**
-- [ ] A runaway agent loop is `502 LLM_LOOP_LIMIT` on both the agenda and support endpoints
-- [ ] A quote with a null `daysUntilEvent` (`EVENT_DATE_UNKNOWN`) reaches the model as words, not `null`
-- [ ] A missing model is `502 LLM_UNAVAILABLE` on `/support`, not a context failure
-- [ ] `concierge-service/src/main/java/**/domain/` imports neither Spring nor LangChain4j
-- [ ] FR-18 set to `[~]` in `specs/2-user-stories.md` (row and section) with the note "implemented and
+- [x] FR-18 delivered behind `POST /api/v1/concierge/support`; `GET /api/v1/concierge/escalations` serves the queue
+- [x] Six tools, each tested on its arguments as well as its results
+- [x] **No tool takes an attendee id, and every registration-scoped tool refuses a registration the requester does not hold**
+- [x] **`requestRefund` fetches its own quote and refuses above 200.00 AUD per conversation, telling the agent to escalate**
+- [x] **The outcome is derived from the tools' record; a reply claiming an action not taken is withheld**
+- [x] **The prompt-injection regression passes at loop level and over HTTP**
+- [x] A runaway agent loop is `502 LLM_LOOP_LIMIT` on both the agenda and support endpoints
+- [x] A quote with a null `daysUntilEvent` (`EVENT_DATE_UNKNOWN`) reaches the model as words, not `null`
+- [x] A missing model is `502 LLM_UNAVAILABLE` on `/support`, not a context failure
+- [x] `concierge-service/src/main/java/**/domain/` imports neither Spring nor LangChain4j
+- [x] FR-18 set to `[~]` in `specs/2-user-stories.md` (row and section) with the note "implemented and
       tested offline against a scripted model and the agreed contracts; live Gemini + live services
       run pending (M5 live run)", and both counts updated
-- [ ] `specs/4-api-endpoints.md` §6: FR-18's `(M4)` removed, escalations endpoint listed, `LLM_LOOP_LIMIT` in the error line
-- [ ] `scripts/demo-m4-support.sh` exists in the style of `scripts/demo-m4.sh`; `--self-test` passes,
+- [x] `specs/4-api-endpoints.md` §6: FR-18's `(M4)` removed, escalations endpoint listed, `LLM_LOOP_LIMIT` in the error line
+- [x] `scripts/demo-m4-support.sh` exists in the style of `scripts/demo-m4.sh`; `--self-test` passes,
       and was seen to fail with a check deliberately broken
-- [ ] `docs/verification/2026-m4-support-agent.md` written from real output; live run marked pending
-- [ ] `docs/ai-collaboration-log.md` entry for the modified specification design (Member: Hayden)
+- [x] `docs/verification/2026-m4-support-agent.md` written from real output; live run marked pending
+- [x] `docs/ai-collaboration-log.md` entry for the modified specification design (Member: Hayden)
 
 ## Deferred: the live run (M5)
 
