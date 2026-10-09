@@ -1,0 +1,19 @@
+# Test classpath only. Spring Boot loads classpath:/config/application.yml IN ADDITION to
+# classpath:/application.yml, and this one wins, so every @SpringBootTest in this module runs
+# offline without having to remember to. In M2 ticketing needed an annotation on every test class
+# instead, and one forgotten annotation cost sixty seconds of admin-client retries.
+spring:
+  kafka:
+    streams:
+      # StreamsBuilderFactoryManager starts every Kafka Streams instance the binder builds; off, it
+      # starts none. The topologies are still assembled at refresh - BinderWiringTest drives them
+      # with TopologyTestDriver - but no stream thread ever looks for a broker.
+      auto-startup: false
+  cloud:
+    stream:
+      kafka:
+        streams:
+          binder:
+            # The binder's topic provisioner opens an AdminClient per binding and waits 30 seconds
+            # per topic for a broker. Off, it provisions nothing and contacts nobody.
+            auto-create-topics: false
