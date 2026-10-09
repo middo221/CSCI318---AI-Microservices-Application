@@ -41,6 +41,10 @@ spring:
               # alert reaches its topic, within a second instead of up to thirty.
               statestore.cache.max.bytes: 0
               commit.interval.ms: 1000
+              # A record that throws inside a processor (for instance a queuedAt so old that the
+              # wait overflows) is logged and dropped. The binder's default shuts the client down,
+              # which would leave every read model answering 503 until the service is restarted.
+              processing.exception.handler: org.apache.kafka.streams.errors.LogAndContinueProcessingExceptionHandler
             # Without these, spring.application.name becomes the application.id of all three
             # functions and puts three different topologies in one consumer group.
             functions:

@@ -176,6 +176,7 @@ class GateThroughputTopologyTest {
         checkIn("ses-1", "north-1", MINUTE_0.plusSeconds(10), Duration.ofSeconds(30));
 
         assertThat(windowsAt("north-1").get(MINUTE_0)).isEqualTo(new GateStats(1, 30_000, 30_000));
+        assertThat(TopologyHarness.droppedRecords(driver)).isZero();
     }
 
     /** A tombstone must not reach mapValues/groupBy, where it would throw and stop the stream thread. */
@@ -185,5 +186,22 @@ class GateThroughputTopologyTest {
         checkIn("ses-1", "north-1", MINUTE_0.plusSeconds(10), Duration.ofSeconds(30));
 
         assertThat(windowsAt("north-1").get(MINUTE_0)).isEqualTo(new GateStats(1, 30_000, 30_000));
+        assertThat(TopologyHarness.droppedRecords(driver)).isZero();
+    }
+
+    /**
+     * A well-formed check-in whose queue time is so far back that the wait overflows a Duration.
+     * It passes the guards and throws in the aggregator; the stream must log it, drop it and
+     * carry on, not shut the client down and leave both gate endpoints answering 503 for good.
+     */
+    @Test
+    void aCheckInWhoseWaitOverflowsIsDroppedAndTheStreamCarriesOn() {
+        Instant at = MINUTE_0.plusSeconds(5);
+        checkIns.pipeInput("ses-1", ProducerWire.bytes(TestEvents.checkedIn(
+                "ses-1", "north-1", Instant.parse("-999999999-01-01T00:00:00Z"), at)), at);
+        checkIn("ses-1", "north-1", MINUTE_0.plusSeconds(10), Duration.ofSeconds(30));
+
+        assertThat(windowsAt("north-1").get(MINUTE_0)).isEqualTo(new GateStats(1, 30_000, 30_000));
+        assertThat(TopologyHarness.droppedRecords(driver)).isEqualTo(1);
     }
 }

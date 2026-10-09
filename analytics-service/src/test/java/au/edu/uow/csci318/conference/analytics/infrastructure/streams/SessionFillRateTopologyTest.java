@@ -203,4 +203,32 @@ class SessionFillRateTopologyTest {
         capacity("ses-1", 4, 3);
         assertThat(fillRate("ses-1")).isEqualTo(FillRate.of("ses-1", 2, 4));
     }
+
+    @Test
+    void aSeatsReservedTombstoneIsSkippedAndTheNextReservationIsCounted() {
+        capacity("ses-1", 10, 0);
+        reserved.pipeInput("ses-1", (byte[]) null, T0.plusSeconds(1));
+        reserve("ses-1", 2, 2);
+
+        assertThat(fillRate("ses-1").reservedSeats()).isEqualTo(2);
+        assertThat(TopologyHarness.droppedRecords(driver)).isZero();
+    }
+
+    @Test
+    void aSeatsReleasedTombstoneIsSkippedAndTheNextReservationIsCounted() {
+        capacity("ses-1", 10, 0);
+        released.pipeInput("ses-1", (byte[]) null, T0.plusSeconds(1));
+        reserve("ses-1", 2, 2);
+
+        assertThat(fillRate("ses-1").reservedSeats()).isEqualTo(2);
+        assertThat(TopologyHarness.droppedRecords(driver)).isZero();
+    }
+
+    @Test
+    void aCapacityWithABlankSessionIdCreatesNoRowAndDoesNotThrow() {
+        capacity.pipeInput("ses-1", ProducerWire.bytes(TestEvents.capacity(" ", 10)), T0);
+
+        assertThat(fillRate("ses-1")).isNull();
+        assertThat(TopologyHarness.droppedRecords(driver)).isZero();
+    }
 }

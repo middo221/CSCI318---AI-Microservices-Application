@@ -6,6 +6,8 @@ import org.apache.kafka.streams.state.QueryableStoreType;
 import org.apache.kafka.streams.state.QueryableStoreTypes;
 import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
 import org.apache.kafka.streams.state.ReadOnlyWindowStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cloud.stream.binder.kafka.streams.InteractiveQueryService;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +22,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class InteractiveQueryStateStoreLookup implements StateStoreLookup {
+
+    private static final Logger log = LoggerFactory.getLogger(InteractiveQueryStateStoreLookup.class);
 
     private final InteractiveQueryService interactiveQueries;
 
@@ -41,6 +45,8 @@ public class InteractiveQueryStateStoreLookup implements StateStoreLookup {
         try {
             return interactiveQueries.getQueryableStore(storeName, type);
         } catch (IllegalStateException | InvalidStateStoreException e) {
+            // One line, so a dead client or a mistyped store name can be told from a start-up in the log.
+            log.warn("Store {} is not queryable: {}", storeName, e);
             throw new ReadModelUnavailableException(storeName, e);
         }
     }

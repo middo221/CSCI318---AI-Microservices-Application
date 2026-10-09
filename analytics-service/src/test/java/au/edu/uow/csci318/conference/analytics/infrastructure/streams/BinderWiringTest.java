@@ -117,6 +117,14 @@ class BinderWiringTest {
         assertThat(config.get(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG)).hasToString("1000");
     }
 
+    /** A record that throws in a processor is dropped; the binder's default would shut the client down. */
+    @Test
+    void aProcessingErrorIsLoggedAndSkippedNotFatal() {
+        FUNCTIONS.forEach(fn -> assertThat(factory(fn).getStreamsConfiguration()
+                .get(StreamsConfig.PROCESSING_EXCEPTION_HANDLER_CLASS_CONFIG))
+                .as(fn).hasToString("org.apache.kafka.streams.errors.LogAndContinueProcessingExceptionHandler"));
+    }
+
     @Test
     void stateStoresLiveInMemory() {
         drive("sessionFillRate");

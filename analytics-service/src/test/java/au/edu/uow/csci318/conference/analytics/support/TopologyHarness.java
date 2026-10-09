@@ -26,6 +26,7 @@ import org.apache.kafka.streams.TopologyConfig;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.errors.InvalidStateStoreException;
 import org.apache.kafka.streams.errors.LogAndContinueExceptionHandler;
+import org.apache.kafka.streams.errors.LogAndContinueProcessingExceptionHandler;
 import org.apache.kafka.streams.state.BuiltInDslStoreSuppliers;
 import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
 import org.apache.kafka.streams.state.ReadOnlyWindowStore;
@@ -52,7 +53,7 @@ public final class TopologyHarness {
     /**
      * Mirrors the configuration the binder hands each function: byte-array default serdes, so a
      * stateful step that forgets its own serdes fails here as it would on the broker; in-memory DSL
-     * stores; no record cache; log-and-continue on a record that cannot be deserialised.
+     * stores; no record cache; log-and-continue on a record that cannot be deserialised or whose processing throws.
      */
     public static Properties properties(Path stateDir) {
         Properties props = new Properties();
@@ -66,6 +67,8 @@ public final class TopologyHarness {
         props.put(StreamsConfig.STATESTORE_CACHE_MAX_BYTES_CONFIG, 0L);
         props.put(StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
                 LogAndContinueExceptionHandler.class.getName());
+        props.put(StreamsConfig.PROCESSING_EXCEPTION_HANDLER_CLASS_CONFIG,
+                LogAndContinueProcessingExceptionHandler.class.getName());
         return props;
     }
 
@@ -105,6 +108,18 @@ public final class TopologyHarness {
 
     public static TestOutputTopic<String, String> rawOutput(TopologyTestDriver driver, String topic) {
         return driver.createOutputTopic(topic, new StringDeserializer(), new StringDeserializer());
+    }
+
+    /**
+     * Records the driver's tasks dropped after a processing or deserialisation error under
+     * log-and-continue. Guard tests assert zero, so that removing a guard cannot hide as a skip.
+     */
+    public static long droppedRecords(TopologyTestDriver driver) {
+        return driver.metrics().entrySet().stream()
+                .filter(m -> m.getKey().group().equals("stream-task-metrics")
+                        && m.getKey().name().equals("dropped-records-total"))
+                .mapToLong(m -> ((Number) m.getValue().metricValue()).longValue())
+                .sum();
     }
 
     /** Serves the driver's stores through the same seam interactive queries use in production. */
