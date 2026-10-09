@@ -42,6 +42,7 @@ warn()  { printf '%s   %s%s\n' "$yellow" "$1" "$off"; }
 fail()  { printf '%s   %s%s\n' "$red" "$1" "$off"; EXIT_CODE=1; }
 
 EXIT_CODE=0
+SKIPPED=""
 PAUSE_MODE=0
 case "${1:-}" in --pause|-p) PAUSE_MODE=1 ;; esac
 pause() { [ "$PAUSE_MODE" -eq 1 ] && { printf '\n%s   [Enter to continue]%s' "$dim" "$off"; read -r _; }; return 0; }
@@ -96,7 +97,7 @@ refused() {
 
 finish() {
   echo
-  if [ "$EXIT_CODE" = 0 ]; then ok "every check held"; else fail "TICKETING CHECK FAILED - see the FAILED lines above"; fi
+  if [ "$EXIT_CODE" = 0 ]; then ok "every check held${SKIPPED:+ - except the broker checks, which did not run}"; else fail "TICKETING CHECK FAILED - see the FAILED lines above"; fi
   exit "$EXIT_CODE"
 }
 
@@ -278,5 +279,6 @@ if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$KAFKA_CONTAINER"; th
   ok "Watch these in Kafka UI at http://localhost:8080"
 else
   warn "$KAFKA_CONTAINER is not running here, so the broker was not read"
+  SKIPPED=1
 fi
 finish

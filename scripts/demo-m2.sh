@@ -259,9 +259,16 @@ else
       run "GET $PAYMENT/registrations/$REG_3_ID/payment-order"
       paymentOrder "$REG_3_ID" | pretty
       run "kafka-console-consumer.sh --topic payment-failed   (key :: value, this registration)"
-      FAILED_MSGS=$(MSYS_NO_PATHCONV=1 docker exec converge-kafka         /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092         --topic payment-failed --from-beginning --timeout-ms 10000         --property print.key=true --property key.separator=" :: " 2>/dev/null | grep -v deprecated)
-      printf '%s
-' "$FAILED_MSGS" | grep -F "$REG_3_ID :: "
+      FAILED_MSGS=""
+      if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx converge-kafka; then
+        FAILED_MSGS=$(MSYS_NO_PATHCONV=1 docker exec converge-kafka \
+          /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+          --topic payment-failed --from-beginning --timeout-ms 10000 \
+          --property print.key=true --property key.separator=" :: " 2>/dev/null | grep -v deprecated)
+        printf '%s\n' "$FAILED_MSGS" | grep -F "$REG_3_ID :: "
+      else
+        warn "converge-kafka is not running here, so payment-failed cannot be read"
+      fi
       if verdict=$(hold_expired_verdict "$(paymentOrder "$REG_3_ID")" "$FAILED_MSGS" "$REG_3_ID"); then
         ok "FAILED, reason HOLD_EXPIRED, and NO attempt — the gateway was never called"
       else

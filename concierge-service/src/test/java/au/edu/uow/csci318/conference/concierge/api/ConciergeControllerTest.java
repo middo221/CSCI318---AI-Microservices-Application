@@ -183,6 +183,10 @@ class ConciergeControllerTest {
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value("LLM_RATE_LIMITED"))
                 .andExpect(jsonPath("$.message").exists());
+
+        // Never asked again: only an unreadable answer is retried, and a retry here would just
+        // spend more of the quota that has run out.
+        assertThat(model.turns()).isEqualTo(1);
     }
 
     @Test
