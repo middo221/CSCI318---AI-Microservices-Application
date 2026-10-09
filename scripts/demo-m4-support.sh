@@ -262,7 +262,8 @@ explain_failure() {
            LLM_UNAVAILABLE)
              fail "502 LLM_UNAVAILABLE - the concierge could not use its language model."
              note "It says: $(field "$2" message)"
-             note "If no model is configured, restart concierge-service with the key exported into its own shell:"
+             note "If no model is configured, put GEMINI_API_KEY in .env and run: bash scripts/run-all.sh (it reads .env and passes the key on)."
+             note "Or restart concierge-service with the key exported into its own shell:"
              printf '     %sset -a; . ./.env; set +a%s\n' "$bold" "$off"
              printf '     %s./mvnw spring-boot:run -pl concierge-service%s\n' "$bold" "$off" ;;
            LLM_LOOP_LIMIT)

@@ -13,9 +13,10 @@
 #   set -a; . ./.env; set +a                                                    (terminal C)
 #   ./mvnw spring-boot:run -pl concierge-service                                (terminal C)
 #
-# THE KEY MUST BE EXPORTED. Nothing in this repository reads .env into the JVM - Docker Compose
-# reads it for its own variable substitution, and that is all. Without GEMINI_API_KEY in the
-# concierge's environment the service still starts, and the agenda endpoint answers
+# THE CONCIERGE MUST HOLD THE KEY. The simplest route is `bash scripts/run-all.sh` (or run-all.ps1),
+# which reads .env and passes GEMINI_API_KEY to the concierge for you. With spring-boot:run as above,
+# the key must instead be exported into the concierge's own shell (the `set -a; . ./.env` line).
+# Without GEMINI_API_KEY in the concierge's environment the service still starts, and the agenda endpoint answers
 # 502 LLM_UNAVAILABLE. That is by design; it is what lets the test suite run without a key.
 #
 # Then:  ./scripts/demo-m4.sh              run straight through
@@ -168,7 +169,8 @@ if [ "$CODE" != "200" ]; then
     502)
       fail "502 LLM_UNAVAILABLE - the concierge has no language model."
       printf '\n'
-      note "Stop concierge-service and restart it with the key exported into ITS shell:"
+      note "Put GEMINI_API_KEY in .env and run: bash scripts/run-all.sh   (it reads .env and passes the key to the concierge)."
+      note "Or stop concierge-service and restart it with the key exported into ITS shell:"
       printf '\n'
       printf '     %sset -a; . ./.env; set +a%s\n' "$bold" "$off"
       printf '     %s./mvnw spring-boot:run -pl concierge-service%s\n' "$bold" "$off"
