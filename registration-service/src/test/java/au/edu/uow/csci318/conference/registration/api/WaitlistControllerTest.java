@@ -152,6 +152,14 @@ class WaitlistControllerTest {
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 
+    /** The column holds 64 characters; a longer id must be a 400, not a 409 from the failed insert. */
+    @Test
+    void refusesAJoinWithAnOverLongAttendeeId() throws Exception {
+        join(givenSession(1, 1), "a".repeat(65))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
     @Test
     void listsTheQueueInJoiningOrder() throws Exception {
         String session = givenSession(1, 1);

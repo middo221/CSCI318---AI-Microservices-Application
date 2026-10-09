@@ -32,12 +32,13 @@ class JpaWaitlistRepositoryTest {
         entityManager.clear();
     }
 
+    /** Entry ids sort against joining order, so only the order column can restore the queue. */
     @Test
     void roundTripsAQueueInJoiningOrder() {
         Waitlist waitlist = Waitlist.forSession("ses-1");
-        waitlist.join("wle-1", "att-1", NOW);
-        waitlist.join("wle-2", "att-2", NOW.plusSeconds(1));
-        waitlist.join("wle-3", "att-3", NOW.plusSeconds(2));
+        waitlist.join("wle-z", "att-1", NOW);
+        waitlist.join("wle-a", "att-2", NOW.plusSeconds(1));
+        waitlist.join("wle-m", "att-3", NOW.plusSeconds(2));
         waitlist.promote(1, NOW.plusSeconds(60));
         waitlists.save(waitlist);
         detach();
@@ -45,9 +46,28 @@ class JpaWaitlistRepositoryTest {
         assertThat(waitlists.findBySessionId("ses-1").orElseThrow().places())
                 .extracting(WaitlistPlace::waitlistEntryId, WaitlistPlace::status, WaitlistPlace::position)
                 .containsExactly(
-                        tuple("wle-1", WaitlistStatus.PROMOTED, null),
-                        tuple("wle-2", WaitlistStatus.WAITING, 1),
-                        tuple("wle-3", WaitlistStatus.WAITING, 2));
+                        tuple("wle-z", WaitlistStatus.PROMOTED, null),
+                        tuple("wle-a", WaitlistStatus.WAITING, 1),
+                        tuple("wle-m", WaitlistStatus.WAITING, 2));
+    }
+
+    /**
+     * H2 happens to return rows in insertion order, so the loaded list alone cannot prove the queue
+     * is stored in order. The order column itself does: without {@code @OrderColumn} it is not there.
+     */
+    @Test
+    void storesTheQueueOrderInAnOrderColumn() {
+        Waitlist waitlist = Waitlist.forSession("ses-3");
+        waitlist.join("wle-z", "att-1", NOW);
+        waitlist.join("wle-a", "att-2", NOW.plusSeconds(1));
+        waitlist.join("wle-m", "att-3", NOW.plusSeconds(2));
+        waitlists.save(waitlist);
+        detach();
+
+        assertThat(entityManager.createNativeQuery(
+                        "select id from waitlist_entries where waitlist_session_id = 'ses-3' order by entry_index")
+                .getResultList())
+                .containsExactly("wle-z", "wle-a", "wle-m");
     }
 
     @Test

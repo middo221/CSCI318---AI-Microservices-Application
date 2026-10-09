@@ -9,7 +9,12 @@ import au.edu.uow.csci318.conference.registration.domain.model.TimeSlot;
 import au.edu.uow.csci318.conference.registration.domain.model.Waitlist;
 import au.edu.uow.csci318.conference.registration.domain.repository.SessionViewRepository;
 import au.edu.uow.csci318.conference.registration.domain.repository.WaitlistRepository;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -146,9 +151,22 @@ class WaitlistApplicationServiceTest {
         SessionView unsized = SessionView.forSession("ses-1");
         unsized.describe("conf-1", "Observability in practice", MORNING, Money.aud("49.50"));
         views.put("ses-1", unsized);
+        Logger logger = (Logger) LoggerFactory.getLogger(WaitlistApplicationService.class);
+        ListAppender<ILoggingEvent> logs = new ListAppender<>();
+        logs.start();
+        logger.addAppender(logs);
 
-        assertThat(service.promoteFor("ses-1", 2)).isZero();
+        try {
+            assertThat(service.promoteFor("ses-1", 2)).isZero();
+        }
+        finally {
+            logger.detachAppender(logs);
+        }
 
         assertThat(published).isEmpty();
+        assertThat(logs.list).singleElement().satisfies(e -> {
+            assertThat(e.getLevel()).isEqualTo(Level.WARN);
+            assertThat(e.getFormattedMessage()).contains("ses-1");
+        });
     }
 }

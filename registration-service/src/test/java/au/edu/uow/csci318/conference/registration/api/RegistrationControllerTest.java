@@ -131,6 +131,15 @@ class RegistrationControllerTest {
     }
 
     @Test
+    void rejectsARegistrationWithAnOverLongAttendeeId() throws Exception {
+        mockMvc.perform(post("/api/v1/registrations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("a".repeat(65), "ses-1", 1)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
     void rejectsARegistrationForNoSessions() throws Exception {
         mockMvc.perform(post("/api/v1/registrations")
                         .contentType(MediaType.APPLICATION_JSON)

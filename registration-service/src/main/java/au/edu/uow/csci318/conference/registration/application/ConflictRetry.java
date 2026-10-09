@@ -39,9 +39,11 @@ public final class ConflictRetry {
             }
             catch (OptimisticLockingFailureException | DataIntegrityViolationException ex) {
                 if (attempt >= MAX_ATTEMPTS) {
+                    log.error("{} lost a race on all {} attempts and is being abandoned: {}",
+                            what, MAX_ATTEMPTS, ex.getMessage());
                     throw ex;
                 }
-                log.debug("{} lost a race (attempt {} of {}), retrying: {}",
+                log.info("{} lost a race (attempt {} of {}), retrying: {}",
                         what, attempt, MAX_ATTEMPTS, ex.getMessage());
             }
         }

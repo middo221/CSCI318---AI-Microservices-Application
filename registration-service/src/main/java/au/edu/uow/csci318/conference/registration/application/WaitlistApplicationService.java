@@ -8,6 +8,8 @@ import au.edu.uow.csci318.conference.registration.domain.model.SessionView;
 import au.edu.uow.csci318.conference.registration.domain.model.Waitlist;
 import au.edu.uow.csci318.conference.registration.domain.model.WaitlistPlace;
 import au.edu.uow.csci318.conference.registration.domain.repository.WaitlistRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +30,8 @@ import java.util.UUID;
  */
 @Service
 public class WaitlistApplicationService {
+
+    private static final Logger log = LoggerFactory.getLogger(WaitlistApplicationService.class);
 
     private final WaitlistRepository waitlists;
     private final SessionAvailabilityService availability;
@@ -92,14 +96,20 @@ public class WaitlistApplicationService {
         if (found.isEmpty()) {
             return 0;
         }
-        int free = availability.findComplete(sessionId).map(SessionView::getAvailableSeats).orElse(0);
+        Optional<SessionView> sized = availability.findComplete(sessionId);
+        if (sized.isEmpty()) {
+            log.warn("session {} has a waitlist but the replica cannot size it; promoting nobody", sessionId);
+            return 0;
+        }
+        int free = sized.get().getAvailableSeats();
         int seats = Math.min(releasedSeats, free);
         Waitlist waitlist = found.get();
         List<WaitlistPlace> promoted = waitlist.promote(seats, Instant.now());
         if (promoted.isEmpty()) {
             return 0;
         }
-        // Drain the instance we changed: save() merges the loaded waitlist and returns a copy.
+        // Drain the instance we changed, never what save() returns: that is the same instance for a
+        // loaded entity but a merged copy, without the recorded events, for one with an assigned id.
         List<DomainEvent> recorded = waitlist.pullDomainEvents();
         waitlists.save(waitlist);
         domainEvents.publishAll(recorded);

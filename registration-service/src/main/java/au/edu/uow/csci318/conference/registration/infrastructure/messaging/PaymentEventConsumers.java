@@ -24,7 +24,7 @@ import java.util.function.Consumer;
  * the binding name, so renaming a method here without renaming the property silently unbinds the
  * consumer — check both together.
  *
- * <p><strong>Both handlers are guarded.</strong> Unlike the catalogue projection, which is an
+ * <p><strong>All four handlers are guarded.</strong> Unlike the catalogue projection, which is an
  * upsert and therefore idempotent by construction, these mutate a state machine and emit events.
  * Confirming twice would publish {@code registration-confirmed} twice and ticketing would issue two
  * sets of tickets for one payment. Kafka delivers at least once, so the processed-event table is
@@ -91,15 +91,16 @@ public class PaymentEventConsumers {
                 return;
             }
             try {
-                boolean refunded = ConflictRetry.call("refund of registration " + event.registrationId(),
+                boolean refunded = ConflictRetry.call("apply refund-issued for " + event.registrationId(),
                         () -> registrations.applyRefundIssued(event.registrationId()));
                 if (refunded) {
                     log.info("registration {} refunded ({}% by {})",
                             event.registrationId(), event.refundPercent(), event.decidedBy());
                 }
                 else {
-                    log.info("refund {} needed no change to registration {} (a reversed late payment)",
-                            event.refundId(), event.registrationId());
+                    log.info("refund {} needed no change to registration {}: it is already {}",
+                            event.refundId(), event.registrationId(),
+                            registrations.findById(event.registrationId()).getStatus());
                 }
             }
             catch (RegistrationNotFoundException ex) {

@@ -3,7 +3,6 @@ package au.edu.uow.csci318.conference.registration.infrastructure.messaging;
 import au.edu.uow.csci318.conference.common.event.SeatsReleased;
 import au.edu.uow.csci318.conference.registration.application.ConflictRetry;
 import au.edu.uow.csci318.conference.registration.application.WaitlistApplicationService;
-import au.edu.uow.csci318.conference.registration.domain.SessionNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
@@ -50,14 +49,14 @@ public class WaitlistEventConsumers {
                 return;
             }
             try {
-                int promoted = ConflictRetry.call("waitlist promotion for session " + event.sessionId(),
+                int promoted = ConflictRetry.call("promote waitlist for " + event.sessionId(),
                         () -> waitlists.promoteFor(event.sessionId(), event.quantity()));
                 if (promoted > 0) {
                     log.info("offered {} released seat(s) of session {} to its waitlist",
                             promoted, event.sessionId());
                 }
             }
-            catch (SessionNotFoundException | IllegalArgumentException | IllegalStateException ex) {
+            catch (IllegalArgumentException | IllegalStateException ex) {
                 // Nothing to retry; absorbing it keeps the partition moving.
                 log.warn("cannot promote from the waitlist of session {}: {}", event.sessionId(), ex.getMessage());
             }
