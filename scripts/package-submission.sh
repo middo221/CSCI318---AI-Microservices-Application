@@ -48,7 +48,7 @@ problems = []
 with zipfile.ZipFile(path) as archive:
     names = archive.namelist()
     for want in required:
-        if not any(n == top + want or n.startswith(top + want) for n in names):
+        if not any((n.startswith(top + want) if want.endswith("/") else n == top + want) for n in names):
             problems.append("missing " + want)
     for name in names:
         if not name.startswith(top):
@@ -57,7 +57,7 @@ with zipfile.ZipFile(path) as archive:
         parts = [p for p in rel.split("/") if p]
         if not parts:
             continue
-        if (parts[-1] == ".env" or parts[0] in ("private", ".worktrees", "dist", "logs")
+        if ((parts[-1] == ".env" or parts[-1].startswith(".env.")) and parts[-1] != ".env.example" or parts[0] in ("private", ".worktrees", "dist", "logs")
                 or "target" in parts[:-1] or rel in ("CLAUDE.md", "AGENTS.md") or parts[-1].endswith(".log")):
             problems.append("forbidden: " + rel)
         if name.endswith("/"):
@@ -114,6 +114,8 @@ def write(name, extra=None, drop=None, plain=()):
 marker = ("[DRAFT " + chr(0x2014) + " to do]\n").encode()
 write("good")
 write("no-readme", drop=["README.md"])
+write("no-mvnw", drop=["mvnw"])
+write("dotenv-local", {".env.local": b"x\n"})
 write("no-postman", drop=["postman/c.json"])
 write("dotenv", {".env": b"GEMINI_API_KEY=secret-value-123\n"})
 write("private", {"private/STATUS.md": b"x\n"})
@@ -139,6 +141,8 @@ PY
   expect 1 "a missing README fails"                     no-readme
   expect 1 "a missing postman/ fails"                   no-postman
   expect 1 "a .env fails"                               dotenv
+  expect 1 "a .env.local fails (.env.example is allowed)" dotenv-local
+  expect 1 "a missing mvnw fails even though mvnw.cmd is present" no-mvnw
   expect 1 "private/ fails"                             private
   expect 1 "a target/ directory fails"                  target
   expect 1 "CLAUDE.md fails"                            claude
@@ -163,23 +167,30 @@ fi
 
 SHA=$(git rev-parse --short HEAD)
 NAME="converge-submission-$SHA"
+if [ "$ALLOW_DIRTY" = 1 ] && [ -n "$(git status --porcelain)" ]; then
+  NAME="$NAME-DIRTY"
+  echo "WARNING: uncommitted changes are NOT in this zip (built from HEAD). It is named -DIRTY; do not submit it."
+fi
 ZIP="dist/$NAME.zip"
 mkdir -p dist
 rm -f "$ZIP"
 git archive --format=zip --prefix="$NAME/" -o "$ZIP" HEAD || { echo "FAILED: git archive"; exit 1; }
 # Author names only (%an), never email addresses; the subject is on its own line.
-git log --date=iso --format='%h %ad %an%n%s%n' --stat > "dist/git-history.txt"
+git log --date=iso --format='%h %ad %an%n%s%n' --stat > "dist/git-history.txt" || { echo "FAILED: git log"; exit 1; }
 python - "$ZIP" "$NAME/git-history.txt" "dist/git-history.txt" <<'PY'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "a", zipfile.ZIP_DEFLATED) as archive:
     archive.write(sys.argv[3], sys.argv[2])
 PY
+[ $? = 0 ] || { echo "FAILED: could not add git-history.txt to the zip"; exit 1; }
 rm -f dist/git-history.txt
 
 SECRET=""
 if [ -f .env ]; then
   SECRET=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\+\)\?GEMINI_API_KEY[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '\r"'"'")
   [ "$SECRET" = "your-key-here" ] && SECRET=""
+else
+  echo "note: no .env found — the key-value scan is skipped (the AIza pattern scan still runs)"
 fi
 
 echo "Checking $ZIP"
