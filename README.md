@@ -575,7 +575,9 @@ curl -s http://localhost:8086/api/v1/concierge/escalations
 `outcome` is `RESOLVED`, `REFUND_REQUESTED` or `ESCALATED`, derived from what the agent's tools
 actually did, never from the model's words. The agent acts only for the attendee named in the
 request, and a refund above the limit is refused inside the tool, which tells the agent to
-escalate the case to an organiser instead; the organisers' queue is `GET /concierge/escalations`. `scripts/demo-m4-support.sh` runs four conversations,
+escalate the case to an organiser instead. The organisers' queue is `GET /concierge/escalations`.
+
+`scripts/demo-m4-support.sh` runs four conversations,
 including one over the limit and one prompt injection, and checks every guardrail against the
 registration service itself.
 
@@ -653,7 +655,7 @@ JSON, then run `python postman/build_collection.py`.
 .\mvnw.cmd clean test      # Windows PowerShell
 ```
 
-The suite (1017 tests at the merge gate) passes **with Docker stopped, no network access and no Gemini key**. Kafka is replaced
+The full suite passes **with Docker stopped, no network access and no Gemini key**. Kafka is replaced
 by the Spring Cloud Stream test binder and Kafka Streams' `TopologyTestDriver`; Gemini by a
 scripted chat model.
 
@@ -788,8 +790,10 @@ two or three seconds.
 | FR-17 | Build a personal agenda from natural language *(agentic AI)* | `[x]` |
 | FR-18 | Raise a support request handled by an agent *(agentic AI)* | `[~]` |
 
-`[x]` delivered and exercised end to end; `[~]` implemented and tested offline, live run pending.
-[`specs/2-user-stories.md`](specs/2-user-stories.md) is the authority and names the evidence for each.
+`[x]` delivered on `main`, with tests, and exercised end to end; `[~]` partially delivered — for every
+`[~]` row above, the code and its offline tests are on `main` and the missing part is the live
+end-to-end run. [`specs/2-user-stories.md`](specs/2-user-stories.md) is the authority and names the
+evidence for each.
 
 | Milestone | Weeks | Status |
 | :--- | :--- | :--- |
