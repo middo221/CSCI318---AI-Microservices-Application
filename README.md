@@ -55,7 +55,8 @@ to SVG under [`docs/diagrams/svg/`](docs/diagrams/svg/). The full specifications
   `concierge-service`; everything else, and the whole test suite, runs without it.
 - **Git Bash** on Windows (installed with Git for Windows) — every script in `scripts/` is a bash
   script. PowerShell equivalents exist for starting and stopping the services.
-- **Python 3** on the `PATH` — the scripts use it to read JSON. No extra packages are needed.
+- **Python 3** on the `PATH` — the scripts use it to read JSON. No extra packages are needed, except that `scripts/check_endpoints.py openapi` reads YAML and
+  needs PyYAML (`python -m pip install pyyaml`).
 - **curl** — ships with Git Bash, macOS and most Linux distributions.
 
 Maven is **not** required — the repository ships a wrapper.
@@ -160,7 +161,7 @@ prints a status table (also saved to `logs/status.txt`). Each service writes its
 | :--- | :--- |
 | `--no-build` (`-NoBuild`) | Start from the jars already built |
 | `--only a,b` (`-Only a,b`) | Start only the named services, e.g. `--only payment-service` |
-| `--timeout N` (`-TimeoutSeconds N`) | Seconds to wait for each service (default 240) |
+| `--timeout N` (`-TimeoutSeconds N`) | One overall deadline, in seconds, for all the services to answer (default 240) |
 | `--check` (`-Check`) | Start nothing; probe all six and print the status table |
 
 Stop them with:
@@ -407,6 +408,11 @@ curl -s http://localhost:8082/api/v1/sessions/$S2/availability
 The registration is `CANCELLED`, its holds `RELEASED`, the order `FAILED` with reason
 `CARD_DECLINED`, and the four seats are back in `availableSeats`.
 
+**Optional - do this last, or run `scripts/demo-m2.sh` instead.** Every service uses an in-memory H2
+database, so restarting a service empties it: restarting payment loses the payment orders that the
+FR-11 organiser override uses, and restarting registration loses its replica of the sessions that
+FR-10 needs. Run the rest of this walkthrough first.
+
 Hold expiry needs a registration nobody pays for. Start registration with a short window
 (`CONFERENCE_REGISTRATION_HOLD_WINDOW=PT20S bash scripts/run-all.sh`) and stop payment
 (`bash scripts/stop-all.sh payment-service`), register with `TOK_OK`, and read the registration
@@ -609,7 +615,7 @@ stops after each step so you can show the messages landing in Kafka UI.
 | `scripts/demo-m3-analytics.sh` | FR-14, FR-15, FR-16: a session filled past 90% (one alert), a gate flooded past the congestion threshold, every analytics endpoint and both alert topics | all but concierge | `--pause`, `--self-test` |
 | `scripts/demo-m4.sh` | FR-17: an agenda from a programme containing a deliberate clash | catalog, registration, concierge with key | `--pause` |
 | `scripts/demo-m4-support.sh` | FR-18: four support conversations — under the limit, over it, a prompt injection, an ineligible refund — each checked against the registration service | all but analytics, concierge with key | `--pause`, `--self-test`; `COOLDOWN=<s>` between conversations (default 65) |
-| `scripts/demo-all.sh` | Every script above in order, each output saved under `logs/live-run-<timestamp>/` with the broker's topic offsets at the end | all six, concierge with key | `--with-expiry` (also stops and restarts payment for demo-m2's expiry steps; start `run-all.sh` with `CONFERENCE_REGISTRATION_HOLD_WINDOW=PT20S`), `--self-test` |
+| `scripts/demo-all.sh` | Needs GNU `timeout` and GNU `sed` (Linux or Git Bash; on macOS install coreutils and gnu-sed). Every script above in order, each output saved under `logs/live-run-<timestamp>/` with the broker's topic offsets at the end | all six, concierge with key | `--with-expiry` (also stops and restarts payment for demo-m2's expiry steps; start `run-all.sh` with `CONFERENCE_REGISTRATION_HOLD_WINDOW=PT20S`), `--self-test` |
 
 `--self-test` needs no running services: it proves that each of the script's own checks can fail.
 
@@ -635,7 +641,8 @@ Supporting tools in `scripts/`:
 
 [`postman/converge.postman_collection.json`](postman/converge.postman_collection.json) covers every
 endpoint of all six services, ordered as a demonstration: catalogue → registration → payment →
-tickets → transfer and check-in → refunds → waitlist → analytics → agents.
+tickets → transfer and check-in → waitlist → refunds → analytics → agents, with a ninth folder of
+error-contract examples.
 
 1. In Postman, **Import** both `postman/converge.postman_collection.json` and
    `postman/converge.postman_environment.json`.
@@ -807,6 +814,9 @@ evidence for each.
 ## Team
 
 Hayden Hill, Asadullah Zafar and Damon Middleton.
+
+In the commit history, commits authored `Vorndev` are Hayden Hill's, `Damon` is Damon Middleton, and
+`Asadullah Zafar` is Asadullah Zafar.
 
 Individual contributions are recorded in the commit history: `git log --stat`, or
 `git-history.txt` at the root of the submission zip.

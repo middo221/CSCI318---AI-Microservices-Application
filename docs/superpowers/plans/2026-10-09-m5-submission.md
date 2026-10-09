@@ -10972,7 +10972,7 @@ services while it runs. When it finishes:
 ```bash
 RUN=$(ls -d logs/live-run-* | tail -1); echo "$RUN"; cat "$RUN/summary.md"
 ```
-Expected: seven rows. Record each verdict as it is — this is the run.
+Expected: seven rows, or eight with `--with-expiry` (the extra row is `02a expiry-evidence`). Record each verdict as it is — this is the run.
 
 - [ ] **Step 6: If a script failed**
 
