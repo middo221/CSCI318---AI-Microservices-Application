@@ -32,7 +32,11 @@ public class LangChain4jAgendaAgentFactory implements AgendaAgentFactory {
         this.chatModel = chatModel;
     }
 
-    /** The proxy, wrapped so a runaway loop surfaces as {@code LLM_LOOP_LIMIT} (Task 1). */
+    /**
+     * The proxy, wrapped so a runaway loop surfaces as {@code LLM_LOOP_LIMIT} (Task 1) and an
+     * unreadable final answer is asked for once more ({@link EmptyAnswer}; every agenda tool only
+     * reads, so a second pass is safe).
+     */
     @Override
     public AgendaBuilder agentFor(AgendaTools tools) {
         AgendaBuilder agent = AiServices.builder(AgendaBuilder.class)
@@ -41,7 +45,8 @@ public class LangChain4jAgendaAgentFactory implements AgendaAgentFactory {
                 .hallucinatedToolNameStrategy(UnknownTool::answer)
                 .maxToolCallingRoundTrips(MAX_TOOL_CALLING_ROUND_TRIPS)
                 .build();
-        return (attendeeId, interests) -> LoopLimit.enforce(MAX_TOOL_CALLING_ROUND_TRIPS,
-                () -> agent.buildAgenda(attendeeId, interests));
+        return (attendeeId, interests) -> EmptyAnswer.retryOnce(
+                () -> LoopLimit.enforce(MAX_TOOL_CALLING_ROUND_TRIPS,
+                        () -> agent.buildAgenda(attendeeId, interests)));
     }
 }
